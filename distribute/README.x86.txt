@@ -1,5 +1,6 @@
-# Juicy Soundfont Plugin
+# JuicySF Rack
 
+A 16-channel multitimbral General MIDI sound module. Fork of Birch-san's juicysfplugin:
 https://github.com/Birch-san/juicysfplugin
 
 Targets Windows 7 i686
@@ -7,32 +8,24 @@ Commonly this means a 32-bit Intel or AMD processor.
 
 ## Installation
 
-If the folder "C:\Program Files (x86)\Common Files\VST3" does not yet exist: make the folder yourself.  
 If the folder "C:\Program Files (x86)\Common Files\VST2" does not yet exist: make the folder yourself.
 
-VST2\libjuicysfplugin.dll -> "C:\Program Files (x86)\Common Files\VST2\libjuicysfplugin.dll"
-VST3\juicysfplugin.vst3 -> "C:\Program Files (x86)\Common Files\VST3\juicysfplugin.vst3"
-Standalone\juicysfplugin.exe -> "C:\Program Files (x86)\Birchlabs\juicysfplugin.exe"
+VST2\libJuicySF Rack.dll -> "C:\Program Files (x86)\Common Files\VST2\libJuicySF Rack.dll" (only present if this build was made with a VST2 SDK supplied)
+Standalone\JuicySF Rack.exe -> "C:\Program Files (x86)\Birchlabs\JuicySF Rack.exe"
 
-### Upgrading from juicysfplugin 2.x or older
-
-Run the uninstaller that came with juicysfplugin, or delete the files that are described in these release notes:  
-https://github.com/Birch-san/juicysfplugin/releases/tag/2.3.3
-
-You may notice that opening SF3 soundfonts is slower than before.  
-This is because juicysfplugin is now linked statically which means we can no longer use OpenMP to load SF3 soundfonts via multi-threading.  
-(OpenMP does not support static linking on MinGW).  
-The upside is that installation is now easier (single-file binary).
-
-## Warning
-
-The VST3 plugin is known to be incompatible with FL Studio (tested on v20.9, on Windows 11 ARM).  
-The error message from FL Studio does not give any details explaining why the plugin is considered invalid.  
-The VST3 plugin is nevertheless included, in case you fancy trying it with another DAW.
+Note: VST3 is not supported. VST3 has no per-channel MIDI Program Change — a
+Program Change can only reach a VST3 plugin as a single global program
+parameter, never scoped to a channel, which breaks JuicySF Rack's core
+"MIDI channel selects instrument" workflow. Use the VST2 or Standalone build.
 
 ## Usage
 
 Pick a soundfont from the file-picker (drag-and-drop works too).
+
+Route up to 16 external MIDI sources into the plugin, one per MIDI channel
+(1-16). Each channel gets its own instrument, either by manually picking a
+patch from that channel's dropdown, or automatically from incoming MIDI
+Program Change on that channel (which takes priority over a manual pick).
 
 ### Soundfonts
 

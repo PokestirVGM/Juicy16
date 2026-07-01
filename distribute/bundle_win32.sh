@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ./bundle_win32.sh 3.1.0
+# ./bundle_win32.sh 0.2.0
 
 set -eo pipefail
 DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
@@ -50,12 +50,24 @@ for ARCH in ${ARCHS[@]}; do
   VST2="$ARCH_OUT/VST2"
   mkdir -p "$VST2"
 
-  VST3="$ARCH_OUT/VST3"
-  mkdir -p "$VST3"
+  # VST3 dropped from FORMATS in CMakeLists.txt (no per-channel MIDI program
+  # change under VST3 — see CMakeLists.txt for the full explanation), so there's
+  # no VST3 artifact to copy anymore.
 
-  docker cp "$CONTAINER_NAME":"$ARCH/$FLAVOUR/Standalone/juicysfplugin.exe" "$STANDALONE/juicysfplugin.exe"
-  docker cp "$CONTAINER_NAME":"$ARCH/$FLAVOUR/VST/libjuicysfplugin.dll" "$VST2/libjuicysfplugin.dll"
-  docker cp "$CONTAINER_NAME":"$ARCH/$FLAVOUR/VST3/juicysfplugin.vst3/Contents/$ARCH_LONG/juicysfplugin.vst3" "$VST3/juicysfplugin.vst3"
+  docker cp "$CONTAINER_NAME":"$ARCH/$FLAVOUR/Standalone/JuicySF Rack.exe" "$STANDALONE/JuicySF Rack.exe"
+
+  # VST2 only builds if a VST2 SDK was supplied at configure time (see
+  # win32_cross_compile/configure_juicysfplugin.sh); tolerate its absence rather
+  # than failing the whole bundle.
+  # NOTE: "lib" prefix follows the MinGW/Clang toolchain's default shared-library
+  # naming (not verified against an actual build in this pass — confirm the real
+  # filename in $ARCH/$FLAVOUR/VST/ if this copy fails).
+  if docker cp "$CONTAINER_NAME":"$ARCH/$FLAVOUR/VST/libJuicySF Rack.dll" "$VST2/libJuicySF Rack.dll" 2>/dev/null; then
+    echo "VST2 artifact copied"
+  else
+    echo "No VST2 artifact found (no VST2 SDK supplied at configure time) — skipping"
+    rmdir "$VST2" 2>/dev/null || true
+  fi
 
   cp -r "$DIR/../licenses_of_dependencies" "$ARCH_OUT"
   cp "$DIR/../LICENSE.txt" "$ARCH_OUT"
@@ -63,6 +75,6 @@ for ARCH in ${ARCHS[@]}; do
   cp "$DIR/README.$ARCH.txt" "$ARCH_OUT/README.txt"
 
   pushd "$OUT" > /dev/null
-  zip -9 -r "juicysfplugin-$VERSION-$ARCH.zip" "$FLAVOUR_DIRNAME"
+  zip -9 -r "JuicySF-Rack-$VERSION-$ARCH.zip" "$FLAVOUR_DIRNAME"
   popd > /dev/null
 done
