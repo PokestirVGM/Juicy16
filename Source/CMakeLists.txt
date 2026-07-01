@@ -1,0 +1,12 @@
+target_sources(JuicySFPlugin
+    PRIVATE
+        ChannelListComponent.cpp
+        FilePicker.cpp
+        FluidSynthModel.cpp
+        MyColours.cpp
+        Pills.cpp
+        PluginEditor.cpp
+        PluginProcessor.cpp
+        SlidersComponent.cpp
+        SurjectiveMidiKeyboardComponent.cpp
+        TablesComponent.cpp)
