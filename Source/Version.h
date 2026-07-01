@@ -5,4 +5,4 @@
 
 #pragma once
 
-#define JUICYSF_RACK_VERSION "0.1.9"
+#define JUICYSF_RACK_VERSION "0.1.10"

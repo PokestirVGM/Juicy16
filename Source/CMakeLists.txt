@@ -4,7 +4,6 @@ target_sources(JuicySFPlugin
         FilePicker.cpp
         FluidSynthModel.cpp
         MyColours.cpp
-        Pills.cpp
         PluginEditor.cpp
         PluginProcessor.cpp
         SlidersComponent.cpp
