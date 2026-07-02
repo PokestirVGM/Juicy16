@@ -61,15 +61,35 @@ JuicySFAudioProcessor::JuicySFAudioProcessor()
     }
     valueTreeState.state.appendChild(channelPrograms, nullptr);
 
+    // Feed the VST3 unit interface's shared program list from the loaded font:
+    // names come from bank 0 (GM program numbers 0..127); missing slots fall back
+    // to "Program N" inside the extension.
+    fluidSynthModel.onBanksRefreshed = [this] {
+        StringArray names;
+        for (int i = 0; i < 128; i++)
+            names.add(String());
+        ValueTree bank0{valueTreeState.state.getChildWithName("banks")
+            .getChildWithProperty("num", 0)};
+        for (int i = 0; i < bank0.getNumChildren(); i++) {
+            ValueTree preset{bank0.getChild(i)};
+            const int num{preset.getProperty("num", -1)};
+            if (num >= 0 && num < 128)
+                names.set(num, preset.getProperty("name").toString());
+        }
+        vst3Extensions.setProgramNames(names);
+    };
+
     initialiseSynth();
 }
 
 AudioProcessorValueTreeState::ParameterLayout JuicySFAudioProcessor::createParameterLayout() {
-    // https://stackoverflow.com/a/8469002/5257399
     // Sound-controller params default to 64 = neutral (bipolar modulators; the MIDI
     // convention for CC70-79). 0/127 are full negative/positive modulation.
     const int neutral{64};
-    unique_ptr<AudioParameterInt> params[] {
+    AudioProcessorValueTreeState::ParameterLayout layout;
+
+    // global params: represent the currently-selected channel in the UI
+    layout.add(
         // SoundFont 2.4 spec section 7.2: zero through 127, or 128.
         make_unique<AudioParameterInt>("bank", "which bank is selected in the soundfont", MidiConstants::midiMinValue, 128, MidiConstants::midiMinValue, "Bank" ),
         // note: banks may be sparse, and lack a 0th preset. so defend against this.
@@ -79,13 +99,29 @@ AudioProcessorValueTreeState::ParameterLayout JuicySFAudioProcessor::createParam
         make_unique<AudioParameterInt>("sustain", "volume envelope sustain level", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, neutral, "S" ),
         make_unique<AudioParameterInt>("release", "volume envelope release time", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, neutral, "R" ),
         make_unique<AudioParameterInt>("filterCutOff", "low-pass filter cut-off frequency", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, neutral, "Cut" ),
-        make_unique<AudioParameterInt>("filterResonance", "low-pass filter resonance", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, neutral, "Res" ),
-    };
-    
-    return {
-        make_move_iterator(begin(params)),
-        make_move_iterator(end(params))
-    };
+        make_unique<AudioParameterInt>("filterResonance", "low-pass filter resonance", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, neutral, "Res" ));
+
+    // Per-channel program parameters ("progCh1".."progCh16"), each in its own
+    // parameter group. Two purposes:
+    //  - hosts can select any channel's instrument via automation in every format;
+    //  - in VST3, JUCE derives each parameter's unitId from its GROUP id
+    //    (hashCode of "chUnit<n>"), which our custom IUnitInfo mirrors so hosts
+    //    like Cubase can associate MIDI channel N with unit N (HALion-style
+    //    multitimbral program routing).
+    for (int ch = 1; ch <= 16; ++ch) {
+        layout.add(make_unique<juce::AudioProcessorParameterGroup>(
+            "chUnit" + String(ch),
+            "Ch " + String(ch),
+            "|",
+            make_unique<AudioParameterInt>(
+                "progCh" + String(ch),
+                "program for MIDI channel " + String(ch),
+                MidiConstants::midiMinValue, MidiConstants::midiMaxValue,
+                MidiConstants::midiMinValue,
+                "Ch" + String(ch) + " Prog")));
+    }
+
+    return layout;
 }
 
 JuicySFAudioProcessor::~JuicySFAudioProcessor()

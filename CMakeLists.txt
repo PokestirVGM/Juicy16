@@ -126,13 +126,15 @@ juce_add_plugin(JuicySFPlugin
     PLUGIN_MANUFACTURER_CODE Blbs               # A four-character manufacturer id with at least one upper-case character
     PLUGIN_CODE Jsfr                            # A unique four-character plugin id with exactly one upper-case character
                                                 # GarageBand 10.3 requires the first letter to be upper-case, and the remaining letters to be lower-case
-    # VST3 dropped: it has no per-channel MIDI program change (program change is a
-    # single global parameter routed to setCurrentProgram), so the multitimbral
-    # "MIDI channel -> instrument via PC" workflow is impossible on VST3. AU and VST2
-    # both forward per-channel program change to processBlock, so those are our targets.
-    # VST2 (.vst) only builds when VST2_SDK_PATH is set (see top of file); otherwise
-    # ${VST2_FORMAT} is empty and only AU + Standalone build.
-    FORMATS AU ${VST2_FORMAT} Standalone
+    # AU is the primary macOS format (delivers per-channel MIDI program change
+    # natively). VST3 is built for Cubase and Windows: JUCE converts host-delivered
+    # VST3 program-change events (kCtrlProgramChange legacy events) to per-channel
+    # MIDI in processBlock, and per-channel program PARAMETERS (progCh1..16, grouped
+    # into chUnit1..16) provide instrument selection in hosts that don't deliver PC
+    # events; a custom IUnitInfo (VST3ClientExtensions) maps MIDI channels to units
+    # HALion-style. VST2 (.vst) only builds when VST2_SDK_PATH is set (see top of
+    # file); otherwise ${VST2_FORMAT} is empty.
+    FORMATS AU ${VST2_FORMAT} VST3 Standalone
     VST_COPY_DIR "${VST_COPY_DIR}"
     VST3_COPY_DIR "${VST3_COPY_DIR}"
     AU_COPY_DIR "${AU_COPY_DIR}"
@@ -156,6 +158,20 @@ set_target_properties(JuicySFPlugin PROPERTIES
 # CMake command.
 
 add_subdirectory(Source)
+
+# Source/VST3Multitimbral.cpp includes VST3 SDK interface headers (header-only —
+# no SDK symbols are linked; see that file) from JUCE's bundled copy, to implement
+# per-channel units/program lists. The bundled SDK lives inside the
+# juce_audio_processors module; some installs name the module directory with a
+# "_headless" suffix.
+set(JUCE_VST3_SDK_DIR "${JUCE_MODULES_DIR}/juce_audio_processors_headless/format_types/VST3_SDK")
+if (NOT EXISTS "${JUCE_VST3_SDK_DIR}")
+  set(JUCE_VST3_SDK_DIR "${JUCE_MODULES_DIR}/juce_audio_processors/format_types/VST3_SDK")
+endif ()
+if (NOT EXISTS "${JUCE_VST3_SDK_DIR}")
+  message(FATAL_ERROR "Cannot find JUCE's bundled VST3 SDK under ${JUCE_MODULES_DIR}")
+endif ()
+target_include_directories(JuicySFPlugin PRIVATE "${JUCE_VST3_SDK_DIR}")
 
 # `target_compile_definitions` adds some preprocessor definitions to our target. In a Projucer
 # project, these might be passed in the 'Preprocessor Definitions' field. JUCE modules also make use

@@ -40,6 +40,10 @@ public:
     // params consistent if `channel` happens to be the selected one.
     void setChannelProgram(int channel, int bank, int preset);
 
+    // invoked on the message thread after refreshBanks rebuilds the `banks` tree
+    // (font load/unload). Used to push program names to the VST3 unit interface.
+    std::function<void()> onBanksRefreshed;
+
     void processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiMessages);
 
     // marshals MIDI-driven per-channel program changes (captured on the audio
@@ -68,6 +72,11 @@ public:
     // (MIDI/GS convention), bank/preset default to 0. Shared with PluginProcessor.
     static int defaultParamValue(const String& parameterID);
 
+    // per-channel program parameter ids ("progCh1".."progCh16", 0-based channel in,
+    // 1-based name out) and the reverse mapping (-1 if not a program param).
+    static String progParamId(int chZeroBased);
+    static int progParamChannel(const String& parameterID);
+
 private:
     static const StringArray programChangeParams;
     // every parameter that is stored independently per MIDI channel
@@ -79,6 +88,9 @@ private:
 
     void loadSelectedChannel(int newChannel);
     void saveParamToChannel(const String& parameterID, int value);
+    // mirror a channel's current program into its progChN parameter (guarded so
+    // parameterChanged doesn't re-apply it to the synth). Message thread only.
+    void syncProgParam(int ch, int preset);
 
     static constexpr int kNumChannels{16};
     static constexpr int kNumSoundCcs{6}; // CC71,72,73,74,75,79 (see ccIndexOrder)

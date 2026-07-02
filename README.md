@@ -24,10 +24,10 @@ All 16 channels mix down to a single stereo output.
 
 ## Formats
 
-- **AU** (Audio Unit) — the primary supported format on macOS.
+- **AU** (Audio Unit) — the primary format on macOS (FL Studio, Logic, etc.). Delivers per-channel MIDI Program Change natively.
+- **VST3** — for Cubase (which supports neither AU nor, since Cubase 13, VST2) and Windows. VST3 has no per-channel Program Change *event*, so JuicySF Rack implements the same mechanism HALion-style multitimbral instruments use: sixteen VST3 **units** (one per MIDI channel) with a shared program list and per-channel program parameters, injected via JUCE's `VST3ClientExtensions` (no JUCE modifications — see `Source/VST3Multitimbral.cpp`). Hosts that instead deliver Program Change as legacy MIDI events (e.g. REAPER) work through the normal MIDI path. The 16 `Ch N Prog` parameters are also plain automatable parameters in any host.
 - **Standalone** app — for testing without a DAW.
 - **VST2** — builds only if you supply a VST2 SDK (see [Building from source](#building-from-source-macos)); Steinberg no longer distributes it, so it's not bundled here.
-- **VST3 is intentionally not supported.** The VST3 format has no per-channel MIDI Program Change — a Program Change can only reach a VST3 plugin as a single *global* program parameter, never scoped to a channel. That makes the core "MIDI channel selects instrument" workflow impossible under VST3, no matter how the plugin is written. AU and VST2 both deliver MIDI Program Change per channel correctly, so those are the supported targets.
 
 ## SoundFont / DLS support
 

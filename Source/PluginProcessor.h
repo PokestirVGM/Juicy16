@@ -16,6 +16,7 @@
 #endif
 #include "../JuceLibraryCode/JuceHeader.h"
 #include "FluidSynthModel.h"
+#include "VST3Multitimbral.h"
 #include <list>
 
 using namespace std;
@@ -64,6 +65,10 @@ public:
 
     bool supportsDoublePrecisionProcessing() const override;
 
+    // VST3 only: per-channel units + program list (see VST3Multitimbral.h).
+    // Inert in AU/Standalone/VST2 builds.
+    juce::VST3ClientExtensions* getVST3ClientExtensions() override { return &vst3Extensions; }
+
     FluidSynthModel& getFluidSynthModel();
 
     MidiKeyboardState keyboardState;
@@ -74,6 +79,7 @@ private:
     AudioProcessorValueTreeState valueTreeState;
 
     FluidSynthModel fluidSynthModel;
+    JuicyVST3Extensions vst3Extensions;
 
     AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 

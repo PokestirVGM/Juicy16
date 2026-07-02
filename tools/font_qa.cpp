@@ -149,6 +149,8 @@ int main(int argc, char** argv) {
             for (auto& e : fs::directory_iterator(root)) {
                 auto ext = e.path().extension().string();
                 for (auto& c : ext) c = (char) tolower(c);
+                if (e.path().filename().string().rfind("._", 0) == 0)
+                    continue; // macOS AppleDouble metadata sidecar, not a font
                 if (ext == ".sf2" || ext == ".sf3" || ext == ".dls") files.push_back(e.path());
             }
             std::sort(files.begin(), files.end());

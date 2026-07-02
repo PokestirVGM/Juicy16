@@ -61,6 +61,17 @@ int FluidSynthModel::defaultParamValue(const String& parameterID) {
     return programChangeParams.contains(parameterID) ? 0 : 64;
 }
 
+String FluidSynthModel::progParamId(int chZeroBased) {
+    return "progCh" + String(chZeroBased + 1);
+}
+
+int FluidSynthModel::progParamChannel(const String& parameterID) {
+    if (!parameterID.startsWith("progCh"))
+        return -1;
+    const int ch{parameterID.substring(6).getIntValue() - 1};
+    return (ch >= 0 && ch < kNumChannels) ? ch : -1;
+}
+
 FluidSynthModel::FluidSynthModel(
     AudioProcessorValueTreeState& valueTreeState
     )
@@ -82,12 +93,18 @@ FluidSynthModel::FluidSynthModel(
     for (const auto &[param, controller]: paramToController) {
         valueTreeState.addParameterListener(param, this);
     }
+    for (int ch = 0; ch < kNumChannels; ch++) {
+        valueTreeState.addParameterListener(progParamId(ch), this);
+    }
     valueTreeState.state.addListener(this);
 }
 
 FluidSynthModel::~FluidSynthModel() {
     cancelPendingUpdate();
     clearRepairedTemp();
+    for (int ch = 0; ch < kNumChannels; ch++) {
+        valueTreeState.removeParameterListener(progParamId(ch), this);
+    }
     for (const auto &[param, controller]: paramToController) {
         valueTreeState.removeParameterListener(param, this);
     }
@@ -183,6 +200,12 @@ const StringArray FluidSynthModel::programChangeParams{"bank", "preset"};
 const StringArray FluidSynthModel::perChannelParams{
     "bank", "preset", "attack", "decay", "sustain", "release", "filterCutOff", "filterResonance"};
 
+void FluidSynthModel::syncProgParam(int ch, int preset) {
+    juce::ScopedValueSetter<bool> guard{loadingChannel, true};
+    if (auto* p{dynamic_cast<AudioParameterInt*>(valueTreeState.getParameter(progParamId(ch)))})
+        *p = preset;
+}
+
 void FluidSynthModel::saveParamToChannel(const String& parameterID, int value) {
     if (loadingChannel)
         return;
@@ -200,6 +223,25 @@ void FluidSynthModel::parameterChanged(const String& parameterID, float newValue
     // would clobber the tree we just read. Skip entirely.
     if (loadingChannel)
         return;
+    if (int progCh{progParamChannel(parameterID)}; progCh >= 0) {
+        // Per-channel program parameter (host automation / VST3 unit program).
+        // Can arrive on the audio thread, so treat it exactly like an incoming
+        // MIDI program change: apply to the synth, then capture the resulting
+        // program for the message thread to mirror into channelPrograms/UI.
+        int program{0};
+        if (auto* p{dynamic_cast<AudioParameterInt*>(valueTreeState.getParameter(parameterID))})
+            program = p->get();
+        if (fluid_synth_program_change(synth.get(), progCh, program) == FLUID_OK) {
+            int sf, bank, preset;
+            if (fluid_synth_get_program(synth.get(), progCh, &sf, &bank, &preset) == FLUID_OK) {
+                midiBank[progCh].store(bank, std::memory_order_relaxed);
+                midiPreset[progCh].store(preset, std::memory_order_relaxed);
+                midiProgramDirtyMask.fetch_or(1u << progCh, std::memory_order_release);
+                triggerAsyncUpdate();
+            }
+        }
+        return;
+    }
     if (programChangeParams.contains(parameterID)) {
         int bank, preset;
         {
@@ -285,6 +327,9 @@ void FluidSynthModel::setChannelProgram(int chan, int bank, int preset) {
         chNode.setProperty("bank", bank, nullptr);
         chNode.setProperty("preset", preset, nullptr);
     }
+    // mirror into the channel's program parameter for hosts
+    if (chan >= 0 && chan < kNumChannels)
+        syncProgParam(chan, preset);
     // if this is the channel the user is currently viewing, keep the global
     // bank/preset params (host program interface + slider sync) consistent.
     // suppress save-back so parameterChanged doesn't re-write the node.
@@ -324,6 +369,9 @@ void FluidSynthModel::handleAsyncUpdate() {
                 chNode.setProperty("bank", bank, nullptr);
                 chNode.setProperty("preset", preset, nullptr);
             }
+            // keep the channel's program parameter (host automation lane / VST3
+            // unit program) mirroring the engine
+            syncProgParam(ch, preset);
             // if this is the channel the user is viewing, move the dropdown highlight
             if (ch == selected) {
                 juce::ScopedValueSetter<bool> guard{loadingChannel, true};
@@ -557,9 +605,11 @@ void FluidSynthModel::refreshBanks() {
                 sfont_id,
                 static_cast<unsigned int>(bankOffset + rawBank),
                 static_cast<unsigned int>(rawPreset));
-            // mirror into the display (doesn't touch params, so no parameterChanged)
+            // mirror into the display and the channel's program parameter
             ch.setProperty("bank", rawBank, nullptr);
             ch.setProperty("preset", rawPreset, nullptr);
+            if (chNum >= 0 && chNum < kNumChannels)
+                syncProgParam(chNum, rawPreset);
             // re-apply this channel's saved envelope/filter sliders (64 = neutral)
             for (const auto& [paramID, cc] : paramToController) {
                 fluid_synth_cc(
@@ -576,6 +626,9 @@ void FluidSynthModel::refreshBanks() {
     // refresh the selected channel's params so the preset list highlight + sliders
     // reflect the (possibly adjusted) current program.
     syncToSelectedChannel();
+
+    if (onBanksRefreshed)
+        onBanksRefreshed();
 
 #if JUCE_DEBUG
 //    unique_ptr<XmlElement> xml{valueTreeState.state.createXml()};

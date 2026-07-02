@@ -8,4 +8,5 @@ target_sources(JuicySFPlugin
         PluginProcessor.cpp
         SlidersComponent.cpp
         SurjectiveMidiKeyboardComponent.cpp
-        TablesComponent.cpp)
+        TablesComponent.cpp
+        VST3Multitimbral.cpp)
