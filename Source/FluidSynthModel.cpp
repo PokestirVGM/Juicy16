@@ -9,6 +9,7 @@
 #include "FluidSynthModel.h"
 #include "MidiConstants.h"
 #include "Util.h"
+#include "Vst3Diag.h" // TEMPORARY: Cubase VST3 diagnostics in the status bar
 
 #if JUCE_MAC || JUCE_IOS
   #include <CoreFoundation/CFString.h>
@@ -213,6 +214,11 @@ juce::String FluidSynthModel::getMidiMonitorText() {
     s << "  PCparam: ";
     if (paramCh < 0) s << "none";
     else s << "ch" << (paramCh + 1) << " p" << monLastParamProgram.load(std::memory_order_relaxed);
+    // IMidiMapping activity (VST3 only): calls / highest controller queried / PC(130) queries.
+    // "0/-1/0" means the host never used IMidiMapping (it routes MIDI another way).
+    s << "  map:" << juicysf::diag::midiMapCalls.load(std::memory_order_relaxed)
+      << "/" << juicysf::diag::midiMapMaxCtrl.load(std::memory_order_relaxed)
+      << "/" << juicysf::diag::midiMapPcCalls.load(std::memory_order_relaxed);
     return s;
 }
 

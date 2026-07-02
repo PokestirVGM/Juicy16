@@ -8,9 +8,18 @@
 //
 
 #include "VST3Multitimbral.h"
+#include "Vst3Diag.h"
 
 #include <atomic>
 #include <cstring>
+
+// TEMPORARY diagnostic counters (see Vst3Diag.h). Defined here so they live in the
+// shared code and resolve for the vendored VST3 wrapper at link time.
+namespace juicysf::diag {
+    std::atomic<int> midiMapCalls{0};
+    std::atomic<int> midiMapMaxCtrl{-1};
+    std::atomic<int> midiMapPcCalls{0};
+}
 
 #include <pluginterfaces/vst/ivstunits.h>
 #include <pluginterfaces/vst/ivstcomponent.h>

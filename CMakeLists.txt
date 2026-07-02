@@ -16,7 +16,7 @@ cmake_minimum_required(VERSION 3.15)
 # directories, and the current project version. This is a standard CMake command.
 
 # keep in sync with Source/Version.h (JUICYSF_RACK_VERSION, shown in the UI)
-project(JUICY_SF_RACK VERSION 0.3.3)
+project(JUICY_SF_RACK VERSION 0.3.4)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -206,6 +206,9 @@ if (NOT EXISTS "${JUCE_VST3_SDK_DIR}")
   message(FATAL_ERROR "Cannot find JUCE's bundled VST3 SDK under ${JUCE_MODULES_DIR}")
 endif ()
 target_include_directories(JuicySFPlugin PRIVATE "${JUCE_VST3_SDK_DIR}")
+# Source/ on the include path so the vendored VST3 wrapper can #include "Vst3Diag.h"
+# (JUCE re-exports this target's INCLUDE_DIRECTORIES to the format wrapper targets).
+target_include_directories(JuicySFPlugin PRIVATE "${CMAKE_SOURCE_DIR}/Source")
 
 # `target_compile_definitions` adds some preprocessor definitions to our target. In a Projucer
 # project, these might be passed in the 'Preprocessor Definitions' field. JUCE modules also make use
