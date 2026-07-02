@@ -75,6 +75,15 @@ JuicySFAudioProcessorEditor::JuicySFAudioProcessorEditor(
     midiKeyboard.setMidiChannelsToDisplay(0xffff);
     valueTreeState.state.addListener(this);
     syncKeyboardChannel();
+
+    startTimerHz(10); // TEMPORARY: diagnostic MIDI monitor refresh
+}
+
+void JuicySFAudioProcessorEditor::timerCallback()
+{
+    statusLabel.setText(
+        "v" JUICYSF_RACK_VERSION "  " + processor.getFluidSynthModel().getMidiMonitorText(),
+        dontSendNotification);
 }
 
 void JuicySFAudioProcessorEditor::syncKeyboardChannel() {
@@ -95,6 +104,7 @@ void JuicySFAudioProcessorEditor::valueChanged(Value&) {
 
 JuicySFAudioProcessorEditor::~JuicySFAudioProcessorEditor()
 {
+    stopTimer();
     valueTreeState.state.removeListener(this);
     lastUIWidth.removeListener(this);
     lastUIHeight.removeListener(this);

@@ -44,6 +44,10 @@ public:
     // (font load/unload). Used to push program names to the VST3 unit interface.
     std::function<void()> onBanksRefreshed;
 
+    // TEMPORARY diagnostic (Cubase VST3 bring-up): what MIDI/parameter input has
+    // been seen. Shown in the status bar; remove once VST3 routing is confirmed.
+    juce::String getMidiMonitorText();
+
     void processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiMessages);
 
     // marshals MIDI-driven per-channel program changes (captured on the audio
@@ -108,6 +112,13 @@ private:
     std::atomic<unsigned int> midiCcDirtyMask{0}; // bit per channel
     static const fluid_midi_control_change ccIndexOrder[kNumSoundCcs];
     static int ccToIndex(int cc); // −1 if not one of ours
+
+    // --- TEMPORARY diagnostic MIDI/param input monitor (see getMidiMonitorText) ---
+    std::atomic<int> monNoteOn[kNumChannels]{};
+    std::atomic<int> monLastPcChannel{-1};    // last MIDI program-change event
+    std::atomic<int> monLastPcProgram{-1};
+    std::atomic<int> monLastParamChannel{-1}; // last progChN PARAMETER change (VST3 units path)
+    std::atomic<int> monLastParamProgram{-1};
 
     // there's no bimap in the standard library!
     static const map<fluid_midi_control_change, String> controllerToParam;

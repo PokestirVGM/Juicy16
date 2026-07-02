@@ -200,6 +200,22 @@ const StringArray FluidSynthModel::programChangeParams{"bank", "preset"};
 const StringArray FluidSynthModel::perChannelParams{
     "bank", "preset", "attack", "decay", "sustain", "release", "filterCutOff", "filterResonance"};
 
+juce::String FluidSynthModel::getMidiMonitorText() {
+    juce::String s;
+    s << "notes/ch:";
+    for (int i = 0; i < kNumChannels; ++i)
+        s << " " << monNoteOn[i].load(std::memory_order_relaxed);
+    const int pcCh{monLastPcChannel.load(std::memory_order_relaxed)};
+    s << "  PCevt: ";
+    if (pcCh < 0) s << "none";
+    else s << "ch" << (pcCh + 1) << " p" << monLastPcProgram.load(std::memory_order_relaxed);
+    const int paramCh{monLastParamChannel.load(std::memory_order_relaxed)};
+    s << "  PCparam: ";
+    if (paramCh < 0) s << "none";
+    else s << "ch" << (paramCh + 1) << " p" << monLastParamProgram.load(std::memory_order_relaxed);
+    return s;
+}
+
 void FluidSynthModel::syncProgParam(int ch, int preset) {
     juce::ScopedValueSetter<bool> guard{loadingChannel, true};
     if (auto* p{dynamic_cast<AudioParameterInt*>(valueTreeState.getParameter(progParamId(ch)))})
@@ -231,6 +247,8 @@ void FluidSynthModel::parameterChanged(const String& parameterID, float newValue
         int program{0};
         if (auto* p{dynamic_cast<AudioParameterInt*>(valueTreeState.getParameter(parameterID))})
             program = p->get();
+        monLastParamChannel.store(progCh, std::memory_order_relaxed); // diagnostic
+        monLastParamProgram.store(program, std::memory_order_relaxed);
         if (fluid_synth_program_change(synth.get(), progCh, program) == FLUID_OK) {
             int sf, bank, preset;
             if (fluid_synth_get_program(synth.get(), progCh, &sf, &bank, &preset) == FLUID_OK) {
@@ -670,6 +688,8 @@ void FluidSynthModel::processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiM
         
         const unsigned int midiCh{static_cast<unsigned int>(m.getChannel() - 1)}; // JUCE: 1-16, FluidSynth: 0-15
         if (m.isNoteOn()) {
+            if (midiCh < static_cast<unsigned int>(kNumChannels))
+                monNoteOn[midiCh].fetch_add(1, std::memory_order_relaxed); // diagnostic
             fluid_synth_noteon(
                 synth.get(),
                 midiCh,
@@ -699,6 +719,8 @@ void FluidSynthModel::processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiM
                 triggerAsyncUpdate();
             }
         } else if (m.isProgramChange()) {
+            monLastPcChannel.store(static_cast<int>(midiCh), std::memory_order_relaxed); // diagnostic
+            monLastPcProgram.store(m.getProgramChangeNumber(), std::memory_order_relaxed);
             // MIDI from the DAW is authoritative: apply the program change to this
             // channel, then capture the resulting program so the message thread can
             // update the channel list / params (see handleAsyncUpdate).
