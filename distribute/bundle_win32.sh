@@ -50,11 +50,12 @@ for ARCH in ${ARCHS[@]}; do
   VST2="$ARCH_OUT/VST2"
   mkdir -p "$VST2"
 
-  # VST3 dropped from FORMATS in CMakeLists.txt (no per-channel MIDI program
-  # change under VST3 — see CMakeLists.txt for the full explanation), so there's
-  # no VST3 artifact to copy anymore.
+  VST3="$ARCH_OUT/VST3"
+  mkdir -p "$VST3"
 
   docker cp "$CONTAINER_NAME":"$ARCH/$FLAVOUR/Standalone/JuicySF Rack.exe" "$STANDALONE/JuicySF Rack.exe"
+  # ship the whole .vst3 bundle directory (JUCE 8 layout: Contents/<arch>-win/...)
+  docker cp "$CONTAINER_NAME":"$ARCH/$FLAVOUR/VST3/JuicySF Rack.vst3" "$VST3/"
 
   # VST2 only builds if a VST2 SDK was supplied at configure time (see
   # win32_cross_compile/configure_juicysfplugin.sh); tolerate its absence rather

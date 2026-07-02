@@ -8,15 +8,17 @@ Commonly this means a 32-bit Intel or AMD processor.
 
 ## Installation
 
-If the folder "C:\Program Files (x86)\Common Files\VST2" does not yet exist: make the folder yourself.
+Copy the whole "JuicySF Rack.vst3" folder into:
+VST3\JuicySF Rack.vst3 -> "C:\Program Files (x86)\Common Files\VST3\JuicySF Rack.vst3"
 
-VST2\libJuicySF Rack.dll -> "C:\Program Files (x86)\Common Files\VST2\libJuicySF Rack.dll" (only present if this build was made with a VST2 SDK supplied)
 Standalone\JuicySF Rack.exe -> "C:\Program Files (x86)\Birchlabs\JuicySF Rack.exe"
 
-Note: VST3 is not supported. VST3 has no per-channel MIDI Program Change — a
-Program Change can only reach a VST3 plugin as a single global program
-parameter, never scoped to a channel, which breaks JuicySF Rack's core
-"MIDI channel selects instrument" workflow. Use the VST2 or Standalone build.
+VST2\libJuicySF Rack.dll -> "C:\Program Files (x86)\Common Files\VST2\libJuicySF Rack.dll"
+(VST2 is only present if this build was made with a VST2 SDK supplied)
+
+The VST3 supports per-channel MIDI Program Change (route up to 16 MIDI channels
+into one instance; a Program Change on channel N selects channel N's instrument,
+same as the macOS AU).
 
 ## Usage
 

@@ -104,6 +104,7 @@ COPY VST2_SDK/ /VST2_SDK/
 COPY resources/Logo512.png resources/Logo512.png
 COPY cmake/Modules/FindPkgConfig.cmake cmake/Modules/FindPkgConfig.cmake
 COPY Source/ Source/
+COPY vendor/ vendor/
 COPY JuceLibraryCode/JuceHeader.h JuceLibraryCode/JuceHeader.h
 COPY CMakeLists.txt CMakeLists.txt
 COPY win32_cross_compile/configure_juicysfplugin.sh configure_juicysfplugin.sh
