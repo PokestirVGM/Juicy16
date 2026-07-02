@@ -15,7 +15,8 @@ cmake_minimum_required(VERSION 3.15)
 # `project()` command. `project()` sets up some helpful variables that describe source/binary
 # directories, and the current project version. This is a standard CMake command.
 
-project(JUICY_SF_RACK VERSION 0.2.0)
+# keep in sync with Source/Version.h (JUICYSF_RACK_VERSION, shown in the UI)
+project(JUICY_SF_RACK VERSION 0.3.2)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -158,6 +159,39 @@ set_target_properties(JuicySFPlugin PROPERTIES
 # CMake command.
 
 add_subdirectory(Source)
+
+# VST3 wrapper patch: point the juce_audio_plugin_client_VST3 interface target's
+# source at our vendored copy of the wrapper, whose ONLY change is adding the
+# kIsProgramChange flag to the per-channel program parameters (progCh1..16) —
+# required by hosts (Cubase) to route MIDI Program Change on channel N to unit N's
+# program parameter. Stock JUCE has no hook for parameter flags. This mutates only
+# the VST3 format target created during THIS configure; the JUCE install and the
+# AU/Standalone/VST2 targets are untouched. diff vs stock: 10 added lines (see
+# "JUICYSF RACK PATCH" in vendor/juce_patched/juce_audio_plugin_client_VST3.cpp).
+if (TARGET juce_audio_plugin_client_VST3)
+  get_target_property(_vst3_client_sources juce_audio_plugin_client_VST3 INTERFACE_SOURCES)
+  # On Apple the module compiles the .mm shim (which quote-includes the .cpp next
+  # to it — our vendored .mm therefore pulls our patched .cpp); elsewhere it
+  # compiles the .cpp directly. Handle both.
+  set(_vst3_client_new_sources "")
+  set(_vst3_client_swapped FALSE)
+  foreach (_src IN LISTS _vst3_client_sources)
+    # sources may be wrapped in generator expressions, so match/replace the path
+    # inside the string rather than the whole element
+    if (_src MATCHES "juce_audio_plugin_client_VST3\\.(cpp|mm)")
+      string(REGEX REPLACE "[^;<>$]*juce_audio_plugin_client_VST3\\.(cpp|mm)"
+             "${CMAKE_SOURCE_DIR}/vendor/juce_patched/juce_audio_plugin_client_VST3.\\1"
+             _src "${_src}")
+      set(_vst3_client_swapped TRUE)
+    endif ()
+    list(APPEND _vst3_client_new_sources "${_src}")
+  endforeach ()
+  if (NOT _vst3_client_swapped)
+    message(FATAL_ERROR "Could not find juce_audio_plugin_client_VST3.{cpp,mm} in the VST3 client target's sources — JUCE layout changed; update the vendored patch wiring. Sources were: ${_vst3_client_sources}")
+  endif ()
+  set_target_properties(juce_audio_plugin_client_VST3 PROPERTIES INTERFACE_SOURCES "${_vst3_client_new_sources}")
+  message(STATUS "VST3 wrapper source swapped for vendored kIsProgramChange patch")
+endif ()
 
 # Source/VST3Multitimbral.cpp includes VST3 SDK interface headers (header-only —
 # no SDK symbols are linked; see that file) from JUCE's bundled copy, to implement

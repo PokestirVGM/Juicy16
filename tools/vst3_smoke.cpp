@@ -163,17 +163,26 @@ int main (int argc, char** argv) {
         }
         CHECK (busOk, "getUnitByBus maps MIDI channel N -> unit N");
 
-        // parameter unitIds must land inside our units (the Cubase invariant)
-        int paramsInChannelUnits = 0;
+        // parameter unitIds must land inside our units (the Cubase invariant),
+        // and each must carry kIsProgramChange (the vendored wrapper patch) so
+        // hosts treat it as the unit's program selector.
+        int paramsInChannelUnits = 0, flaggedParams = 0;
         const auto n = controller->getParameterCount();
         for (int32 i = 0; i < n; ++i) {
             Vst::ParameterInfo pi{};
             if (controller->getParameterInfo (i, pi) != kResultOk) continue;
             for (int ch = 0; ch < 16; ++ch)
-                if (pi.unitId == expectedUnitId (ch)) { ++paramsInChannelUnits; break; }
+                if (pi.unitId == expectedUnitId (ch)) {
+                    ++paramsInChannelUnits;
+                    if ((pi.flags & Vst::ParameterInfo::kIsProgramChange) != 0)
+                        ++flaggedParams;
+                    break;
+                }
         }
-        printf ("  params inside channel units: %d\n", paramsInChannelUnits);
+        printf ("  params inside channel units: %d (kIsProgramChange on %d)\n",
+                paramsInChannelUnits, flaggedParams);
         CHECK (paramsInChannelUnits == 16, "exactly the 16 progChN params live in the channel units");
+        CHECK (flaggedParams == 16, "all 16 channel program params carry kIsProgramChange");
 
         units->release();
     }
