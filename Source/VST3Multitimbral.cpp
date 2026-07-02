@@ -234,6 +234,12 @@ int32_t JuicyVST3Extensions::queryIEditController (const Steinberg::TUID iid, vo
     return kNoInterface;
 }
 
+int32_t JuicyVST3Extensions::queryIAudioProcessor (const Steinberg::TUID iid, void** obj)
+{
+    // identical shadow on the component object — see header comment
+    return queryIEditController (iid, obj);
+}
+
 void JuicyVST3Extensions::setIComponentHandler (Steinberg::FUnknown* handler)
 {
     if (unitHandler != nullptr)

@@ -33,6 +33,12 @@ public:
     ~JuicyVST3Extensions() override;
 
     int32_t queryIEditController (const Steinberg::TUID, void** obj) override;
+    // Same IUnitInfo exposed on the COMPONENT side: hosts may interrogate either
+    // object for unit structure (Cubase asks the component; FL asks neither and
+    // uses IMidiMapping). JUCE's component otherwise answers with its stock
+    // single-root/no-program-list implementation, which tells Cubase there is
+    // nothing to route Program Change to.
+    int32_t queryIAudioProcessor (const Steinberg::TUID, void** obj) override;
     void setIComponentHandler (Steinberg::FUnknown*) override;
 
     // Message thread: replace the shared program list's names (index = GM program

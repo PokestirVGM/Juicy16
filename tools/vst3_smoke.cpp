@@ -188,6 +188,24 @@ int main (int argc, char** argv) {
         units->release();
     }
 
+    // ---- component-side IUnitInfo (Cubase interrogates the COMPONENT, not the
+    // controller, for unit structure; both must present our 17-unit view) ----
+    {
+        Vst::IUnitInfo* compUnits = nullptr;
+        component->queryInterface (Vst::IUnitInfo_iid, (void**) &compUnits);
+        CHECK (compUnits != nullptr, "component exposes IUnitInfo");
+        if (compUnits) {
+            CHECK (compUnits->getUnitCount() == 17, "component-side: 17 units (our shadow)");
+            Vst::UnitID uid = -1;
+            CHECK (compUnits->getUnitByBus (Vst::MediaTypes::kEvent, Vst::BusDirections::kInput, 0, 5, uid) == kResultTrue
+                   && uid == expectedUnitId (5), "component-side: getUnitByBus channel->unit");
+            Vst::ProgramListInfo pli{};
+            CHECK (compUnits->getProgramListCount() == 1 && compUnits->getProgramListInfo (0, pli) == kResultTrue,
+                   "component-side: program list present");
+            compUnits->release();
+        }
+    }
+
     // ---- IMidiMapping: the path Cubase/FL actually use to route Program Change ----
     {
         Vst::IMidiMapping* mapping = nullptr;

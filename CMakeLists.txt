@@ -16,7 +16,7 @@ cmake_minimum_required(VERSION 3.15)
 # directories, and the current project version. This is a standard CMake command.
 
 # keep in sync with Source/Version.h (JUICYSF_RACK_VERSION, shown in the UI)
-project(JUICY_SF_RACK VERSION 0.3.4)
+project(JUICY_SF_RACK VERSION 0.3.5)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
