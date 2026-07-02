@@ -25,6 +25,7 @@
 #include <pluginterfaces/vst/ivstunits.h>
 #include <pluginterfaces/vst/ivstaudioprocessor.h>
 #include <pluginterfaces/vst/ivstmessage.h>
+#include <pluginterfaces/vst/ivstmidicontrollers.h>
 
 using namespace Steinberg;
 
@@ -185,6 +186,41 @@ int main (int argc, char** argv) {
         CHECK (flaggedParams == 16, "all 16 channel program params carry kIsProgramChange");
 
         units->release();
+    }
+
+    // ---- IMidiMapping: the path Cubase/FL actually use to route Program Change ----
+    {
+        Vst::IMidiMapping* mapping = nullptr;
+        controller->queryInterface (Vst::IMidiMapping_iid, (void**) &mapping);
+        CHECK (mapping != nullptr, "controller exposes IMidiMapping");
+        if (mapping) {
+            // collect the ParamIDs of the 16 progChN params (identified by unitId)
+            Vst::ParamID progParamIds[16];
+            for (auto& id : progParamIds) id = Vst::kNoParamId;
+            const auto n = controller->getParameterCount();
+            for (int32 i = 0; i < n; ++i) {
+                Vst::ParameterInfo pi{};
+                if (controller->getParameterInfo (i, pi) != kResultOk) continue;
+                for (int ch = 0; ch < 16; ++ch)
+                    if (pi.unitId == expectedUnitId (ch)) { progParamIds[ch] = pi.id; break; }
+            }
+
+            bool pcMapped = true;
+            for (int16 ch = 0; ch < 16; ++ch) {
+                Vst::ParamID id = Vst::kNoParamId;
+                if (mapping->getMidiControllerAssignment (0, ch, Vst::kCtrlProgramChange, id) != kResultTrue
+                    || id != progParamIds[ch] || id == Vst::kNoParamId) { pcMapped = false; break; }
+            }
+            CHECK (pcMapped, "PC (ctrl 130) on channel N maps to that channel's progChN param");
+
+            Vst::ParamID ccId = Vst::kNoParamId;
+            CHECK (mapping->getMidiControllerAssignment (0, 3, 7, ccId) == kResultTrue && ccId != Vst::kNoParamId,
+                   "CC table still intact (CC7 mapped)");
+            Vst::ParamID oobId = Vst::kNoParamId;
+            CHECK (mapping->getMidiControllerAssignment (0, 3, 131, oobId) != kResultTrue,
+                   "out-of-table controllers rejected (no OOB read)");
+            mapping->release();
+        }
     }
 
     controller->terminate();

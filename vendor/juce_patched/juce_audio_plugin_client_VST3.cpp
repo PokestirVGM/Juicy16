@@ -1268,6 +1268,22 @@ public:
                                                     [[maybe_unused]] Vst::ParamID& resultID) override
     {
        #if JUCE_VST3_EMULATE_MIDI_CC_WITH_PARAMETERS
+        // JUICYSF RACK PATCH: route per-channel MIDI Program Change to that
+        // channel's program parameter (progCh1..16). Stock JUCE reads past the
+        // end of midiControllerToParameter (second dimension is kCountCtrlNumber
+        // == 130) when a host asks about kCtrlProgramChange (== 130), returning
+        // kResultTrue with a GARBAGE ParamID -- so hosts that route PC via
+        // IMidiMapping (Cubase, FL Studio) send program changes into the void.
+        if (midiControllerNumber == Vst::kCtrlProgramChange
+            && channel >= 0 && channel < numMIDIChannels)
+        {
+            resultID = VST3ClientExtensions::convertJuceParameterId ("progCh" + String (channel + 1));
+            return kResultTrue;
+        }
+
+        if (midiControllerNumber < 0 || midiControllerNumber >= Vst::kCountCtrlNumber)
+            return kResultFalse; // outside the CC table (e.g. quarter-frame); stock code read out of bounds here
+
         resultID = midiControllerToParameter[channel][midiControllerNumber];
         return kResultTrue; // Returning false makes some hosts stop asking for further MIDI Controller Assignments
        #else
