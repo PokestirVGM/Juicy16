@@ -731,12 +731,6 @@ void FluidSynthModel::processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiM
                 midiCh,
                 m.getNoteNumber());
         } else if (m.isController()) {
-            // CC 85 carries the program number (Cubase strips real PC for VST3 —
-            // see kProgramSelectCc). Handled INSTEAD of being forwarded as a CC.
-            if (m.getControllerNumber() == kProgramSelectCc) {
-                applyProgramChangeFromAudioThread(midiCh, m.getControllerValue());
-                continue;
-            }
             fluid_synth_cc(
                 synth.get(),
                 midiCh,

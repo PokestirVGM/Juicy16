@@ -99,16 +99,14 @@ private:
     static constexpr int kNumChannels{16};
     static constexpr int kNumSoundCcs{6}; // CC71,72,73,74,75,79 (see ccIndexOrder)
 
-    // Program select via CC (Cubase fallback). Cubase delivers per-channel CCs to
-    // VST3 plugins but strips MIDI Program Change entirely — verified empirically:
-    // it never queries IMidiMapping for ctrl 130, never sends PC events, and never
-    // reads IUnitInfo (units:0/0/0). CC 85 is undefined in the MIDI spec and unused
-    // by FluidSynth, so it safely carries the program number instead (value 0-127).
-    // Convert a file's PCs with Cubase's Logical Editor or any MIDI tool.
-    static constexpr int kProgramSelectCc{85};
-
-    // shared audio-thread path for "set this channel's program" (MIDI PC, CC85):
-    // applies to the synth and captures the result for handleAsyncUpdate.
+    // shared audio-thread path for "set this channel's program" (MIDI PC or the
+    // VST3 progChN parameters): applies to the synth and captures the result for
+    // handleAsyncUpdate.
+    // NOTE: an earlier CC85-as-program-select fallback (v0.3.8) was REMOVED in
+    // v0.3.10 — native PC routing works in all hosts since the v0.3.9 unit-timing
+    // fix, and intercepting a CC is hazardous: host chase/reset machinery that
+    // sprays controller resets (value 0) would silently reset every channel's
+    // program.
     void applyProgramChangeFromAudioThread(unsigned int midiCh, int program);
     // per-channel program captured on the audio thread when a MIDI program
     // change arrives; consumed on the message thread in handleAsyncUpdate.
