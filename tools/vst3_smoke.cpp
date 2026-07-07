@@ -167,7 +167,7 @@ int main (int argc, char** argv) {
         // parameter unitIds must land inside our units (the Cubase invariant),
         // and each must carry kIsProgramChange (the vendored wrapper patch) so
         // hosts treat it as the unit's program selector.
-        int paramsInChannelUnits = 0, flaggedParams = 0;
+        int paramsInChannelUnits = 0, flaggedParams = 0, steppedParams = 0;
         const auto n = controller->getParameterCount();
         for (int32 i = 0; i < n; ++i) {
             Vst::ParameterInfo pi{};
@@ -177,13 +177,18 @@ int main (int argc, char** argv) {
                     ++paramsInChannelUnits;
                     if ((pi.flags & Vst::ParameterInfo::kIsProgramChange) != 0)
                         ++flaggedParams;
+                    if (pi.stepCount == 127)
+                        ++steppedParams;
                     break;
                 }
         }
-        printf ("  params inside channel units: %d (kIsProgramChange on %d)\n",
-                paramsInChannelUnits, flaggedParams);
+        printf ("  params inside channel units: %d (kIsProgramChange on %d, stepCount 127 on %d)\n",
+                paramsInChannelUnits, flaggedParams, steppedParams);
         CHECK (paramsInChannelUnits == 16, "exactly the 16 progChN params live in the channel units");
         CHECK (flaggedParams == 16, "all 16 channel program params carry kIsProgramChange");
+        // Cubase requires a discrete 128-step program selector: stepCount MUST be
+        // programCount-1 (127), not 0 (continuous). Regression-guard for isDiscrete().
+        CHECK (steppedParams == 16, "all 16 channel program params report stepCount 127");
 
         units->release();
     }

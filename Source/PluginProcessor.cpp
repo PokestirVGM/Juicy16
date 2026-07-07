@@ -82,6 +82,18 @@ JuicySFAudioProcessor::JuicySFAudioProcessor()
     initialiseSynth();
 }
 
+// AudioParameterInt does not report itself as discrete, so JUCE's VST3 wrapper
+// publishes ParameterInfo.stepCount = 0 for it (juce_audio_plugin_client_VST3.cpp:
+// "if (! param.isDiscrete()) return 0"). Hosts that route MIDI Program Change via
+// the unit/program-list mechanism (Cubase) require the kIsProgramChange parameter
+// to be a discrete stepper with stepCount == programCount - 1 (127) to translate
+// program numbers onto it — with stepCount 0 they treat it as a continuous knob
+// and won't deliver PCs to it at all.
+struct DiscreteParameterInt final : public AudioParameterInt {
+    using AudioParameterInt::AudioParameterInt;
+    bool isDiscrete() const override { return true; }
+};
+
 AudioProcessorValueTreeState::ParameterLayout JuicySFAudioProcessor::createParameterLayout() {
     // Sound-controller params default to 64 = neutral (bipolar modulators; the MIDI
     // convention for CC70-79). 0/127 are full negative/positive modulation.
@@ -113,7 +125,7 @@ AudioProcessorValueTreeState::ParameterLayout JuicySFAudioProcessor::createParam
             "chUnit" + String(ch),
             "Ch " + String(ch),
             "|",
-            make_unique<AudioParameterInt>(
+            make_unique<DiscreteParameterInt>(
                 "progCh" + String(ch),
                 "program for MIDI channel " + String(ch),
                 MidiConstants::midiMinValue, MidiConstants::midiMaxValue,
