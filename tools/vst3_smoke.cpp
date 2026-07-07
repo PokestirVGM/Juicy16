@@ -111,6 +111,27 @@ int main (int argc, char** argv) {
     if (!controller) return 1;
     CHECK (controller->initialize (nullptr) == kResultOk, "controller->initialize");
 
+    // ---- PRE-CONNECTION probe (Cubase's order): hosts may interrogate the unit
+    // structure immediately after initialize, BEFORE the component/controller
+    // connection that hands JUCE's controller its AudioProcessor. Whatever is
+    // answered here is what a caching host believes forever.
+    {
+        Vst::IUnitInfo* early = nullptr;
+        controller->queryInterface (Vst::IUnitInfo_iid, (void**) &early);
+        if (early == nullptr)
+            printf ("  pre-connect: controller has NO IUnitInfo\n");
+        else {
+            printf ("  pre-connect: unit count = %d, programListCount = %d\n",
+                    early->getUnitCount(), early->getProgramListCount());
+            CHECK (early->getUnitCount() == 17,
+                   "PRE-CONNECT unit count is 17 (host cache sees the real structure)");
+            Vst::UnitID uid = -1;
+            CHECK (early->getUnitByBus (Vst::MediaTypes::kEvent, Vst::BusDirections::kInput, 0, 4, uid) == kResultTrue
+                   && uid == expectedUnitId (4), "PRE-CONNECT getUnitByBus works");
+            early->release();
+        }
+    }
+
     // Connect component <-> controller like a real host: JUCE's controller only
     // learns its AudioProcessor instance (and thus consults the plugin's
     // VST3ClientExtensions in queryInterface) once the connection points are wired.

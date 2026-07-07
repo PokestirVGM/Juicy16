@@ -9,6 +9,7 @@
 
 #include "VST3Multitimbral.h"
 #include "Vst3Diag.h"
+#include "Vst3Units.h"
 
 #include <atomic>
 #include <cstring>
@@ -22,6 +23,27 @@ namespace juicysf::diag {
     std::atomic<int> unitInfoCalls{0};
     std::atomic<int> unitByBusCalls{0};
     std::atomic<int> programListCalls{0};
+}
+
+// Shared program-name store (see Vst3Units.h) — read by both our IUnitInfo
+// implementation below and the vendored wrapper's controller-side IUnitInfo.
+namespace juicysf::vst3units {
+    namespace {
+        juce::CriticalSection namesLock;
+        juce::StringArray programNames;
+    }
+    void setProgramNames (const juce::StringArray& names) {
+        const juce::ScopedLock sl (namesLock);
+        programNames = names;
+    }
+    juce::String programNameForIndex (int index) {
+        {
+            const juce::ScopedLock sl (namesLock);
+            if (index >= 0 && index < programNames.size() && programNames[index].isNotEmpty())
+                return programNames[index];
+        }
+        return "Program " + juce::String (index);
+    }
 }
 
 #include <pluginterfaces/vst/ivstunits.h>
@@ -38,19 +60,12 @@ using Steinberg::kInvalidArgument;
 
 namespace {
 
-constexpr int kNumMidiChannels = 16;
-// Arbitrary distinct ID for our single shared program list ('PROG'). Program-list
-// IDs are a separate ID space from unit IDs, but keep it far from the hash range
-// anyway for easy debugging.
-constexpr Vst::ProgramListID kJuicyProgramListId = 0x50524F47;
+constexpr int kNumMidiChannels = juicysf::vst3units::kNumMidiChannels;
+constexpr Vst::ProgramListID kJuicyProgramListId = juicysf::vst3units::kProgramListId;
 
-// MUST match the JUCE VST3 wrapper's unit-ID derivation for parameter groups
-// (JuceAudioProcessor::getUnitID: group->getID().hashCode() & 0x7fffffff), applied
-// to our group IDs "chUnit1".."chUnit16" from createParameterLayout(). That is
-// what places each progChN parameter inside its channel's unit.
 static Steinberg::Vst::UnitID unitIdForChannel (int chZeroBased)
 {
-    const auto id = ("chUnit" + juce::String (chZeroBased + 1)).hashCode() & 0x7fffffff;
+    const auto id = juicysf::vst3units::unitIdForChannel (chZeroBased);
     jassert (id != Vst::kRootUnitId); // hash collision with the root would break routing
     return id;
 }
@@ -69,12 +84,6 @@ class JuicyVST3Extensions::UnitInfoImpl final : public Vst::IUnitInfo
 {
 public:
     UnitInfoImpl() = default;
-
-    void setProgramNames (const juce::StringArray& newNames)
-    {
-        const juce::ScopedLock sl (lock);
-        names = newNames;
-    }
 
     //==============================================================================
     // FUnknown, by hand (no SDK .cpp needed)
@@ -151,15 +160,7 @@ public:
         juicysf::diag::programListCalls.fetch_add (1, std::memory_order_relaxed);
         if (listId != kJuicyProgramListId || programIndex < 0 || programIndex >= 128)
             return kResultFalse;
-        juce::String s;
-        {
-            const juce::ScopedLock sl (lock);
-            if (programIndex < names.size() && names[programIndex].isNotEmpty())
-                s = names[programIndex];
-        }
-        if (s.isEmpty())
-            s = "Program " + juce::String (programIndex);
-        copyToString128 (name, s);
+        copyToString128 (name, juicysf::vst3units::programNameForIndex (programIndex));
         return kResultTrue;
     }
 
@@ -213,8 +214,6 @@ public:
 private:
     std::atomic<int> refCount{1}; // creator holds the initial reference
     std::atomic<Vst::UnitID> selectedUnit{Vst::kRootUnitId};
-    juce::CriticalSection lock;
-    juce::StringArray names;
 
     ~UnitInfoImpl() = default; // COM: delete only via release()
 };
@@ -271,7 +270,7 @@ void JuicyVST3Extensions::setIComponentHandler (Steinberg::FUnknown* handler)
 
 void JuicyVST3Extensions::setProgramNames (const juce::StringArray& names)
 {
-    unitInfo->setProgramNames (names);
+    juicysf::vst3units::setProgramNames (names);
     if (unitHandler != nullptr)
         static_cast<Vst::IUnitHandler*> (static_cast<void*> (unitHandler))
             ->notifyProgramListChange (kJuicyProgramListId, Vst::kAllProgramInvalid);

@@ -69,6 +69,7 @@ JUCE_BEGIN_NO_SANITIZE ("vptr")
 #include <juce_audio_processors_headless/format_types/juce_VST3Common.h>
 #include <juce_audio_plugin_client/VST3/juce_VST3ModuleInfo.h>
 #include "Vst3Diag.h" // JUICYSF RACK: temporary Cubase diagnostics
+#include "Vst3Units.h" // JUICYSF RACK: shared multitimbral unit structure
 
 #if JUCE_VST3_CAN_REPLACE_VST2 && ! JUCE_FORCE_USE_LEGACY_PARAM_IDS && ! JUCE_IGNORE_VST3_MISMATCHED_PARAMETER_ID_WARNING
 
@@ -1330,129 +1331,122 @@ public:
     }
 
     //==============================================================================
+    // JUICYSF RACK PATCH: the controller serves the plugin's multitimbral unit
+    // structure UNCONDITIONALLY (16 channel units + one 128-slot program list;
+    // see Source/Vst3Units.h). Hosts (Cubase) interrogate IUnitInfo immediately
+    // after controller creation, BEFORE the component connection provides
+    // audioProcessor; stock JUCE answered "1 unit, no program lists" then (see
+    // the jassertfalse fallbacks it had here), the host cached that forever and
+    // consequently discarded every MIDI Program Change. The structure is static,
+    // so no processor is required to report it correctly and consistently.
     Steinberg::int32 PLUGIN_API getUnitCount() override
     {
-        if (audioProcessor != nullptr)
-            return audioProcessor->getUnitCount();
-
-        jassertfalse;
-        return 1;
+        return 1 + juicysf::vst3units::kNumMidiChannels;
     }
 
     tresult PLUGIN_API getUnitInfo (Steinberg::int32 unitIndex, Vst::UnitInfo& info) override
     {
-        if (audioProcessor != nullptr)
-            return audioProcessor->getUnitInfo (unitIndex, info);
-
-        jassertfalse;
         if (unitIndex == 0)
         {
             info.id             = Vst::kRootUnitId;
             info.parentUnitId   = Vst::kNoParentUnitId;
             info.programListId  = Vst::kNoProgramListId;
-
             toString128 (info.name, TRANS ("Root Unit"));
-
             return kResultTrue;
         }
 
-        zerostruct (info);
-        return kResultFalse;
+        const auto ch = (int) unitIndex - 1;
+
+        if (ch < 0 || ch >= juicysf::vst3units::kNumMidiChannels)
+        {
+            zerostruct (info);
+            return kResultFalse;
+        }
+
+        info.id             = (Vst::UnitID) juicysf::vst3units::unitIdForChannel (ch);
+        info.parentUnitId   = Vst::kRootUnitId;
+        info.programListId  = (Vst::ProgramListID) juicysf::vst3units::kProgramListId;
+        toString128 (info.name, "Ch " + juce::String (ch + 1));
+        return kResultTrue;
     }
 
     Steinberg::int32 PLUGIN_API getProgramListCount() override
     {
-        if (audioProcessor != nullptr)
-            return audioProcessor->getProgramListCount();
-
-        jassertfalse;
-        return 0;
+        return 1;
     }
 
     tresult PLUGIN_API getProgramListInfo (Steinberg::int32 listIndex, Vst::ProgramListInfo& info) override
     {
-        if (audioProcessor != nullptr)
-            return audioProcessor->getProgramListInfo (listIndex, info);
+        if (listIndex != 0)
+        {
+            zerostruct (info);
+            return kResultFalse;
+        }
 
-        jassertfalse;
-        zerostruct (info);
-        return kResultFalse;
+        info.id = (Vst::ProgramListID) juicysf::vst3units::kProgramListId;
+        info.programCount = juicysf::vst3units::kNumPrograms;
+        toString128 (info.name, "Programs");
+        return kResultTrue;
     }
 
     tresult PLUGIN_API getProgramName (Vst::ProgramListID listId, Steinberg::int32 programIndex, Vst::String128 name) override
     {
-        if (audioProcessor != nullptr)
-            return audioProcessor->getProgramName (listId, programIndex, name);
+        if (listId != (Vst::ProgramListID) juicysf::vst3units::kProgramListId
+            || programIndex < 0 || programIndex >= juicysf::vst3units::kNumPrograms)
+        {
+            toString128 (name, juce::String());
+            return kResultFalse;
+        }
 
-        jassertfalse;
-        toString128 (name, juce::String());
+        toString128 (name, juicysf::vst3units::programNameForIndex ((int) programIndex));
+        return kResultTrue;
+    }
+
+    tresult PLUGIN_API getProgramInfo (Vst::ProgramListID, Steinberg::int32,
+                                       Vst::CString, Vst::String128) override
+    {
         return kResultFalse;
     }
 
-    tresult PLUGIN_API getProgramInfo (Vst::ProgramListID listId, Steinberg::int32 programIndex,
-                                       Vst::CString attributeId, Vst::String128 attributeValue) override
+    tresult PLUGIN_API hasProgramPitchNames (Vst::ProgramListID, Steinberg::int32) override
     {
-        if (audioProcessor != nullptr)
-            return audioProcessor->getProgramInfo (listId, programIndex, attributeId, attributeValue);
-
-        jassertfalse;
         return kResultFalse;
     }
 
-    tresult PLUGIN_API hasProgramPitchNames (Vst::ProgramListID listId, Steinberg::int32 programIndex) override
+    tresult PLUGIN_API getProgramPitchName (Vst::ProgramListID, Steinberg::int32,
+                                            Steinberg::int16, Vst::String128) override
     {
-        if (audioProcessor != nullptr)
-            return audioProcessor->hasProgramPitchNames (listId, programIndex);
-
-        jassertfalse;
-        return kResultFalse;
-    }
-
-    tresult PLUGIN_API getProgramPitchName (Vst::ProgramListID listId, Steinberg::int32 programIndex,
-                                            Steinberg::int16 midiPitch, Vst::String128 name) override
-    {
-        if (audioProcessor != nullptr)
-            return audioProcessor->getProgramPitchName (listId, programIndex, midiPitch, name);
-
-        jassertfalse;
         return kResultFalse;
     }
 
     tresult PLUGIN_API selectUnit (Vst::UnitID unitId) override
     {
-        if (audioProcessor != nullptr)
-            return audioProcessor->selectUnit (unitId);
-
-        jassertfalse;
-        return kResultFalse;
+        juicySelectedUnit = unitId;
+        return kResultTrue;
     }
 
-    tresult PLUGIN_API setUnitProgramData (Steinberg::int32 listOrUnitId, Steinberg::int32 programIndex,
-                                           IBStream* data) override
+    tresult PLUGIN_API setUnitProgramData (Steinberg::int32, Steinberg::int32, IBStream*) override
     {
-        if (audioProcessor != nullptr)
-            return audioProcessor->setUnitProgramData (listOrUnitId, programIndex, data);
-
-        jassertfalse;
-        return kResultFalse;
+        return kNotImplemented;
     }
 
     Vst::UnitID PLUGIN_API getSelectedUnit() override
     {
-        if (audioProcessor != nullptr)
-            return audioProcessor->getSelectedUnit();
-
-        jassertfalse;
-        return kResultFalse;
+        return juicySelectedUnit;
     }
+
+    Vst::UnitID juicySelectedUnit = Vst::kRootUnitId; // JUICYSF RACK PATCH
 
     tresult PLUGIN_API getUnitByBus (Vst::MediaType type, Vst::BusDirection dir, Steinberg::int32 busIndex,
                                      Steinberg::int32 channel, Vst::UnitID& unitId) override
     {
-        if (audioProcessor != nullptr)
-            return audioProcessor->getUnitByBus (type, dir, busIndex, channel, unitId);
+        if (type == Vst::MediaTypes::kEvent && dir == Vst::BusDirections::kInput
+            && busIndex == 0 && channel >= 0 && channel < juicysf::vst3units::kNumMidiChannels)
+        {
+            unitId = (Vst::UnitID) juicysf::vst3units::unitIdForChannel ((int) channel);
+            return kResultTrue;
+        }
 
-        jassertfalse;
         return kResultFalse;
     }
 
