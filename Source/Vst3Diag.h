@@ -19,4 +19,9 @@ namespace juicysf::diag {
     extern std::atomic<int> midiMapCalls;    // total getMidiControllerAssignment calls
     extern std::atomic<int> midiMapMaxCtrl;  // highest controllerNumber the host asked about
     extern std::atomic<int> midiMapPcCalls;  // calls specifically for kCtrlProgramChange (130)
+
+    // IUnitInfo activity: does the host read our unit/program-list structure at all?
+    extern std::atomic<int> unitInfoCalls;   // any IUnitInfo method
+    extern std::atomic<int> unitByBusCalls;  // getUnitByBus (the channel->unit map)
+    extern std::atomic<int> programListCalls;// getProgramListInfo/getProgramName
 }

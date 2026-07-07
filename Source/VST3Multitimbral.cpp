@@ -19,6 +19,9 @@ namespace juicysf::diag {
     std::atomic<int> midiMapCalls{0};
     std::atomic<int> midiMapMaxCtrl{-1};
     std::atomic<int> midiMapPcCalls{0};
+    std::atomic<int> unitInfoCalls{0};
+    std::atomic<int> unitByBusCalls{0};
+    std::atomic<int> programListCalls{0};
 }
 
 #include <pluginterfaces/vst/ivstunits.h>
@@ -100,10 +103,15 @@ public:
 
     //==============================================================================
     // IUnitInfo
-    Steinberg::int32 PLUGIN_API getUnitCount() override { return 1 + kNumMidiChannels; }
+    Steinberg::int32 PLUGIN_API getUnitCount() override
+    {
+        juicysf::diag::unitInfoCalls.fetch_add (1, std::memory_order_relaxed);
+        return 1 + kNumMidiChannels;
+    }
 
     tresult PLUGIN_API getUnitInfo (Steinberg::int32 unitIndex, Vst::UnitInfo& info) override
     {
+        juicysf::diag::unitInfoCalls.fetch_add (1, std::memory_order_relaxed);
         if (unitIndex == 0)
         {
             info.id = Vst::kRootUnitId;
@@ -126,6 +134,8 @@ public:
 
     tresult PLUGIN_API getProgramListInfo (Steinberg::int32 listIndex, Vst::ProgramListInfo& info) override
     {
+        juicysf::diag::unitInfoCalls.fetch_add (1, std::memory_order_relaxed);
+        juicysf::diag::programListCalls.fetch_add (1, std::memory_order_relaxed);
         if (listIndex != 0)
             return kResultFalse;
         info.id = kJuicyProgramListId;
@@ -137,6 +147,8 @@ public:
     tresult PLUGIN_API getProgramName (Vst::ProgramListID listId, Steinberg::int32 programIndex,
                                        Vst::String128 name) override
     {
+        juicysf::diag::unitInfoCalls.fetch_add (1, std::memory_order_relaxed);
+        juicysf::diag::programListCalls.fetch_add (1, std::memory_order_relaxed);
         if (listId != kJuicyProgramListId || programIndex < 0 || programIndex >= 128)
             return kResultFalse;
         juce::String s;
@@ -180,6 +192,8 @@ public:
                                      Steinberg::int32 busIndex, Steinberg::int32 channel,
                                      Vst::UnitID& unitId) override
     {
+        juicysf::diag::unitInfoCalls.fetch_add (1, std::memory_order_relaxed);
+        juicysf::diag::unitByBusCalls.fetch_add (1, std::memory_order_relaxed);
         // the per-MIDI-channel association hosts use to route program changes
         if (type == Vst::MediaTypes::kEvent && dir == Vst::BusDirections::kInput
             && busIndex == 0 && channel >= 0 && channel < kNumMidiChannels)

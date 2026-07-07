@@ -219,6 +219,11 @@ juce::String FluidSynthModel::getMidiMonitorText() {
     s << "  map:" << juicysf::diag::midiMapCalls.load(std::memory_order_relaxed)
       << "/" << juicysf::diag::midiMapMaxCtrl.load(std::memory_order_relaxed)
       << "/" << juicysf::diag::midiMapPcCalls.load(std::memory_order_relaxed);
+    // IUnitInfo activity: total / getUnitByBus / program-list reads.
+    // all zeros = the host never read our unit structure at all.
+    s << "  units:" << juicysf::diag::unitInfoCalls.load(std::memory_order_relaxed)
+      << "/" << juicysf::diag::unitByBusCalls.load(std::memory_order_relaxed)
+      << "/" << juicysf::diag::programListCalls.load(std::memory_order_relaxed);
     return s;
 }
 
