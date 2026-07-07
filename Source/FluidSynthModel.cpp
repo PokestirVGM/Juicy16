@@ -689,6 +689,25 @@ void FluidSynthModel::setSampleRate(float sampleRate) {
     }
 }
 
+void FluidSynthModel::applyProgramChangeFromAudioThread(unsigned int midiCh, int program) {
+    if (midiCh >= static_cast<unsigned int>(kNumChannels))
+        return;
+    monLastPcChannel.store(static_cast<int>(midiCh), std::memory_order_relaxed); // diagnostic
+    monLastPcProgram.store(program, std::memory_order_relaxed);
+    // MIDI from the DAW is authoritative: apply the program change to this
+    // channel, then capture the resulting program so the message thread can
+    // update the channel list / params (see handleAsyncUpdate).
+    if (fluid_synth_program_change(synth.get(), midiCh, program) == FLUID_OK) {
+        int sf, bank, preset;
+        if (fluid_synth_get_program(synth.get(), static_cast<int>(midiCh), &sf, &bank, &preset) == FLUID_OK) {
+            midiBank[midiCh].store(bank, std::memory_order_relaxed);
+            midiPreset[midiCh].store(preset, std::memory_order_relaxed);
+            midiProgramDirtyMask.fetch_or(1u << midiCh, std::memory_order_release);
+            triggerAsyncUpdate();
+        }
+    }
+}
+
 void FluidSynthModel::processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiMessages) {
     MidiBuffer processedMidi;
     int time;
@@ -712,6 +731,12 @@ void FluidSynthModel::processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiM
                 midiCh,
                 m.getNoteNumber());
         } else if (m.isController()) {
+            // CC 85 carries the program number (Cubase strips real PC for VST3 —
+            // see kProgramSelectCc). Handled INSTEAD of being forwarded as a CC.
+            if (m.getControllerNumber() == kProgramSelectCc) {
+                applyProgramChangeFromAudioThread(midiCh, m.getControllerValue());
+                continue;
+            }
             fluid_synth_cc(
                 synth.get(),
                 midiCh,
@@ -730,24 +755,7 @@ void FluidSynthModel::processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiM
                 triggerAsyncUpdate();
             }
         } else if (m.isProgramChange()) {
-            monLastPcChannel.store(static_cast<int>(midiCh), std::memory_order_relaxed); // diagnostic
-            monLastPcProgram.store(m.getProgramChangeNumber(), std::memory_order_relaxed);
-            // MIDI from the DAW is authoritative: apply the program change to this
-            // channel, then capture the resulting program so the message thread can
-            // update the channel list / params (see handleAsyncUpdate).
-            int result{fluid_synth_program_change(
-                synth.get(),
-                midiCh,
-                m.getProgramChangeNumber())};
-            if (result == FLUID_OK) {
-                int sf, bank, preset;
-                if (fluid_synth_get_program(synth.get(), static_cast<int>(midiCh), &sf, &bank, &preset) == FLUID_OK) {
-                    midiBank[midiCh].store(bank, std::memory_order_relaxed);
-                    midiPreset[midiCh].store(preset, std::memory_order_relaxed);
-                    midiProgramDirtyMask.fetch_or(1u << midiCh, std::memory_order_release);
-                    triggerAsyncUpdate();
-                }
-            }
+            applyProgramChangeFromAudioThread(midiCh, m.getProgramChangeNumber());
         } else if (m.isPitchWheel()) {
             fluid_synth_pitch_bend(
                 synth.get(),
