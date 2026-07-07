@@ -86,6 +86,8 @@ FluidSynthModel::FluidSynthModel(
     for (int i = 0; i < kNumChannels; i++) {
         midiBank[i].store(0, std::memory_order_relaxed);
         midiPreset[i].store(0, std::memory_order_relaxed);
+        engineBank[i].store(0, std::memory_order_relaxed);
+        enginePreset[i].store(0, std::memory_order_relaxed);
         for (int c = 0; c < kNumSoundCcs; c++)
             midiCcValue[i][c].store(-1, std::memory_order_relaxed);
     }
@@ -293,6 +295,10 @@ void FluidSynthModel::parameterChanged(const String& parameterID, float newValue
             sfont_id,
             static_cast<unsigned int>(bankOffset + bank),
             static_cast<unsigned int>(preset));
+        if (ch < static_cast<unsigned int>(kNumChannels)) {
+            engineBank[ch].store(bankOffset + bank, std::memory_order_relaxed);
+            enginePreset[ch].store(preset, std::memory_order_relaxed);
+        }
         // persist both bank and preset to the channel currently being edited.
         // Host automation can invoke us on the audio thread, where ValueTree
         // writes are unsafe — defer those through the same atomics the MIDI
@@ -348,6 +354,10 @@ void FluidSynthModel::setChannelProgram(int chan, int bank, int preset) {
             sfont_id,
             static_cast<unsigned int>(bankOffset + bank),
             static_cast<unsigned int>(preset));
+        if (chan >= 0 && chan < kNumChannels) {
+            engineBank[chan].store(bankOffset + bank, std::memory_order_relaxed);
+            enginePreset[chan].store(preset, std::memory_order_relaxed);
+        }
     }
     // persist to the channel node (drives the dropdown display + saved state)
     ValueTree chNode{valueTreeState.state.getChildWithName("channelPrograms")
@@ -371,9 +381,44 @@ void FluidSynthModel::setChannelProgram(int chan, int bank, int preset) {
     }
 }
 
+void FluidSynthModel::applyAllChannelStateToSynth() {
+    // after a system-reset SysEx: push every channel's saved program + sound CCs
+    // from channelPrograms back into the synth (message thread; fluid calls are
+    // thread-safe). Mirrors the re-apply refreshBanks does after a font load.
+    if (sfont_id == -1)
+        return;
+    const int bankOffset{fluid_synth_get_bank_offset(synth.get(), sfont_id)};
+    ValueTree chPrograms{valueTreeState.state.getChildWithName("channelPrograms")};
+    for (int i = 0; i < chPrograms.getNumChildren(); i++) {
+        ValueTree ch{chPrograms.getChild(i)};
+        const int chNum{ch.getProperty("num")};
+        if (chNum < 0 || chNum >= kNumChannels)
+            continue;
+        const int rawBank{static_cast<int>(ch.getProperty("bank", 0))};
+        const int rawPreset{static_cast<int>(ch.getProperty("preset", 0))};
+        fluid_synth_program_select(
+            synth.get(),
+            static_cast<unsigned int>(chNum),
+            sfont_id,
+            static_cast<unsigned int>(bankOffset + rawBank),
+            static_cast<unsigned int>(rawPreset));
+        engineBank[chNum].store(bankOffset + rawBank, std::memory_order_relaxed);
+        enginePreset[chNum].store(rawPreset, std::memory_order_relaxed);
+        for (const auto& [paramID, cc] : paramToController) {
+            fluid_synth_cc(
+                synth.get(),
+                static_cast<unsigned int>(chNum),
+                static_cast<int>(cc),
+                static_cast<int>(ch.getProperty(paramID, defaultParamValue(paramID))));
+        }
+    }
+}
+
 void FluidSynthModel::handleAsyncUpdate() {
     // consume per-channel program changes and sound-CC changes captured on the
     // audio thread; all ValueTree/parameter writes happen here, on the message thread.
+    if (needsFullResync.exchange(false, std::memory_order_acquire))
+        applyAllChannelStateToSynth();
     const unsigned int pcMask{midiProgramDirtyMask.exchange(0, std::memory_order_acquire)};
     const unsigned int ccMask{midiCcDirtyMask.exchange(0, std::memory_order_acquire)};
     if (pcMask == 0 && ccMask == 0)
@@ -634,6 +679,10 @@ void FluidSynthModel::refreshBanks() {
                 sfont_id,
                 static_cast<unsigned int>(bankOffset + rawBank),
                 static_cast<unsigned int>(rawPreset));
+            if (chNum >= 0 && chNum < kNumChannels) {
+                engineBank[chNum].store(bankOffset + rawBank, std::memory_order_relaxed);
+                enginePreset[chNum].store(rawPreset, std::memory_order_relaxed);
+            }
             // mirror into the display and the channel's program parameter
             ch.setProperty("bank", rawBank, nullptr);
             ch.setProperty("preset", rawPreset, nullptr);
@@ -702,10 +751,31 @@ void FluidSynthModel::applyProgramChangeFromAudioThread(unsigned int midiCh, int
         if (fluid_synth_get_program(synth.get(), static_cast<int>(midiCh), &sf, &bank, &preset) == FLUID_OK) {
             midiBank[midiCh].store(bank, std::memory_order_relaxed);
             midiPreset[midiCh].store(preset, std::memory_order_relaxed);
+            engineBank[midiCh].store(bank, std::memory_order_relaxed);
+            enginePreset[midiCh].store(preset, std::memory_order_relaxed);
             midiProgramDirtyMask.fetch_or(1u << midiCh, std::memory_order_release);
             triggerAsyncUpdate();
         }
     }
+}
+
+bool FluidSynthModel::isSystemResetSysex(const uint8_t* d, int size) {
+    // data excludes the F0/F7 framing (JUCE getSysExData).
+    if (d == nullptr)
+        return false;
+    // Universal Non-Realtime, General MIDI subfamily: 7E <dev> 09 <01|02|03>
+    // (GM1 On / GM Off / GM2 On) — FluidSynth resets channels for these.
+    if (size >= 4 && d[0] == 0x7E && d[2] == 0x09)
+        return true;
+    // Roland GS Reset: 41 <dev> 42 12 40 00 7F 00 41
+    if (size >= 9 && d[0] == 0x41 && d[2] == 0x42 && d[3] == 0x12
+        && d[4] == 0x40 && d[5] == 0x00 && d[6] == 0x7F)
+        return true;
+    // Yamaha XG System On: 43 <dev> 4C 00 00 7E 00
+    if (size >= 7 && d[0] == 0x43 && d[2] == 0x4C && d[3] == 0x00
+        && d[4] == 0x00 && d[5] == 0x7E)
+        return true;
+    return false;
 }
 
 void FluidSynthModel::processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiMessages) {
@@ -780,6 +850,29 @@ void FluidSynthModel::processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiM
                 nullptr, // no response_len pointer because we have no interest in handling response currently
                 nullptr, // no handled pointer because we have no interest in handling response currently
                 static_cast<int>(false));
+
+            // A GM/GS/XG system reset just wiped every channel's program/bank
+            // inside FluidSynth — invisibly to our state tracking, the host's
+            // parameter cache, and the UI (game rips commonly carry one at tick 0,
+            // so every replay silently reverted all channels to program 0 while
+            // everything else still believed the right programs were active).
+            // Re-assert each channel's program immediately so the very next notes
+            // are correct, and queue the authoritative message-thread resync for
+            // the saved sound-controller values too.
+            if (isSystemResetSysex(m.getSysExData(), m.getSysExDataSize())) {
+                if (sfont_id != -1) {
+                    for (int ch = 0; ch < kNumChannels; ch++) {
+                        fluid_synth_program_select(
+                            synth.get(),
+                            static_cast<unsigned int>(ch),
+                            sfont_id,
+                            static_cast<unsigned int>(engineBank[ch].load(std::memory_order_relaxed)),
+                            static_cast<unsigned int>(enginePreset[ch].load(std::memory_order_relaxed)));
+                    }
+                }
+                needsFullResync.store(true, std::memory_order_release);
+                triggerAsyncUpdate();
+            }
         }
     }
 

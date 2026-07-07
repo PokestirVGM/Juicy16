@@ -92,6 +92,9 @@ private:
 
     void loadSelectedChannel(int newChannel);
     void saveParamToChannel(const String& parameterID, int value);
+    // message thread: push every channel's saved program + sound CCs from
+    // channelPrograms back into the synth (used after a system-reset SysEx).
+    void applyAllChannelStateToSynth();
     // mirror a channel's current program into its progChN parameter (guarded so
     // parameterChanged doesn't re-apply it to the synth). Message thread only.
     void syncProgParam(int ch, int preset);
@@ -113,6 +116,22 @@ private:
     std::atomic<int> midiBank[kNumChannels];
     std::atomic<int> midiPreset[kNumChannels];
     std::atomic<unsigned int> midiProgramDirtyMask{0}; // bit per channel
+
+    // Set when a GM/GS/XG system-reset SysEx passed through to FluidSynth (which
+    // resets every channel's program/bank/controllers INTERNALLY, invisible to our
+    // state tracking): handleAsyncUpdate then re-applies the authoritative
+    // channelPrograms state on the message thread. Game-rip MIDIs commonly carry a
+    // reset SysEx at tick 0 — combined with hosts deduplicating parameter sends,
+    // this silently reverted every channel to program 0 on replay while the UI
+    // (and the host) still believed the correct programs were active.
+    std::atomic<bool> needsFullResync{false};
+    // last engine program per channel (RAW synth bank incl. offset + preset),
+    // maintained at every program_select/change site; used for the immediate
+    // audio-thread re-assert after a reset SysEx so the very next notes are correct.
+    std::atomic<int> engineBank[kNumChannels];
+    std::atomic<int> enginePreset[kNumChannels];
+
+    static bool isSystemResetSysex(const uint8_t* data, int size);
 
     // per-channel sound-controller values captured on the audio thread when a
     // mapped CC (71/72/73/74/75/79) arrives; −1 = nothing pending. Consumed on the
