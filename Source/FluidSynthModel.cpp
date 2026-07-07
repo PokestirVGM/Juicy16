@@ -9,7 +9,6 @@
 #include "FluidSynthModel.h"
 #include "MidiConstants.h"
 #include "Util.h"
-#include "Vst3Diag.h" // TEMPORARY: Cubase VST3 diagnostics in the status bar
 
 #if JUCE_MAC || JUCE_IOS
   #include <CoreFoundation/CFString.h>
@@ -203,32 +202,6 @@ const StringArray FluidSynthModel::programChangeParams{"bank", "preset"};
 const StringArray FluidSynthModel::perChannelParams{
     "bank", "preset", "attack", "decay", "sustain", "release", "filterCutOff", "filterResonance"};
 
-juce::String FluidSynthModel::getMidiMonitorText() {
-    juce::String s;
-    s << "notes/ch:";
-    for (int i = 0; i < kNumChannels; ++i)
-        s << " " << monNoteOn[i].load(std::memory_order_relaxed);
-    const int pcCh{monLastPcChannel.load(std::memory_order_relaxed)};
-    s << "  PCevt: ";
-    if (pcCh < 0) s << "none";
-    else s << "ch" << (pcCh + 1) << " p" << monLastPcProgram.load(std::memory_order_relaxed);
-    const int paramCh{monLastParamChannel.load(std::memory_order_relaxed)};
-    s << "  PCparam: ";
-    if (paramCh < 0) s << "none";
-    else s << "ch" << (paramCh + 1) << " p" << monLastParamProgram.load(std::memory_order_relaxed);
-    // IMidiMapping activity (VST3 only): calls / highest controller queried / PC(130) queries.
-    // "0/-1/0" means the host never used IMidiMapping (it routes MIDI another way).
-    s << "  map:" << juicysf::diag::midiMapCalls.load(std::memory_order_relaxed)
-      << "/" << juicysf::diag::midiMapMaxCtrl.load(std::memory_order_relaxed)
-      << "/" << juicysf::diag::midiMapPcCalls.load(std::memory_order_relaxed);
-    // IUnitInfo activity: total / getUnitByBus / program-list reads.
-    // all zeros = the host never read our unit structure at all.
-    s << "  units:" << juicysf::diag::unitInfoCalls.load(std::memory_order_relaxed)
-      << "/" << juicysf::diag::unitByBusCalls.load(std::memory_order_relaxed)
-      << "/" << juicysf::diag::programListCalls.load(std::memory_order_relaxed);
-    return s;
-}
-
 void FluidSynthModel::syncProgParam(int ch, int preset) {
     juce::ScopedValueSetter<bool> guard{loadingChannel, true};
     if (auto* p{dynamic_cast<AudioParameterInt*>(valueTreeState.getParameter(progParamId(ch)))})
@@ -260,8 +233,6 @@ void FluidSynthModel::parameterChanged(const String& parameterID, float newValue
         int program{0};
         if (auto* p{dynamic_cast<AudioParameterInt*>(valueTreeState.getParameter(parameterID))})
             program = p->get();
-        monLastParamChannel.store(progCh, std::memory_order_relaxed); // diagnostic
-        monLastParamProgram.store(program, std::memory_order_relaxed);
         if (fluid_synth_program_change(synth.get(), progCh, program) == FLUID_OK) {
             int sf, bank, preset;
             if (fluid_synth_get_program(synth.get(), progCh, &sf, &bank, &preset) == FLUID_OK) {
@@ -741,8 +712,6 @@ void FluidSynthModel::setSampleRate(float sampleRate) {
 void FluidSynthModel::applyProgramChangeFromAudioThread(unsigned int midiCh, int program) {
     if (midiCh >= static_cast<unsigned int>(kNumChannels))
         return;
-    monLastPcChannel.store(static_cast<int>(midiCh), std::memory_order_relaxed); // diagnostic
-    monLastPcProgram.store(program, std::memory_order_relaxed);
     // MIDI from the DAW is authoritative: apply the program change to this
     // channel, then capture the resulting program so the message thread can
     // update the channel list / params (see handleAsyncUpdate).
@@ -788,8 +757,6 @@ void FluidSynthModel::processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiM
         
         const unsigned int midiCh{static_cast<unsigned int>(m.getChannel() - 1)}; // JUCE: 1-16, FluidSynth: 0-15
         if (m.isNoteOn()) {
-            if (midiCh < static_cast<unsigned int>(kNumChannels))
-                monNoteOn[midiCh].fetch_add(1, std::memory_order_relaxed); // diagnostic
             fluid_synth_noteon(
                 synth.get(),
                 midiCh,

@@ -25,7 +25,11 @@ All 16 channels mix down to a single stereo output.
 ## Formats
 
 - **AU** (Audio Unit) — the primary format on macOS (FL Studio, Logic, etc.). Delivers per-channel MIDI Program Change natively.
-- **VST3** — for Cubase (which supports neither AU nor, since Cubase 13, VST2) and Windows. VST3 has no per-channel Program Change *event*, so JuicySF Rack implements the same mechanism HALion-style multitimbral instruments use: sixteen VST3 **units** (one per MIDI channel) with a shared program list and per-channel program parameters, injected via JUCE's `VST3ClientExtensions` (no JUCE modifications — see `Source/VST3Multitimbral.cpp`). Hosts that instead deliver Program Change as legacy MIDI events (e.g. REAPER) work through the normal MIDI path. The 16 `Ch N Prog` parameters are also plain automatable parameters in any host.
+- **VST3** — for Cubase (which supports neither AU nor, since Cubase 13, VST2) and Windows. VST3 has no per-channel Program Change *event*, so a host has to route it one of two ways, and JuicySF Rack supports both:
+  - Sixteen `Ch N Prog` parameters (0–127), automatable in any host, driven by MIDI Program Change via `IMidiMapping`.
+  - Sixteen VST3 **units** (one per MIDI channel) sharing one program list — the mechanism HALion-style multitimbral instruments use — implemented via JUCE's `VST3ClientExtensions` (`Source/VST3Multitimbral.cpp`), no JUCE source changes required for this part.
+
+  Getting Cubase working end-to-end also required fixing two real bugs in **stock JUCE's VST3 wrapper** (not this plugin's code): an out-of-bounds array read that returns a garbage parameter ID when a host asks where Program Change should go, and a timing hole where the wrapper reports "no program lists" to any host that queries unit structure before the plugin's internal component/controller connection completes — which some hosts (Cubase) do immediately and then cache forever. Both are fixed in a small vendored patch (`vendor/juce_patched/`, ~40 changed lines, diffable against the stock file) that CMake swaps in automatically when building the VST3 target — no manual step needed. AU/AUv3/Standalone are unaffected (they don't compile that file).
 - **Standalone** app — for testing without a DAW.
 - **VST2** — builds only if you supply a VST2 SDK (see [Building from source](#building-from-source-macos)); Steinberg no longer distributes it, so it's not bundled here.
 
@@ -39,6 +43,7 @@ Loads `.sf2`, `.sf3`, and `.dls`. DLS files exported by some tools (notably Awav
 - 512-voice polyphony, so dense 16-channel material doesn't steal voices mid-note.
 - The synth's sample rate always tracks the host's actual sample rate.
 - SoundFont-spec CC71–79 modulators (filter/envelope) use the correct bipolar MIDI convention — a channel that's never touched those CCs behaves identically to plain FluidSynth defaults; there's no hidden coloration from CCs sitting at their spec-neutral value.
+- Self-heals from GM/GS/XG system-reset SysEx: FluidSynth resets every channel's program internally when it passes one through (game-rip MIDI files commonly carry one at tick 0), invisibly to the plugin's own state and the host's parameter cache. JuicySF Rack detects the reset and immediately re-asserts every channel's saved program, so it can't silently strip your channel assignments on replay.
 
 ## Building from source (macOS)
 
@@ -55,7 +60,7 @@ cmake --build cmake-build-install --target install
 cd /path/to/JuicySF-Rack
 cmake -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_OSX_ARCHITECTURES=arm64 \
   -DCMAKE_PREFIX_PATH="$HOME/juicydeps;/opt/homebrew"
-cmake --build build --target JuicySFPlugin_Standalone JuicySFPlugin_AU
+cmake --build build --target JuicySFPlugin_Standalone JuicySFPlugin_AU JuicySFPlugin_VST3
 ```
 
 Built artifacts land in `build/JuicySFPlugin_artefacts/Debug/` (Standalone `.app`, AU `.component`) and auto-install to your user plugin folders (`COPY_PLUGIN_AFTER_BUILD` in `CMakeLists.txt`).
@@ -67,7 +72,6 @@ For Windows cross-compilation, see `building.win32.md` and `win32.Dockerfile`.
 ## Known limitations
 
 - Single stereo output — all 16 channels mix down together; there's no per-channel audio-out routing.
-- No VST3 (see above).
 - VST2 requires supplying your own SDK.
 
 ## Licenses

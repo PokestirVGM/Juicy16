@@ -26,7 +26,6 @@ class JuicySFAudioProcessorEditor
 : public AudioProcessorEditor
 , private Value::Listener
 , private ValueTree::Listener
-, private juce::Timer // TEMPORARY: drives the diagnostic MIDI monitor in the status bar
 {
 public:
     JuicySFAudioProcessorEditor(
@@ -44,7 +43,6 @@ public:
 
 private:
     void valueChanged (Value&) override;
-    void timerCallback() override; // TEMPORARY: refresh diagnostic MIDI monitor
 
     // keyboard follows the selected channel so you can audition the row you clicked
     void valueTreePropertyChanged (ValueTree&, const Identifier&) override;

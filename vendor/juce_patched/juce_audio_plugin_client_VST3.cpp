@@ -68,7 +68,6 @@ JUCE_BEGIN_NO_SANITIZE ("vptr")
 #include <juce_audio_processors_headless/format_types/juce_VST3Utilities.h>
 #include <juce_audio_processors_headless/format_types/juce_VST3Common.h>
 #include <juce_audio_plugin_client/VST3/juce_VST3ModuleInfo.h>
-#include "Vst3Diag.h" // JUICYSF RACK: temporary Cubase diagnostics
 #include "Vst3Units.h" // JUICYSF RACK: shared multitimbral unit structure
 
 #if JUCE_VST3_CAN_REPLACE_VST2 && ! JUCE_FORCE_USE_LEGACY_PARAM_IDS && ! JUCE_IGNORE_VST3_MISMATCHED_PARAMETER_ID_WARNING
@@ -1270,16 +1269,6 @@ public:
                                                     [[maybe_unused]] Vst::ParamID& resultID) override
     {
        #if JUCE_VST3_EMULATE_MIDI_CC_WITH_PARAMETERS
-        // JUICYSF RACK diagnostic: record what the host asks IMidiMapping about
-        juicysf::diag::midiMapCalls.fetch_add (1, std::memory_order_relaxed);
-        {
-            int prev = juicysf::diag::midiMapMaxCtrl.load (std::memory_order_relaxed);
-            while (midiControllerNumber > prev
-                   && ! juicysf::diag::midiMapMaxCtrl.compare_exchange_weak (prev, midiControllerNumber)) {}
-        }
-        if (midiControllerNumber == Vst::kCtrlProgramChange)
-            juicysf::diag::midiMapPcCalls.fetch_add (1, std::memory_order_relaxed);
-
         // JUICYSF RACK PATCH: route per-channel MIDI Program Change to that
         // channel's program parameter (progCh1..16). Stock JUCE reads past the
         // end of midiControllerToParameter (second dimension is kCountCtrlNumber
