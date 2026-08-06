@@ -1,119 +1,97 @@
-These are instructions for producing a Universal Binary on an M1 Mac.
+# Building JuicySF Rack on macOS
+
+These commands describe the locally verified developer build. They do not by themselves create an approved public release: minimum macOS, released architectures, signing identity, notarization, product identity, and licensing remain Beta 1 gates.
+
+## Requirements
+
+- CMake 3.15 or newer
+- Xcode Command Line Tools or Xcode with a C++17 compiler
+- JUCE exactly 8.0.14, installed as a CMake package
+- FluidSynth 2.x and pkg-config
+
+Example dependencies using Homebrew:
 
 ```bash
-git clone git@github.com:juce-framework/JUCE.git
+brew install cmake pkg-config fluid-synth
+```
+
+Install the pinned JUCE version to a prefix of your choice:
+
+```bash
+git clone https://github.com/juce-framework/JUCE.git
 cd JUCE
-git checkout 6.1.4
-cmake -B cmake-build-install -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$HOME/juicydeps"
-cmake --build cmake-build-install --target install
+git checkout 8.0.14
+cmake -S . -B cmake-build-install \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX="$HOME/juicydeps"
+cmake --build cmake-build-install --target install -j 8
+```
 
-# the brew distribution of fluidsynth is not suitable for static linking (it lacks a libfluidsynth.a)
-# but this is still useful because it will give us all of the dependencies, which will enable us to install our own fuidsynth
-brew install fluidsynth pkg-config
+## Debug build
 
-# install an Intel brew
-arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install.sh)"
-alias ibrew="arch -x86_64 /usr/local/bin/brew"
-# install Intel fluidsynth dependencies
-ibrew install fluidsynth
+From the JuicySF Rack repository:
 
-git clone git@github.com:FluidSynth/fluidsynth.git
-cd fluidsynth
-git checkout v2.2.4
-# https://github.com/FluidSynth/fluidsynth/blob/master/README.cmake.md
+```bash
+cmake -S . -B build \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_PREFIX_PATH="$HOME/juicydeps;/opt/homebrew" \
+  -DFLUIDSYNTH_LINK_STATIC=OFF \
+  -DJUICYSF_COPY_PLUGIN_AFTER_BUILD=OFF
+cmake --build build --config Debug -j 8
+ctest --test-dir build -C Debug --output-on-failure
+```
 
-# use my forked cmake with fixed support for FindPkgConfig _LINK_LIBRARIES:
-# https://gitlab.kitware.com/Birchlabs/cmake/-/merge_requests/1
-# ~/git/cmake/cmake-build/bin/cmake
-# or use your standard cmake, but grab the patched FindPkgConfig module from juicysfplugin repo:
-# -DCMAKE_MODULE_PATH="$HOME/git/juicysfplugin/cmake/Modules/" cmake
+Artifacts are written below `build/JuicySFPlugin_artefacts/Debug/`. They are not copied into plugin folders unless `JUICYSF_COPY_PLUGIN_AFTER_BUILD=ON` is explicitly selected.
 
-# we disable libinstpatch because it's hard to statically-link against it
-# - its cmake is not configured to statically-link against its own dependencies, or to produce a static binary
-# - it's not published on brew
-PKG_CONFIG_PATH="$(brew --prefix)/lib/pkgconfig" ~/git/cmake/cmake-build/bin/cmake -Bbuild -DCMAKE_INSTALL_PREFIX="$HOME/juicydeps" \
--DBUILD_SHARED_LIBS=off \
--Denable-portaudio=off \
--Denable-dbus=off \
--Denable-aufile=off \
--Denable-ipv6=off \
--Denable-jack=off \
--Denable-ladspa=off \
--Denable-libinstpatch=off \
--Denable-libsndfile=on \
--Denable-midishare=off \
--Denable-opensles=off \
--Denable-oboe=off \
--Denable-network=off \
--Denable-oss=off \
--Denable-dsound=off \
--Denable-wasapi=off \
--Denable-waveout=off \
--Denable-winmidi=off \
--Denable-sdl2=off \
--Denable-pkgconfig=on \
--Denable-pulseaudio=off \
--Denable-readline=off \
--Denable-threads=on \
--Denable-openmp=on \
--Denable-coreaudio=off \
--Denable-coremidi=off \
--Denable-framework=off \
--Denable-lash=off \
--Denable-alsa=off \
--Denable-systemd=off \
--DCMAKE_BUILD_TYPE=Release
-cmake --build build --target install
+## Portable Release build
 
-PKG_CONFIG_PATH="$(ibrew --prefix)/lib/pkgconfig" ~/git/cmake/cmake-build/bin/cmake -Bbuild -DCMAKE_INSTALL_PREFIX="$HOME/juicydeps_x86_64" \
--DBUILD_SHARED_LIBS=off \
--Denable-portaudio=off \
--Denable-dbus=off \
--Denable-aufile=off \
--Denable-ipv6=off \
--Denable-jack=off \
--Denable-ladspa=off \
--Denable-libinstpatch=off \
--Denable-libsndfile=on \
--Denable-midishare=off \
--Denable-opensles=off \
--Denable-oboe=off \
--Denable-network=off \
--Denable-oss=off \
--Denable-dsound=off \
--Denable-wasapi=off \
--Denable-waveout=off \
--Denable-winmidi=off \
--Denable-sdl2=off \
--Denable-pkgconfig=on \
--Denable-pulseaudio=off \
--Denable-readline=off \
--Denable-threads=on \
--Denable-openmp=on \
--Denable-coreaudio=off \
--Denable-coremidi=off \
--Denable-framework=off \
--Denable-lash=off \
--Denable-alsa=off \
--Denable-systemd=off \
--DCMAKE_OSX_ARCHITECTURES=x86_64 \
--DCMAKE_BUILD_TYPE=Release
-cmake --build build --target install
+Beta artifacts must not depend on a developer's Homebrew paths. With a FluidSynth pkg-config installation that exposes its static dependency closure:
 
-git clone git@github.com:Birch-san/juicysfplugin.git
-cd juicysfplugin
+```bash
+cmake -S . -B build-release \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_PREFIX_PATH="$HOME/juicydeps;/opt/homebrew" \
+  -DFLUIDSYNTH_LINK_STATIC=ON \
+  -DJUICYSF_COPY_PLUGIN_AFTER_BUILD=OFF \
+  -DJUICYSF_CODE_SIGN_IDENTITY="-"
+cmake --build build-release --config Release -j 8
+ctest --test-dir build-release -C Release --output-on-failure
+```
 
-# Simple version:
-PKG_CONFIG_PATH="$HOME/juicydeps/lib64/pkgconfig;$(brew --prefix)/lib/pkgconfig" cmake -B build -DCMAKE_PREFIX_PATH="$HOME/juicydeps;$(brew --prefix)" -DCMAKE_BUILD_TYPE=Release
+`-` produces an ad-hoc signature suitable for local testing. An approved Developer ID identity and notarization workflow are still required if the Beta distribution policy calls for them.
 
-# XCode generator + Universal Binary + codesigning + AUv3 + VST2 + auto-install to /Library/Audio/Plug-Ins + target lower OS
-PKG_CONFIG_PATH="$HOME/juicydeps/lib64/pkgconfig;$(brew --prefix)/lib/pkgconfig" cmake -B build -DCMAKE_PREFIX_PATH="$HOME/juicydeps;$(brew --prefix)" -DVST2_SDK_PATH="$HOME/SDKs/VST_SDK/VST2_SDK" -DVST_COPY_DIR="/Library/Audio/Plug-Ins/VST" -DVST3_COPY_DIR="/Library/Audio/Plug-Ins/VST3" -DAU_COPY_DIR="/Library/Audio/Plug-Ins/Components" '-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64' -DEXTRA_ARCH_PKG_CONFIG_PATH="$HOME/juicydeps_x86_64/lib64/pkgconfig;$(ibrew --prefix)/lib/pkgconfig" -GXcode -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY="Apple Development" -DCMAKE_XCODE_ATTRIBUTE_DEVELOPMENT_TEAM=TVU9P2GAL9 -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+The local test artifact built without `CMAKE_OSX_DEPLOYMENT_TARGET` inherited macOS 26.0 and must not be distributed as a compatible Beta. After Phase 0 approves the minimum OS and architecture list, add explicit `-DCMAKE_OSX_DEPLOYMENT_TARGET=<approved>` and `-DCMAKE_OSX_ARCHITECTURES=<approved>`, plus `-DJUICYSF_RELEASE_VALIDATION=ON`. Strict release validation deliberately fails when those values or static FluidSynth linkage are absent.
 
-# use external VST3 SDK:
-# -DVST2_SDK_PATH="$HOME/SDKs/VST_SDK/vst2sdk" -DVST3_SDK_PATH="$HOME/SDKs/VST_SDK/vst3sdk"
+## Artifact checks
 
-# build just one target, in Debug mode
-cmake --build build --target JuicySFPlugin_Standalone
-# build all targets, in Release mode
-cmake --build build --config Release -- -allowProvisioningUpdates
-````
+```bash
+AU="build-release/JuicySFPlugin_artefacts/Release/AU/JuicySF Rack.component"
+VST3="build-release/JuicySFPlugin_artefacts/Release/VST3/JuicySF Rack.vst3"
+
+codesign --verify --deep --strict --verbose=2 "$AU"
+codesign --verify --deep --strict --verbose=2 "$VST3"
+file "$AU/Contents/MacOS/JuicySF Rack"
+file "$VST3/Contents/MacOS/JuicySF Rack"
+otool -L "$AU/Contents/MacOS/JuicySF Rack"
+otool -L "$VST3/Contents/MacOS/JuicySF Rack"
+```
+
+Reject a release artifact if `otool -L` contains `/opt/homebrew`, `/usr/local`, a user home directory, the repository, or a build directory. Verify `LC_BUILD_VERSION`/deployment targets with `otool -l` after the minimum macOS decision is approved.
+
+## AU validation and local installation
+
+`auval` discovers installed Audio Units, so installing a candidate can replace a plugin used by existing projects. Back up or move any existing copy first, then copy the exact candidate to `~/Library/Audio/Plug-Ins/Components/` and run:
+
+```bash
+auval -v aumu Jsfr Blbs
+```
+
+Do not mark the milestone task complete until the exact packaged candidate passes. VST3 may be installed under `~/Library/Audio/Plug-Ins/VST3/` for host validation.
+
+## Architectures
+
+The locally verified 2026-08-05 build was `arm64`. A universal build can be requested with `-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"` only when compatible JUCE and static FluidSynth dependencies exist for both architectures. Universal support is not considered proven until `lipo -archs`, dependency inspection, tests, and host validation pass on both machines.
+
+## Optional targets
+
+Standalone is a QA target. VST2 is disabled by default and is not a Beta 1 format; enabling `JUICYSF_ENABLE_LEGACY_VST2` does not make it supported.

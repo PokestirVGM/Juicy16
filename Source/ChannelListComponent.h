@@ -22,7 +22,7 @@ public:
         AudioProcessorValueTreeState& valueTreeState,
         FluidSynthModel& fluidSynthModel
     );
-    ~ChannelListComponent();
+    ~ChannelListComponent() override;
 
     int getNumRows() override;
 
@@ -54,17 +54,13 @@ public:
 
     void resized() override;
 
-    virtual void valueTreePropertyChanged(ValueTree& treeWhosePropertyHasChanged,
-                                          const Identifier& property) override;
-    inline virtual void valueTreeChildAdded(ValueTree& parentTree,
-                                            ValueTree& childWhichHasBeenAdded) override {};
-    inline virtual void valueTreeChildRemoved(ValueTree& parentTree,
-                                              ValueTree& childWhichHasBeenRemoved,
-                                              int indexFromWhichChildWasRemoved) override {};
-    inline virtual void valueTreeChildOrderChanged(ValueTree& parentTreeWhoseChildrenHaveMoved,
-                                                   int oldIndex, int newIndex) override {};
-    inline virtual void valueTreeParentChanged(ValueTree& treeWhoseParentHasChanged) override {};
-    inline virtual void valueTreeRedirected(ValueTree& treeWhichHasBeenChanged) override {};
+    void valueTreePropertyChanged(ValueTree& treeWhosePropertyHasChanged,
+                                  const Identifier& property) override;
+    void valueTreeChildAdded(ValueTree&, ValueTree&) override {}
+    void valueTreeChildRemoved(ValueTree&, ValueTree&, int) override {}
+    void valueTreeChildOrderChanged(ValueTree&, int, int) override {}
+    void valueTreeParentChanged(ValueTree&) override {}
+    void valueTreeRedirected(ValueTree&) override {}
 
 private:
     // one cell's patch dropdown, bound to a MIDI channel (row)

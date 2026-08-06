@@ -1,79 +1,80 @@
 # JuicySF Rack
 
-JuicySF Rack is a **16-channel multitimbral General MIDI sound module**, built as a native Apple Silicon audio plugin. It's a fork of [Birch-san's juicysfplugin](https://github.com/Birch-san/juicysfplugin) — the original is a single-instrument soundfont player; this fork rebuilds it into a 16-channel rack modeled on hardware multitimbral modules (in the spirit of tools like Fruity LSD).
+JuicySF Rack is a 16-channel multitimbral DLS/SoundFont player inspired by the automatic patch-selection workflow of Fruity LSD. Load one `.dls`, `.sf2`, or `.sf3` bank, send a multichannel MIDI file to one plugin instance, and its Bank Select and Program Change events select instruments independently on MIDI channels 1–16. All channels mix to one stereo output.
 
-[JUCE](https://github.com/juce-framework/JUCE) is the framework. [FluidSynth](https://www.fluidsynth.org/) is the synthesis engine.
+The current development version is `0.5.0-beta.1`. It is a beta candidate under active validation, not yet an approved public release. The authoritative readiness checklist is [MILESTONE_PLAN.md](MILESTONE_PLAN.md).
 
-## The core idea
+## What is implemented
 
-You don't put notes on the track that holds this plugin. Instead:
+- Sixteen independent MIDI channels with per-channel bank, preset, and exposed sound-controller state.
+- Timestamped notes, controllers, Program Changes, pitch bends, pressure, and supported SysEx; events are applied at their sample offsets rather than at the beginning of every audio block.
+- General MIDI percussion default on channel 10 (FluidSynth bank 128), with melodic bank 0 on the other channels.
+- Automatic Program Change handling for game-rip MIDI playback, including later changes during a song.
+- GM, GS, and XG reset detection followed by immediate restoration of the plugin's current per-channel program and exposed controller state.
+- Full CC forwarding to FluidSynth. CC71, 72, 73, 74, 75, and 79 are also mirrored into the selected-channel controls and saved per-channel state.
+- Full unnormalized 14-bit pitch bend and MIDI RPN pitch-bend range handling through FluidSynth.
+- Transactional bank replacement: a failed replacement reports an error and leaves the previous working bank active.
+- Safe temporary repair of a narrow class of malformed DLS RIFF-size fields. The original file is never modified.
+- 7th-order FluidSynth interpolation, 512-voice polyphony, and host sample-rate tracking.
 
-1. Load JuicySF Rack **once**, as an instrument in your DAW.
-2. Route up to **16 separate MIDI sources** into it — one per MIDI channel (1–16). In FL Studio, for example, that's 16 "MIDI Out" tracks pointed at this plugin's port, each set to a different channel.
-3. Load a SoundFont or DLS bank. Each of the 16 channels gets its own instrument.
-4. **Incoming MIDI Program Change on a channel is authoritative** — it instantly selects that channel's instrument and updates the UI to match, exactly like a hardware GM module responding to a MIDI file. You can also assign instruments by hand per channel; manual picks are the fallback until a Program Change overrides them.
+## Formats and current validation status
 
-All 16 channels mix down to a single stereo output.
+| Platform | Format | Intended Beta 1 status | Current evidence |
+| --- | --- | --- | --- |
+| macOS | AU | Release format | Builds and passes strict signature/dependency checks locally; `auval` and DAW matrix remain required |
+| macOS | VST3 | Release format | Automated 16-channel VST3 unit/mapping smoke test passes; Cubase end-to-end retest remains required |
+| Windows | VST3 | Release format | Intended, but the legacy cross-build pipeline is not yet Beta-ready or host-validated |
+| Desktop | Standalone | Development/QA only | Built for local testing; not a primary release format |
+| Desktop | VST2 | Unsupported legacy option | Disabled by default and outside Beta 1 |
+
+Minimum operating systems, released architectures, product identity, and the JUCE licensing path are still owner decisions recorded as blockers in the milestone plan. Do not redistribute a Beta 1 artifact until those gates are resolved.
+
+## Using it with multichannel MIDI
+
+1. Insert one JuicySF Rack instrument instance.
+2. Load the DLS, SF2, or SF3 bank associated with the MIDI file.
+3. Route the original MIDI channels 1–16 to that instance without flattening them to channel 1.
+4. Start playback from the beginning so any reset, Bank Select, and Program Change setup events are delivered.
+
+Incoming MIDI patch events are authoritative. Manual row selections provide a starting assignment, but a later Program Change on that MIDI channel replaces it at the event's timestamp.
+
+Host routing is not hard-coded to FL Studio or Cubase. AU hosts can deliver normal channelized MIDI. VST3 hosts may use MIDI mapping or VST3 units/program parameters; JuicySF Rack implements both. Whether a particular DAW imports and routes a multichannel MIDI file correctly is host configuration and must be verified. See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
 ## Interface
 
-- **Channel list (1–16)**: one row per MIDI channel, each with its own **Patch Selection** dropdown — populated live from whatever SoundFont/DLS is loaded, flat and sorted by bank then preset. Pick a row to select it for editing; the row highlights and its ADSR/filter sliders load on the right.
-- **ADSR/filter sliders**: attack, decay, sustain, release, filter cutoff, and resonance for the selected channel (mapped to SoundFont-spec MIDI CCs 71–75/79). Centered at 64 = no change from the SoundFont's own settings, matching the standard MIDI/GS convention — turn up or down from there.
-- **On-screen keyboard**: follows whichever channel is selected, so you can audition an instrument directly. Lights up for MIDI arriving on any channel. Resizing is capped so the window can never stretch past the keyboard's own natural width.
-- **Status bar**: shows the build version, so it's always obvious whether a rebuilt plugin actually reloaded in your DAW.
+- The 16-row channel list selects a channel for editing and offers manual bank/preset selection.
+- Attack, decay, sustain, release, cutoff, and resonance edit MIDI sound controllers for the selected channel. Value 64 is neutral.
+- The keyboard auditions the selected channel and displays incoming note activity.
+- The status area reports the running version. Bank-load results are also stored in the model and exposed through the file control tooltip.
 
-## Formats
+## Building and testing
 
-- **AU** (Audio Unit) — the primary format on macOS (FL Studio, Logic, etc.). Delivers per-channel MIDI Program Change natively.
-- **VST3** — for Cubase (which supports neither AU nor, since Cubase 13, VST2) and Windows. VST3 has no per-channel Program Change *event*, so a host has to route it one of two ways, and JuicySF Rack supports both:
-  - Sixteen `Ch N Prog` parameters (0–127), automatable in any host, driven by MIDI Program Change via `IMidiMapping`.
-  - Sixteen VST3 **units** (one per MIDI channel) sharing one program list — the mechanism HALion-style multitimbral instruments use — implemented via JUCE's `VST3ClientExtensions` (`Source/VST3Multitimbral.cpp`), no JUCE source changes required for this part.
+- macOS: [building.macos.md](building.macos.md)
+- Windows status and intended path: [building.win32.md](building.win32.md)
+- VST3/Cubase architecture: [docs/VST3_MULTITIMBRAL_DESIGN.md](docs/VST3_MULTITIMBRAL_DESIGN.md)
+- Beta state compatibility: [docs/STATE_COMPATIBILITY.md](docs/STATE_COMPATIBILITY.md)
 
-  Getting Cubase working end-to-end also required fixing two real bugs in **stock JUCE's VST3 wrapper** (not this plugin's code): an out-of-bounds array read that returns a garbage parameter ID when a host asks where Program Change should go, and a timing hole where the wrapper reports "no program lists" to any host that queries unit structure before the plugin's internal component/controller connection completes — which some hosts (Cubase) do immediately and then cache forever. Both are fixed in a small vendored patch (`vendor/juce_patched/`, ~40 changed lines, diffable against the stock file) that CMake swaps in automatically when building the VST3 target — no manual step needed. AU/AUv3/Standalone are unaffected (they don't compile that file).
-- **Standalone** app — for testing without a DAW.
-- **VST2** — builds only if you supply a VST2 SDK (see [Building from source](#building-from-source-macos)); Steinberg no longer distributes it, so it's not bundled here.
-
-## SoundFont / DLS support
-
-Loads `.sf2`, `.sf3`, and `.dls`. DLS files exported by some tools (notably Awave Studio) carry malformed RIFF chunk sizes that strict parsers — including FluidSynth's — reject outright with an "early EOF" error, even though lenient players load them fine. JuicySF Rack detects this and **repairs the file automatically on load** (a corrected copy is used internally; your original file is never modified), so those DLS files just work.
-
-## Playback fidelity
-
-- 7th-order ("highest") sample interpolation.
-- 512-voice polyphony, so dense 16-channel material doesn't steal voices mid-note.
-- The synth's sample rate always tracks the host's actual sample rate.
-- SoundFont-spec CC71–79 modulators (filter/envelope) use the correct bipolar MIDI convention — a channel that's never touched those CCs behaves identically to plain FluidSynth defaults; there's no hidden coloration from CCs sitting at their spec-neutral value.
-- Self-heals from GM/GS/XG system-reset SysEx: FluidSynth resets every channel's program internally when it passes one through (game-rip MIDI files commonly carry one at tick 0), invisibly to the plugin's own state and the host's parameter cache. JuicySF Rack detects the reset and immediately re-asserts every channel's saved program, so it can't silently strip your channel assignments on replay.
-
-## Building from source (macOS)
-
-Requires JUCE (7.x/8.x) installed via CMake, and FluidSynth ≥ 2 available via pkg-config (Homebrew's `fluid-synth` works):
+The local automated gate is:
 
 ```bash
-brew install fluid-synth pkg-config
-
-git clone git@github.com:juce-framework/JUCE.git
-cd JUCE && git checkout 8.0.14
-cmake -B cmake-build-install -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$HOME/juicydeps"
-cmake --build cmake-build-install --target install
-
-cd /path/to/JuicySF-Rack
-cmake -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_OSX_ARCHITECTURES=arm64 \
-  -DCMAKE_PREFIX_PATH="$HOME/juicydeps;/opt/homebrew"
-cmake --build build --target JuicySFPlugin_Standalone JuicySFPlugin_AU JuicySFPlugin_VST3
+cmake --build build --config Debug
+ctest --test-dir build -C Debug --output-on-failure
 ```
 
-Built artifacts land in `build/JuicySFPlugin_artefacts/Debug/` (Standalone `.app`, AU `.component`) and auto-install to your user plugin folders (`COPY_PLUGIN_AFTER_BUILD` in `CMakeLists.txt`).
+It currently covers DLS repair/load, sample-offset rendering, mono/stereo behavior, 16-channel Program Change, reset chase, common CCs, exact pitch-bend values, RPN bend ranges, corrupt selected-channel state, transactional failed bank replacement, and the VST3 multitimbral contract.
 
-To also build the VST2 `.vst`, drop a VST2 SDK's `pluginterfaces/vst2.x/` headers into `VST2_SDK/` before configuring — CMake detects it automatically and adds the `JuicySFPlugin_VST` target.
+## Known limitations and open Beta gates
 
-For Windows cross-compilation, see `building.win32.md` and `win32.Dockerfile`.
+- One stereo output; no per-channel audio outputs.
+- A complete licensed SF2/SF3/DLS compatibility corpus is not yet present.
+- FL Studio, Cubase, Logic, another AU host, and another VST3 host still require candidate-specific manual validation.
+- Windows DLS support and clean-machine dependency behavior have not yet been proven.
+- The current local arm64 artifact inherits a macOS 26.0 deployment target from the toolchain and is not distributable as a broadly compatible Beta. An approved explicit minimum target and rebuild are required.
+- AU validation, universal/x86_64 decisions, notarization, and release packaging remain open.
+- Licensing and product-identity approval remain distribution blockers. The existing license files describe repository history but must not be treated as completed JUCE 8 release clearance.
 
-## Known limitations
+## Privacy and licenses
 
-- Single stereo output — all 16 channels mix down together; there's no per-channel audio-out routing.
-- VST2 requires supplying your own SDK.
+The plugin has no intentional runtime networking or telemetry. See [PRIVACY.txt](PRIVACY.txt).
 
-## Licenses
-
-Overall, JuicySF Rack is GPLv3, inheriting from the original juicysfplugin. See [licenses for all libraries and frameworks](licenses_of_dependencies/).
+See [LICENSE.txt](LICENSE.txt) and [licenses_of_dependencies](licenses_of_dependencies/) for the current repository notices. The final JUCE 8 licensing/distribution position is explicitly unresolved and must be approved before public Beta distribution.

@@ -21,7 +21,7 @@ public:
     FluidSynthModel(
         AudioProcessorValueTreeState& valueTreeState
         );
-     ~FluidSynthModel();
+    ~FluidSynthModel() override;
 
     void initialise();
 
@@ -40,6 +40,18 @@ public:
     // params consistent if `channel` happens to be the selected one.
     void setChannelProgram(int channel, int bank, int preset);
 
+    // Read-only engine diagnostics used by automated tests and future opt-in
+    // diagnostic reporting. Inputs are zero-based FluidSynth channel numbers.
+    bool getControllerValue(int channel, int controller, int& value) const;
+    bool getPitchBend(int channel, int& value) const;
+    bool getPitchWheelSensitivity(int channel, int& semitones) const;
+    bool getChannelProgram(int channel, int& bank, int& preset) const;
+    bool getLastDispatchedController(int channel, int controller, int& value, int& sample) const;
+    bool getLastDispatchedChannelPressure(int channel, int& value, int& sample) const;
+    bool getLastDispatchedKeyPressure(int channel, int key, int& value, int& sample) const;
+    String getFontLoadStatus() const;
+    String getLoadedFontPath() const;
+
     // invoked on the message thread after refreshBanks rebuilds the `banks` tree
     // (font load/unload). Used to push program names to the VST3 unit interface.
     std::function<void()> onBanksRefreshed;
@@ -54,19 +66,15 @@ public:
     void setSampleRate(float sampleRate);
     
     //==============================================================================
-    virtual void parameterChanged (const String& parameterID, float newValue) override;
+    void parameterChanged (const String& parameterID, float newValue) override;
     
-    virtual void valueTreePropertyChanged (ValueTree& treeWhosePropertyHasChanged,
-                                           const Identifier& property) override;
-    inline virtual void valueTreeChildAdded (ValueTree& parentTree,
-                                             ValueTree& childWhichHasBeenAdded) override {};
-    inline virtual void valueTreeChildRemoved (ValueTree& parentTree,
-                                               ValueTree& childWhichHasBeenRemoved,
-                                               int indexFromWhichChildWasRemoved) override {};
-    inline virtual void valueTreeChildOrderChanged (ValueTree& parentTreeWhoseChildrenHaveMoved,
-                                                    int oldIndex, int newIndex) override {};
-    inline virtual void valueTreeParentChanged (ValueTree& treeWhoseParentHasChanged) override {};
-    inline virtual void valueTreeRedirected (ValueTree& treeWhichHasBeenChanged) override {};
+    void valueTreePropertyChanged (ValueTree& treeWhosePropertyHasChanged,
+                                   const Identifier& property) override;
+    void valueTreeChildAdded (ValueTree&, ValueTree&) override {}
+    void valueTreeChildRemoved (ValueTree&, ValueTree&, int) override {}
+    void valueTreeChildOrderChanged (ValueTree&, int, int) override {}
+    void valueTreeParentChanged (ValueTree&) override {}
+    void valueTreeRedirected (ValueTree&) override {}
 
     // default value for a per-channel parameter: sound controllers are neutral at 64
     // (MIDI/GS convention), bank/preset default to 0. Shared with PluginProcessor.
@@ -82,15 +90,17 @@ private:
     // every parameter that is stored independently per MIDI channel
     static const StringArray perChannelParams;
 
-    // true while we're pushing a channel's saved values into the params during a
-    // channel switch; suppresses the save-back so we don't clobber the tree.
-    bool loadingChannel{false};
+    // True only on the thread synchronously mirroring engine/channel state into
+    // parameters. Thread-local storage avoids suppressing unrelated host automation
+    // arriving concurrently on the audio thread.
+    static thread_local bool mirroringParameters;
 
     void loadSelectedChannel(int newChannel);
     void saveParamToChannel(const String& parameterID, int value);
+    void dispatchMidiEvent(const MidiMessage& message, int samplePosition);
+    void renderSamples(AudioBuffer<float>& buffer, int startSample, int numSamples);
     // message thread: push every channel's saved program + sound CCs from
     // channelPrograms back into the synth (used after a system-reset SysEx).
-    void applyAllChannelStateToSynth();
     // mirror a channel's current program into its progChN parameter (guarded so
     // parameterChanged doesn't re-apply it to the synth). Message thread only.
     void syncProgParam(int ch, int preset);
@@ -106,21 +116,13 @@ private:
     // fix, and intercepting a CC is hazardous: host chase/reset machinery that
     // sprays controller resets (value 0) would silently reset every channel's
     // program.
-    void applyProgramChangeFromAudioThread(unsigned int midiCh, int program);
+    void applyProgramChangeFromAudioThread(int midiCh, int program);
     // per-channel program captured on the audio thread when a MIDI program
     // change arrives; consumed on the message thread in handleAsyncUpdate.
     std::atomic<int> midiBank[kNumChannels];
     std::atomic<int> midiPreset[kNumChannels];
     std::atomic<unsigned int> midiProgramDirtyMask{0}; // bit per channel
 
-    // Set when a GM/GS/XG system-reset SysEx passed through to FluidSynth (which
-    // resets every channel's program/bank/controllers INTERNALLY, invisible to our
-    // state tracking): handleAsyncUpdate then re-applies the authoritative
-    // channelPrograms state on the message thread. Game-rip MIDIs commonly carry a
-    // reset SysEx at tick 0 — combined with hosts deduplicating parameter sends,
-    // this silently reverted every channel to program 0 on replay while the UI
-    // (and the host) still believed the correct programs were active.
-    std::atomic<bool> needsFullResync{false};
     // last engine program per channel (RAW synth bank incl. offset + preset),
     // maintained at every program_select/change site; used for the immediate
     // audio-thread re-assert after a reset SysEx so the very next notes are correct.
@@ -135,6 +137,18 @@ private:
     // on the audio thread.
     std::atomic<int> midiCcValue[kNumChannels][kNumSoundCcs];
     std::atomic<unsigned int> midiCcDirtyMask{0}; // bit per channel
+    // Last value actually sent to the synth for the six exposed sound CCs. Reset
+    // SysEx restoration reads only these atomics, so it cannot race a newer MIDI
+    // event by consulting stale message-thread ValueTrees.
+    std::atomic<int> engineCc[kNumChannels][kNumSoundCcs];
+    // Exact input trace used by the offline conformance suite. These atomics are
+    // diagnostics only; synthesis behavior still comes from FluidSynth.
+    std::atomic<int> lastCcValue[kNumChannels][128];
+    std::atomic<int> lastCcSample[kNumChannels][128];
+    std::atomic<int> lastChannelPressureValue[kNumChannels];
+    std::atomic<int> lastChannelPressureSample[kNumChannels];
+    std::atomic<int> lastKeyPressureValue[kNumChannels][128];
+    std::atomic<int> lastKeyPressureSample[kNumChannels][128];
     static const fluid_midi_control_change ccIndexOrder[kNumSoundCcs];
     static int ccToIndex(int cc); // −1 if not one of ours
 
@@ -144,8 +158,14 @@ private:
     static const map<String, fluid_midi_control_change> paramToController;
 
     void refreshBanks();
+    void createSynth();
+    void reloadFontFromState();
 
     AudioProcessorValueTreeState& valueTreeState;
+    // Guards the transactional rollback of path/bookmark properties after a
+    // rejected replacement. Other ValueTree listeners still see the active path,
+    // but this model must not interpret that rollback as a new load request.
+    bool suppressFontStateReload{false};
 
     // https://stackoverflow.com/questions/38980315/is-stdunique-ptr-deletion-order-guaranteed
     // members are destroyed in reverse of the order they're declared
@@ -156,8 +176,11 @@ private:
 
     float currentSampleRate;
 
-    void unloadAndLoadFont(const String &absPath);
-    void loadFont(const String &absPath);
+    bool unloadAndLoadFont(const String& absPath);
+    void publishFontLoadResult(bool success,
+                               const String& requestedPath,
+                               const String& message,
+                               bool repaired);
 
     // Repairs malformed-but-playable DLS files (bad RIFF sizes from some exporters)
     // by writing a corrected copy to a temp file; returns that file, or an invalid
@@ -167,7 +190,7 @@ private:
     void clearRepairedTemp();
     juce::File repairedTempFile;
 
-    int sfont_id;
+    std::atomic<int> sfont_id;
     // the channel currently being edited in the UI. Written on the message thread
     // (loadSelectedChannel), read on the audio thread (processBlock) — atomic.
     std::atomic<unsigned int> channel;

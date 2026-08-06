@@ -31,6 +31,7 @@ JuicySFAudioProcessor::JuicySFAudioProcessor()
 , fluidSynthModel{valueTreeState}
 {
     MemoryBlock bookmarkBuffer;
+    MemoryBlock loadedBookmarkBuffer;
     valueTreeState.state.appendChild({ "uiState", {
             { "width", GuiConstants::minWidth },
             { "height", GuiConstants::defaultHeight },
@@ -39,6 +40,12 @@ JuicySFAudioProcessor::JuicySFAudioProcessor()
     valueTreeState.state.appendChild({ "soundFont", {
         { "path", "" },
         { "bookmark", std::move(bookmarkBuffer) },
+        { "loadStatus", "idle" },
+        { "loadMessage", "No bank loaded." },
+        { "lastAttemptedPath", "" },
+        { "loadedPath", "" },
+        { "loadedBookmark", std::move(loadedBookmarkBuffer) },
+        { "usedDlsRepair", false },
     }, {} }, nullptr);
     // no properties, no subtrees (yet)
     valueTreeState.state.appendChild({ "banks", {}, {} }, nullptr);
@@ -49,7 +56,7 @@ JuicySFAudioProcessor::JuicySFAudioProcessor()
     for (int i = 0; i < 16; i++) {
         channelPrograms.appendChild({ "ch", {
             { "num", i },
-            { "bank", 0 },
+            { "bank", i == 9 ? 128 : 0 },
             { "preset", 0 },
             { "attack", 64 },
             { "decay", 64 },
@@ -99,19 +106,26 @@ AudioProcessorValueTreeState::ParameterLayout JuicySFAudioProcessor::createParam
     // convention for CC70-79). 0/127 are full negative/positive modulation.
     const int neutral{64};
     AudioProcessorValueTreeState::ParameterLayout layout;
+    const auto intParam = [] (const String& id, const String& name,
+                              int minimum, int maximum, int defaultValue,
+                              const String& label) {
+        return make_unique<AudioParameterInt>(
+            juce::ParameterID{id, 0}, name, minimum, maximum, defaultValue,
+            juce::AudioParameterIntAttributes{}.withLabel(label));
+    };
 
     // global params: represent the currently-selected channel in the UI
     layout.add(
         // SoundFont 2.4 spec section 7.2: zero through 127, or 128.
-        make_unique<AudioParameterInt>("bank", "which bank is selected in the soundfont", MidiConstants::midiMinValue, 128, MidiConstants::midiMinValue, "Bank" ),
+        intParam("bank", "which bank is selected in the SoundFont", MidiConstants::midiMinValue, 128, MidiConstants::midiMinValue, "Bank"),
         // note: banks may be sparse, and lack a 0th preset. so defend against this.
-        make_unique<AudioParameterInt>("preset", "which patch (aka patch, program, instrument) is selected in the soundfont", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, MidiConstants::midiMinValue, "Preset" ),
-        make_unique<AudioParameterInt>("attack", "volume envelope attack time", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, neutral, "A" ),
-        make_unique<AudioParameterInt>("decay", "volume envelope decay time", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, neutral, "D" ),
-        make_unique<AudioParameterInt>("sustain", "volume envelope sustain level", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, neutral, "S" ),
-        make_unique<AudioParameterInt>("release", "volume envelope release time", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, neutral, "R" ),
-        make_unique<AudioParameterInt>("filterCutOff", "low-pass filter cut-off frequency", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, neutral, "Cut" ),
-        make_unique<AudioParameterInt>("filterResonance", "low-pass filter resonance", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, neutral, "Res" ));
+        intParam("preset", "which patch (program/instrument) is selected in the SoundFont", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, MidiConstants::midiMinValue, "Preset"),
+        intParam("attack", "volume envelope attack time", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, neutral, "A"),
+        intParam("decay", "volume envelope decay time", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, neutral, "D"),
+        intParam("sustain", "volume envelope sustain level", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, neutral, "S"),
+        intParam("release", "volume envelope release time", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, neutral, "R"),
+        intParam("filterCutOff", "low-pass filter cut-off frequency", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, neutral, "Cut"),
+        intParam("filterResonance", "low-pass filter resonance", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, neutral, "Res"));
 
     // Per-channel program parameters ("progCh1".."progCh16"), each in its own
     // parameter group. Two purposes:
@@ -126,11 +140,11 @@ AudioProcessorValueTreeState::ParameterLayout JuicySFAudioProcessor::createParam
             "Ch " + String(ch),
             "|",
             make_unique<DiscreteParameterInt>(
-                "progCh" + String(ch),
+                juce::ParameterID{"progCh" + String(ch), 0},
                 "program for MIDI channel " + String(ch),
                 MidiConstants::midiMinValue, MidiConstants::midiMaxValue,
                 MidiConstants::midiMinValue,
-                "Ch" + String(ch) + " Prog")));
+                juce::AudioParameterIntAttributes{}.withLabel("Ch" + String(ch) + " Prog"))));
     }
 
     return layout;
@@ -201,7 +215,7 @@ const String JuicySFAudioProcessor::getProgramName(int /*index*/)
     return {};
 }
 
-void JuicySFAudioProcessor::changeProgramName (int index, const String& newName)
+void JuicySFAudioProcessor::changeProgramName (int, const String&)
 {
 }
 
@@ -253,7 +267,8 @@ void JuicySFAudioProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&
     // This is here to avoid people getting screaming feedback
     // when they first compile a plugin, but obviously you don't need to keep
     // this code if your algorithm always overwrites all the output channels.
-    for (int i = getTotalNumInputChannels(); i < getTotalNumOutputChannels(); ++i)
+    for (int i = getTotalNumInputChannels();
+         i < juce::jmin(getTotalNumOutputChannels(), buffer.getNumChannels()); ++i)
         buffer.clear (i, 0, buffer.getNumSamples());
 
     // Now pass any incoming midi messages to our keyboard state object, and let it
@@ -293,7 +308,7 @@ void JuicySFAudioProcessor::getStateInformation (MemoryBlock& destData)
     XmlElement xml{"MYPLUGINSETTINGS"};
     // v2: sound-controller values are bipolar with 64 = neutral (older saves stored
     // unipolar values where 0 was neutral — those are not restored, see setStateInformation)
-    xml.setAttribute("stateVersion", 2);
+    xml.setAttribute("stateVersion", currentStateVersion);
 
     // Store the values of all our parameters, using their param ID as the XML attribute
     XmlElement* params{xml.createNewChildElement("params")};
@@ -347,7 +362,9 @@ void JuicySFAudioProcessor::getStateInformation (MemoryBlock& destData)
         }
     }
     
-    DEBUG_PRINT(xml.createDocument("",false,false));
+#if JUICYSF_TRACE_STATE
+    DEBUG_PRINT(xml.toString());
+#endif
     
     copyXmlToBinary(xml, destData);
 }
@@ -360,15 +377,29 @@ void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInByt
     shared_ptr<XmlElement> xmlState{getXmlFromBinary(data, sizeInBytes)};
 
     if (xmlState.get() != nullptr) {
-        DEBUG_PRINT(xmlState->createDocument("",false,false));
+#if JUICYSF_TRACE_STATE
+        DEBUG_PRINT(xmlState->toString());
+#endif
         // make sure that it's actually our type of XML object..
         if (xmlState->hasTagName(valueTreeState.state.getType())) {
+            const int stateVersion{xmlState->getIntAttribute("stateVersion", 1)};
+            if (stateVersion > currentStateVersion) {
+                ValueTree fontState{valueTreeState.state.getChildWithName("soundFont")};
+                fontState.setProperty("loadStatus", "error", nullptr);
+                fontState.setProperty(
+                    "loadMessage",
+                    "This project uses JuicySF state version " + String(stateVersion)
+                        + "; this build supports up to version "
+                        + String(currentStateVersion) + ". No newer state was applied.",
+                    nullptr);
+                return;
+            }
             // Pre-v2 saves stored sound-controller values with unipolar semantics
             // (0 = neutral); v2 is bipolar (64 = neutral). Restoring old values
             // unchanged would apply full negative modulation, so old saves keep
             // their bank/preset assignments but reset the six sound controllers
             // to the new neutral.
-            const bool restoreSoundCtrls{xmlState->getIntAttribute("stateVersion", 1) >= 2};
+            const bool restoreSoundCtrls{stateVersion >= 2};
             const StringArray soundCtrlParams{ "attack", "decay", "sustain",
                                                "release", "filterCutOff", "filterResonance" };
             // Restore per-channel assignments BEFORE the soundFont, so that the
@@ -385,7 +416,13 @@ void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInByt
                                                      "sustain", "release", "filterCutOff", "filterResonance" }) {
                                 if (!restoreSoundCtrls && soundCtrlParams.contains(p))
                                     continue;
-                                ch.setProperty(p, chElement->getIntAttribute(p, ch.getProperty(p, 0)), nullptr);
+                                const int maximum{p == "bank" ? 128 : MidiConstants::midiMaxValue};
+                                const int restored{chElement->getIntAttribute(
+                                    p, static_cast<int>(ch.getProperty(p, 0)))};
+                                ch.setProperty(
+                                    p,
+                                    juce::jlimit(MidiConstants::midiMinValue, maximum, restored),
+                                    nullptr);
                             }
                         }
                     }
@@ -405,7 +442,7 @@ void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInByt
                     }
                     {
                         Value value{tree.getPropertyAsValue("selectedChannel", nullptr)};
-                        value = xmlElement->getIntAttribute("selectedChannel", 1);
+                        value = juce::jlimit(1, 16, xmlElement->getIntAttribute("selectedChannel", 1));
                     }
                 }
             }

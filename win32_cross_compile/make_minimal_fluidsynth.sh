@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 cd fluidsynth
 
-# declare -a ARCHS=("x64" "x86" "arm64")
-declare -a ARCHS=("x64" "x86")
+declare -a ARCHS=("x64")
 declare -A TOOLCHAINS=( [x64]=x86_64 [x86]=i686 [arm64]=aarch64 )
 declare -A REPOS=( [x64]=clang64 [x86]=clang32 [arm64]=clangarm64 )
  

@@ -54,7 +54,7 @@ public:
         AudioProcessorValueTreeState& valueTreeState
         // FluidSynthModel& fluidSynthModel
     );
-    ~FilePicker();
+    ~FilePicker() override;
 
     void resized() override;
     void paint (Graphics& g) override;
@@ -62,17 +62,13 @@ public:
     void setDisplayedFilePath(const String&);
     
 
-    virtual void valueTreePropertyChanged (ValueTree& treeWhosePropertyHasChanged,
-                                           const Identifier& property) override;
-    inline virtual void valueTreeChildAdded (ValueTree& parentTree,
-                                             ValueTree& childWhichHasBeenAdded) override {};
-    inline virtual void valueTreeChildRemoved (ValueTree& parentTree,
-                                               ValueTree& childWhichHasBeenRemoved,
-                                               int indexFromWhichChildWasRemoved) override {};
-    inline virtual void valueTreeChildOrderChanged (ValueTree& parentTreeWhoseChildrenHaveMoved,
-                                                    int oldIndex, int newIndex) override {};
-    inline virtual void valueTreeParentChanged (ValueTree& treeWhoseParentHasChanged) override {};
-    inline virtual void valueTreeRedirected (ValueTree& treeWhichHasBeenChanged) override {};
+    void valueTreePropertyChanged (ValueTree& treeWhosePropertyHasChanged,
+                                   const Identifier& property) override;
+    void valueTreeChildAdded (ValueTree&, ValueTree&) override {}
+    void valueTreeChildRemoved (ValueTree&, ValueTree&, int) override {}
+    void valueTreeChildOrderChanged (ValueTree&, int, int) override {}
+    void valueTreeParentChanged (ValueTree&) override {}
+    void valueTreeRedirected (ValueTree&) override {}
 private:
     // declared before fileChooser so it outlives it: members destruct in reverse
     // declaration order, and fileChooser must not hold a dangling LookAndFeel*.

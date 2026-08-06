@@ -59,12 +59,12 @@ void ChannelListComponent::PatchCell::resized() {
 
 //==============================================================================
 ChannelListComponent::ChannelListComponent(
-    AudioProcessorValueTreeState& valueTreeState,
-    FluidSynthModel& fluidSynthModel
+    AudioProcessorValueTreeState& state,
+    FluidSynthModel& model
 )
-: valueTreeState{valueTreeState}
-, fluidSynthModel{fluidSynthModel}
-, font{14.0f}
+: valueTreeState{state}
+, fluidSynthModel{model}
+, font{juce::FontOptions{14.0f}}
 {
     rebuildPatchList();
 

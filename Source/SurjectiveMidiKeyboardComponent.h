@@ -87,7 +87,7 @@ public:
             Orientation orientation);
 
     /** Destructor. */
-    ~SurjectiveMidiKeyboardComponent();
+    ~SurjectiveMidiKeyboardComponent() override;
 
     //==============================================================================
     /** Changes the velocity used in midi note-on messages that are triggered by clicking
@@ -416,7 +416,7 @@ private:
     int rangeStart, rangeEnd;
     float firstKey;
     bool canScroll, useMousePositionForVelocity, shouldCheckMousePos;
-    ScopedPointer<Button> scrollDown, scrollUp;
+    std::unique_ptr<Button> scrollDown, scrollUp;
 
     typedef multimap<int, KeyPress> DegreeToAscii;
     DegreeToAscii degreeToAsciis;

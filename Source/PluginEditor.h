@@ -32,7 +32,7 @@ public:
       JuicySFAudioProcessor&,
       AudioProcessorValueTreeState& valueTreeState
       );
-    ~JuicySFAudioProcessorEditor();
+    ~JuicySFAudioProcessorEditor() override;
 
     //==============================================================================
     void paint (Graphics&) override;
@@ -52,10 +52,7 @@ private:
     inline void valueTreeParentChanged (ValueTree&) override {}
     inline void valueTreeRedirected (ValueTree&) override {}
     void syncKeyboardChannel();
-
-    // This reference is provided as a quick way for your editor to
-    // access the processor object that created it.
-    JuicySFAudioProcessor& processor;
+    void syncStatusLabel();
 
     AudioProcessorValueTreeState& valueTreeState;
 
@@ -69,10 +66,10 @@ private:
     FilePicker filePicker;
     SlidersComponent slidersComponent;
 
-    // status bar: shows the build version, so it's obvious when a new build has loaded
+    // status bar: build version plus the latest bank-load result
     Label statusLabel;
 
-    bool focusInitialized;
+    bool focusInitialized{false};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (JuicySFAudioProcessorEditor)
 };

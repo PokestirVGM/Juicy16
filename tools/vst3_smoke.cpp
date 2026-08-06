@@ -125,9 +125,26 @@ int main (int argc, char** argv) {
                     early->getUnitCount(), early->getProgramListCount());
             CHECK (early->getUnitCount() == 17,
                    "PRE-CONNECT unit count is 17 (host cache sees the real structure)");
-            Vst::UnitID uid = -1;
-            CHECK (early->getUnitByBus (Vst::MediaTypes::kEvent, Vst::BusDirections::kInput, 0, 4, uid) == kResultTrue
-                   && uid == expectedUnitId (4), "PRE-CONNECT getUnitByBus works");
+            Vst::ProgramListInfo earlyList{};
+            CHECK (early->getProgramListCount() == 1
+                       && early->getProgramListInfo (0, earlyList) == kResultTrue
+                       && earlyList.programCount == 128,
+                   "PRE-CONNECT shared 128-entry program list is available");
+            bool earlyUnitsOk = true;
+            for (int ch = 0; ch < 16; ++ch) {
+                Vst::UnitInfo info{};
+                Vst::UnitID uid = -1;
+                earlyUnitsOk = earlyUnitsOk
+                    && early->getUnitInfo (ch + 1, info) == kResultTrue
+                    && info.id == expectedUnitId (ch)
+                    && info.programListId == earlyList.id
+                    && early->getUnitByBus (
+                           Vst::MediaTypes::kEvent, Vst::BusDirections::kInput,
+                           0, static_cast<int32> (ch), uid) == kResultTrue
+                    && uid == expectedUnitId (ch);
+            }
+            CHECK (earlyUnitsOk,
+                   "PRE-CONNECT all 16 channel units and bus mappings are stable");
             early->release();
         }
     }

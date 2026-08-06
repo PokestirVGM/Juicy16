@@ -19,6 +19,7 @@
 #include <vector>
 #include <filesystem>
 #include <fstream>
+#include <random>
 
 namespace fs = std::filesystem;
 using juicysf::repairDlsImage;
@@ -80,11 +81,56 @@ static void unitTests() {
         bool changed = repairDlsImage(v.data(), v.size());
         CHECK(changed && get32(v, 4) == v.size() - 8, "oversized outer RIFF: clamped to file size");
     }
+    { // an undersized outer RIFF may be followed by intentional data: refuse it
+        auto v = makeDls(false, false); put32(v, 4, 12); auto before = v;
+        CHECK(!repairDlsImage(v.data(), v.size()) && v == before,
+              "undersized outer RIFF: unchanged (ambiguous trailing data)");
+    }
+    { // odd-sized RIFF chunks include one byte of alignment padding
+        std::vector<uint8_t> v(24, 0);
+        memcpy(&v[0], "RIFF", 4); put32(v, 4, 16); memcpy(&v[8], "DLS ", 4);
+        memcpy(&v[12], "vers", 4); put32(v, 16, 3);
+        v[20] = 1; v[21] = 2; v[22] = 3; v[23] = 0;
+        auto before = v;
+        CHECK(!repairDlsImage(v.data(), v.size()) && v == before,
+              "odd-byte chunk padding: parsed without modification");
+    }
+    { // no preceding complete chunk means there is no safe repair target
+        auto v = makeDls(false, false); put32(v, 16, UINT32_MAX); auto before = v;
+        CHECK(!repairDlsImage(v.data(), v.size()) && v == before,
+              "oversized first chunk: safely refused without 32-bit overflow");
+    }
     { // truncated: file cut mid-chunk (first chunk oversized) -> only outer clamp is possible
         auto v = makeDls(false, false);
         put32(v, 16, 4000); // colh claims 4000 bytes
         repairDlsImage(v.data(), v.size());
         CHECK(get32(v, 4) == v.size() - 8, "truncated-mid-first-chunk: outer size still sane");
+    }
+    { // deterministic malformed-input stress/property check
+        std::mt19937 rng{0x4a534652u};
+        bool stable = true;
+        for (int iteration = 0; iteration < 5000 && stable; ++iteration) {
+            const size_t size{12u + (rng() % 500u)};
+            std::vector<uint8_t> v(size);
+            for (auto& byte : v) byte = static_cast<uint8_t>(rng());
+            memcpy(&v[0], "RIFF", 4); memcpy(&v[8], "DLS ", 4);
+            repairDlsImage(v.data(), v.size());
+            const auto once{v};
+            stable = !repairDlsImage(v.data(), v.size()) && v == once;
+        }
+        CHECK(stable, "5000 malformed DLS images: memory-safe and idempotent");
+    }
+    { // the same stress must never touch non-DLS data
+        std::mt19937 rng{0x53463233u};
+        bool untouched = true;
+        for (int iteration = 0; iteration < 1000 && untouched; ++iteration) {
+            std::vector<uint8_t> v(12u + (rng() % 256u));
+            for (auto& byte : v) byte = static_cast<uint8_t>(rng());
+            memcpy(&v[0], "RIFF", 4); memcpy(&v[8], "sfbk", 4);
+            const auto before{v};
+            untouched = !repairDlsImage(v.data(), v.size()) && v == before;
+        }
+        CHECK(untouched, "1000 non-DLS RIFF images: byte-identical");
     }
 }
 

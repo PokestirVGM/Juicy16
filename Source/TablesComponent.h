@@ -14,15 +14,13 @@ class TablesComponent : public Component
 {
 public:
     TablesComponent(
-        AudioProcessorValueTreeState& valueTreeState,
-        FluidSynthModel& fluidSynthModel
+        AudioProcessorValueTreeState& state,
+        FluidSynthModel& model
     );
 
     void resized() override;
 
 private:
-    AudioProcessorValueTreeState& valueTreeState;
-
     ChannelListComponent channelList;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TablesComponent)

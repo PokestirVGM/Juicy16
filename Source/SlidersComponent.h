@@ -10,9 +10,9 @@ class SlidersComponent : public Component
 {
 public:
     SlidersComponent(
-        AudioProcessorValueTreeState& valueTreeState,
-        FluidSynthModel& fluidSynthModel);
-    ~SlidersComponent();
+        AudioProcessorValueTreeState& state,
+        FluidSynthModel& model);
+    ~SlidersComponent() override;
 
     void resized() override;
 
@@ -23,7 +23,6 @@ public:
 private:
     std::function<void()> makeSliderListener(Slider& slider, int controller);
 
-    AudioProcessorValueTreeState& valueTreeState;
     FluidSynthModel& fluidSynthModel;
 
     GroupComponent envelopeGroup;

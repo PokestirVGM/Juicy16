@@ -50,7 +50,7 @@ void FolderIconButton::paintButton(Graphics& g, bool isMouseOverButton, bool isB
 }
 
 FilePicker::FilePicker(
-    AudioProcessorValueTreeState& valueTreeState
+    AudioProcessorValueTreeState& state
     // FluidSynthModel& fluidSynthModel
 )
 : fileChooser{
@@ -62,7 +62,7 @@ FilePicker::FilePicker(
     "*.sf2;*.sf3;*.dls",
     String(),
     "Select a SoundFont or DLS file to load."}
-, valueTreeState{valueTreeState}
+, valueTreeState{state}
 // , fluidSynthModel{fluidSynthModel}
 // , currentPath{}
 #if JUCE_MAC || JUCE_IOS
@@ -128,21 +128,26 @@ void FilePicker::filenameComponentChanged (FilenameComponent*) {
         Value value{valueTreeState.state.getChildWithName("soundFont").getPropertyAsValue("bookmark", nullptr)};
         var bookmarkVar{static_cast<const void*>(cfDataBytePtr), static_cast<size_t>(cfDataByteLength)};
         value.setValue(bookmarkVar);
+    } else {
+        // Clear a bookmark left by the previously selected file. This triggers the
+        // model's path fallback instead of waiting forever for a bookmark update.
+        MemoryBlock emptyBookmark;
+        Value value{valueTreeState.state.getChildWithName("soundFont").getPropertyAsValue("bookmark", nullptr)};
+        value.setValue(var{std::move(emptyBookmark)});
     }
+    if (cfError != nullptr)
+        CFRelease(cfError);
 #endif
 }
 
 void FilePicker::valueTreePropertyChanged(ValueTree& treeWhosePropertyHasChanged,
                                                const Identifier& property) {
     if (treeWhosePropertyHasChanged.getType() == StringRef("soundFont")) {
-    // if (&treeWhosePropertyHasChanged == &valueTree) {
         if (property == StringRef("path")) {
             String soundFontPath = treeWhosePropertyHasChanged.getProperty("path", "");
-            DEBUG_PRINT(soundFontPath);
             setDisplayedFilePath(soundFontPath);
-            // if (soundFontPath.isNotEmpty()) {
-            //     loadFont(soundFontPath);
-            // }
+        } else if (property == StringRef("loadMessage")) {
+            fileChooser.setTooltip(treeWhosePropertyHasChanged.getProperty("loadMessage").toString());
         }
     }
 }
@@ -151,7 +156,7 @@ void FilePicker::setDisplayedFilePath(const String& path) {
      if (!shouldChangeDisplayedFilePath(path)) {
          return;
      }
-    // currentPath = path;
+    currentPath = path;
     fileChooser.setCurrentFile(File(path), true, dontSendNotification);
 }
 

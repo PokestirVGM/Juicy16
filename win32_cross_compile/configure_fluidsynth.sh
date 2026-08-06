@@ -7,8 +7,7 @@ cd fluidsynth
 if test -n "$1"; then
   declare -a ARCHS=("$1")
 else
-  # declare -a ARCHS=("x64" "x86" "arm64")
-  declare -a ARCHS=("x64" "x86")
+  declare -a ARCHS=("x64")
 fi
 
 declare -A TOOLCHAINS=( [x64]=x86_64 [x86]=i686 [arm64]=aarch64 )
@@ -33,6 +32,7 @@ for ARCH in ${ARCHS[@]}; do
   # which can be installed by drag-and-drop).
   PKG_CONFIG_PATH="/$REPO/lib/pkgconfig" cmake -B"$BUILD" -DCMAKE_INSTALL_PREFIX="/$REPO" \
 -DBUILD_SHARED_LIBS=off \
+-Dosal=cpp11 \
 -Denable-portaudio=off \
 -Denable-dbus=off \
 -Denable-aufile=off \

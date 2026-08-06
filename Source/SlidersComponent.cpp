@@ -23,7 +23,7 @@ std::function<void()> SlidersComponent::makeSliderListener(Slider& slider, int c
         // s << slider.getComponentID() << ", controller " << controller << ", value " << slider.getValue() << ", xmlReleaseValue " << value;
         // DEBUG_PRINT(s);
 //        slider.setValue(slider.getValue(), NotificationType::dontSendNotification);
-        fluidSynthModel.setControllerValue(controller, slider.getValue());
+        fluidSynthModel.setControllerValue(controller, juce::roundToInt(slider.getValue()));
     };
 }
 
@@ -69,23 +69,23 @@ void SlidersComponent::resized() {
 }
 
 void SlidersComponent::acceptMidiControlEvent(int controller, int value) {
-    switch(static_cast<fluid_midi_control_change>(controller)) {
-        case SOUND_CTRL2: // MIDI CC 71 Timbre/Harmonic Intensity (filter resonance)
+    switch(controller) {
+        case static_cast<int>(SOUND_CTRL2): // MIDI CC 71 Timbre/Harmonic Intensity (filter resonance)
             filterResonanceSlider.setValue(value, NotificationType::dontSendNotification);
             break;
-        case SOUND_CTRL3: // MIDI CC 72 Release time
+        case static_cast<int>(SOUND_CTRL3): // MIDI CC 72 Release time
             releaseSlider.setValue(value, NotificationType::dontSendNotification);
             break;
-        case SOUND_CTRL4: // MIDI CC 73 Attack time
+        case static_cast<int>(SOUND_CTRL4): // MIDI CC 73 Attack time
             attackSlider.setValue(value, NotificationType::dontSendNotification);
             break;
-        case SOUND_CTRL5: // MIDI CC 74 Brightness (cutoff frequency, FILTERFC)
+        case static_cast<int>(SOUND_CTRL5): // MIDI CC 74 Brightness (cutoff frequency, FILTERFC)
             filterCutOffSlider.setValue(value, NotificationType::dontSendNotification);
             break;
-        case SOUND_CTRL6: // MIDI CC 75 Decay Time
+        case static_cast<int>(SOUND_CTRL6): // MIDI CC 75 Decay Time
             decaySlider.setValue(value, NotificationType::dontSendNotification);
             break;
-        case SOUND_CTRL10: // MIDI CC 79 undefined
+        case static_cast<int>(SOUND_CTRL10): // MIDI CC 79 undefined
             sustainSlider.setValue(value, NotificationType::dontSendNotification);
             break;
         default:
@@ -94,10 +94,9 @@ void SlidersComponent::acceptMidiControlEvent(int controller, int value) {
 }
 
 SlidersComponent::SlidersComponent(
-    AudioProcessorValueTreeState& valueTreeState,
-    FluidSynthModel& fluidSynthModel)
-: valueTreeState{valueTreeState}
-, fluidSynthModel{fluidSynthModel}
+    AudioProcessorValueTreeState& state,
+    FluidSynthModel& model)
+: fluidSynthModel{model}
 , envelopeGroup{"envelopeGroup", "Envelope"}
 , filterGroup{"filterGroup", "Filter"}
 {
@@ -110,37 +109,37 @@ SlidersComponent::SlidersComponent(
     attackSlider.setRange(rangeMin, rangeMax, rangeStep);
     attackSlider.onDragEnd = makeSliderListener(attackSlider, static_cast<int>(SOUND_CTRL4));
     attackSlider.setTextBoxStyle(Slider::TextBoxBelow, true, attackSlider.getTextBoxWidth(), attackSlider.getTextBoxHeight());
-    attackSliderAttachment = make_unique<SliderAttachment>(valueTreeState, "attack", attackSlider);
+    attackSliderAttachment = make_unique<SliderAttachment>(state, "attack", attackSlider);
 
     decaySlider.setSliderStyle(style);
     decaySlider.setRange(rangeMin, rangeMax, rangeStep);
     decaySlider.onDragEnd = makeSliderListener(decaySlider, static_cast<int>(SOUND_CTRL6));
     decaySlider.setTextBoxStyle(Slider::TextBoxBelow, true, decaySlider.getTextBoxWidth(), decaySlider.getTextBoxHeight());
-    decaySliderAttachment = make_unique<SliderAttachment>(valueTreeState, "decay", decaySlider);
+    decaySliderAttachment = make_unique<SliderAttachment>(state, "decay", decaySlider);
 
     sustainSlider.setSliderStyle(style);
     sustainSlider.setRange(rangeMin, rangeMax, rangeStep);
     sustainSlider.onDragEnd = makeSliderListener(sustainSlider, static_cast<int>(SOUND_CTRL10));
     sustainSlider.setTextBoxStyle(Slider::TextBoxBelow, true, sustainSlider.getTextBoxWidth(), sustainSlider.getTextBoxHeight());
-    sustainSliderAttachment = make_unique<SliderAttachment>(valueTreeState, "sustain", sustainSlider);
+    sustainSliderAttachment = make_unique<SliderAttachment>(state, "sustain", sustainSlider);
 
     releaseSlider.setSliderStyle(style);
     releaseSlider.setRange(rangeMin, rangeMax, rangeStep);
     releaseSlider.onDragEnd = makeSliderListener(releaseSlider, static_cast<int>(SOUND_CTRL3));
     releaseSlider.setTextBoxStyle(Slider::TextBoxBelow, true, releaseSlider.getTextBoxWidth(), releaseSlider.getTextBoxHeight());
-    releaseSliderAttachment = make_unique<SliderAttachment>(valueTreeState, "release", releaseSlider);
+    releaseSliderAttachment = make_unique<SliderAttachment>(state, "release", releaseSlider);
 
     filterCutOffSlider.setSliderStyle(style);
     filterCutOffSlider.setRange(rangeMin, rangeMax, rangeStep);
     filterCutOffSlider.onDragEnd = makeSliderListener(filterCutOffSlider, static_cast<int>(SOUND_CTRL5));
     filterCutOffSlider.setTextBoxStyle(Slider::TextBoxBelow, true, filterCutOffSlider.getTextBoxWidth(), filterCutOffSlider.getTextBoxHeight());
-    filterCutOffSliderAttachment = make_unique<SliderAttachment>(valueTreeState, "filterCutOff", filterCutOffSlider);
+    filterCutOffSliderAttachment = make_unique<SliderAttachment>(state, "filterCutOff", filterCutOffSlider);
 
     filterResonanceSlider.setSliderStyle(style);
     filterResonanceSlider.setRange(rangeMin, rangeMax, rangeStep);
     filterResonanceSlider.onDragEnd = makeSliderListener(filterResonanceSlider, static_cast<int>(SOUND_CTRL2));
     filterResonanceSlider.setTextBoxStyle(Slider::TextBoxBelow, true, filterResonanceSlider.getTextBoxWidth(), filterResonanceSlider.getTextBoxHeight());
-    filterResonanceSliderAttachment = make_unique<SliderAttachment>(valueTreeState, "filterResonance", filterResonanceSlider);
+    filterResonanceSliderAttachment = make_unique<SliderAttachment>(state, "filterResonance", filterResonanceSlider);
 
     addAndMakeVisible(attackSlider);
     addAndMakeVisible(decaySlider);

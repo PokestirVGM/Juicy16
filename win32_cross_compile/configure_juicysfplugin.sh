@@ -3,8 +3,7 @@
 if test -n "$1"; then
   declare -a ARCHS=("$1")
 else
-  # declare -a ARCHS=("x64" "x86" "arm64")
-  declare -a ARCHS=("x64" "x86")
+  declare -a ARCHS=("x64")
 fi
 
 declare -A TOOLCHAINS=( [x64]=x86_64 [x86]=i686 [arm64]=aarch64 )
@@ -39,15 +38,6 @@ do
   UIA_DEFINES="$UIA_DEFINES -D${UIA_CONST}=\"(${UIA_CONSTS[$UIA_CONST]})\""
 done
 
-TEST_DIR=/VST2_SDK/pluginterfaces
-if [ -d "$TEST_DIR" ]; then
-  echo "$TEST_DIR found; enabling VST2 build"
-  VST2_OPTION='-DVST2_SDK_PATH=/VST2_SDK'
-else
-  echo "$TEST_DIR not found found; disabling VST2 build"
-  VST2_OPTION=''
-fi
- 
 for ARCH in ${ARCHS[@]}; do
   echo "arch: $ARCH"
 
@@ -88,7 +78,9 @@ for ARCH in ${ARCHS[@]}; do
 -DCMAKE_EXE_LINKER_FLAGS="$LINKER_FLAGS" \
 -DCMAKE_MODULE_LINKER_FLAGS="$LINKER_FLAGS" \
 -DCMAKE_INSTALL_PREFIX="/$REPO" \
-"$VST2_OPTION" \
+-DJUICYSF_ENABLE_LEGACY_VST2=OFF \
+-DFLUIDSYNTH_LINK_STATIC=ON \
+-DJUICYSF_COPY_PLUGIN_AFTER_BUILD=OFF \
 -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
 -DCMAKE_CXX_FLAGS="$CMAKE_CXX_FLAGS" \
 -DCMAKE_BUILD_TYPE=Release

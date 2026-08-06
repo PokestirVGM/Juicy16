@@ -29,7 +29,7 @@ class JuicySFAudioProcessor  : public AudioProcessor
 public:
     //==============================================================================
     JuicySFAudioProcessor();
-    ~JuicySFAudioProcessor();
+    ~JuicySFAudioProcessor() override;
 
     //==============================================================================
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
@@ -74,6 +74,7 @@ public:
     MidiKeyboardState keyboardState;
 
 private:
+    static constexpr int currentStateVersion{2};
     void initialiseSynth();
 
     AudioProcessorValueTreeState valueTreeState;

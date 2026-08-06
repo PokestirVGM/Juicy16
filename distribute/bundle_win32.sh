@@ -1,81 +1,53 @@
 #!/usr/bin/env bash
-# ./bundle_win32.sh 0.2.0
 
-set -eo pipefail
-DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+# Historical Docker artifact bundler. This is deterministic, VST3-only staging,
+# but the resulting Windows build remains unsupported until building.win32.md's
+# clean-machine and host/font matrix is complete.
+set -euo pipefail
 
-OUT="$DIR/out"
-mkdir -p "$OUT"
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+REPO_DIR=$(cd -- "$SCRIPT_DIR/.." && pwd)
+VERSION=${1:-}
 
-VERSION="$1"
+if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+  echo "usage: $0 <semver, for example 0.5.0-beta.1>" >&2
+  exit 2
+fi
 
-# x86 build fails in JUCE 6.1.5; problem compiling UUIDGetter
-# https://gist.github.com/Birch-san/a36b10155e51bd814ecc7109501e1e64
-# declare -a ARCHS=("x64" "x86")
-declare -a ARCHS=("x64")
+PROJECT_VERSION=$(sed -nE 's/^project\(JUICY_SF_RACK VERSION ([0-9]+\.[0-9]+\.[0-9]+)\)$/\1/p' "$REPO_DIR/CMakeLists.txt")
+PRERELEASE=$(sed -nE 's/^set\(JUICYSF_PRERELEASE_LABEL "([^"]+)" CACHE STRING$/\1/p' "$REPO_DIR/CMakeLists.txt")
+CANONICAL_VERSION=$PROJECT_VERSION
+if [[ -n $PRERELEASE ]]; then
+  CANONICAL_VERSION="$CANONICAL_VERSION-$PRERELEASE"
+fi
+if [[ $VERSION != "$CANONICAL_VERSION" ]]; then
+  echo "version '$VERSION' does not match canonical '$CANONICAL_VERSION'" >&2
+  exit 2
+fi
 
-# macOS bundled GNU bash doesn't support associative arrays
-arch_long_ix() {
-    case $1 in
-        'x64') return 0;;
-        'x86') return 1;;
-    esac
-}
-arch_longs=("x86_64-win"
-           "x86-win");
-# declare -A ARCH_LONGS=( [x64]=x86_64-win [x86]=x86-win )
+OUTPUT_DIR="$SCRIPT_DIR/out"
+STAGING_DIR="$OUTPUT_DIR/JuicySF-Rack-$VERSION-windows-x64"
+ARCHIVE="$OUTPUT_DIR/JuicySF-Rack-$VERSION-windows-x64.zip"
+rm -rf -- "$STAGING_DIR"
+rm -f -- "$ARCHIVE"
+mkdir -p "$STAGING_DIR/VST3"
 
-FLAVOUR=Release
-CONTAINER_NAME=win32_mount
-docker create --name "$CONTAINER_NAME" llvm-mingw
-trap "docker rm \"$CONTAINER_NAME\" > /dev/null" EXIT
+CONTAINER_ID=$(docker create llvm-mingw)
+trap 'docker rm "$CONTAINER_ID" >/dev/null' EXIT
+docker cp \
+  "$CONTAINER_ID:/x64/Release/VST3/JuicySF Rack.vst3" \
+  "$STAGING_DIR/VST3/"
 
-for ARCH in ${ARCHS[@]}; do
-  echo "arch: $ARCH"
+test -f "$STAGING_DIR/VST3/JuicySF Rack.vst3/Contents/x86_64-win/JuicySF Rack.vst3"
+cp -R "$REPO_DIR/licenses_of_dependencies" "$STAGING_DIR/"
+cp "$REPO_DIR/LICENSE.txt" "$REPO_DIR/README.md" "$REPO_DIR/CHANGELOG.md" \
+   "$REPO_DIR/PRIVACY.txt" "$REPO_DIR/building.win32.md" "$STAGING_DIR/"
 
-  set +e
-  arch_long_ix "$ARCH"
-  ARCH_LONG="${arch_longs[$?]}"
-  set -e
-  # ARCH_LONG="${ARCH_LONGS[$ARCH]}"
-  echo "arch_long: $ARCH_LONG"
+(
+  cd "$OUTPUT_DIR"
+  zip -9 -r "$(basename "$ARCHIVE")" "$(basename "$STAGING_DIR")"
+)
+shasum -a 256 "$ARCHIVE" > "$ARCHIVE.sha256"
 
-  FLAVOUR_DIRNAME="win_$ARCH"
-  ARCH_OUT="$OUT/$FLAVOUR_DIRNAME"
-  echo "arch_out: $ARCH_OUT"
-
-  STANDALONE="$ARCH_OUT/Standalone"
-  mkdir -p "$STANDALONE"
-
-  VST2="$ARCH_OUT/VST2"
-  mkdir -p "$VST2"
-
-  VST3="$ARCH_OUT/VST3"
-  mkdir -p "$VST3"
-
-  docker cp "$CONTAINER_NAME":"$ARCH/$FLAVOUR/Standalone/JuicySF Rack.exe" "$STANDALONE/JuicySF Rack.exe"
-  # ship the whole .vst3 bundle directory (JUCE 8 layout: Contents/<arch>-win/...)
-  docker cp "$CONTAINER_NAME":"$ARCH/$FLAVOUR/VST3/JuicySF Rack.vst3" "$VST3/"
-
-  # VST2 only builds if a VST2 SDK was supplied at configure time (see
-  # win32_cross_compile/configure_juicysfplugin.sh); tolerate its absence rather
-  # than failing the whole bundle.
-  # NOTE: "lib" prefix follows the MinGW/Clang toolchain's default shared-library
-  # naming (not verified against an actual build in this pass — confirm the real
-  # filename in $ARCH/$FLAVOUR/VST/ if this copy fails).
-  if docker cp "$CONTAINER_NAME":"$ARCH/$FLAVOUR/VST/libJuicySF Rack.dll" "$VST2/libJuicySF Rack.dll" 2>/dev/null; then
-    echo "VST2 artifact copied"
-  else
-    echo "No VST2 artifact found (no VST2 SDK supplied at configure time) — skipping"
-    rmdir "$VST2" 2>/dev/null || true
-  fi
-
-  cp -r "$DIR/../licenses_of_dependencies" "$ARCH_OUT"
-  cp "$DIR/../LICENSE.txt" "$ARCH_OUT"
-
-  cp "$DIR/README.$ARCH.txt" "$ARCH_OUT/README.txt"
-
-  pushd "$OUT" > /dev/null
-  zip -9 -r "JuicySF-Rack-$VERSION-$ARCH.zip" "$FLAVOUR_DIRNAME"
-  popd > /dev/null
-done
+echo "Created unsupported validation package: $ARCHIVE"
+echo "Do not publish until the Windows Beta 1 gates pass."

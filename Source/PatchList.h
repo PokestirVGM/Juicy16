@@ -1,5 +1,5 @@
 //
-// Flat, sorted list of every preset in the loaded soundfont/DLS.
+// Flat, sorted list of every preset in the loaded DLS/SoundFont bank.
 // Shared by the per-channel patch dropdowns.
 //
 

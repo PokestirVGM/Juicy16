@@ -43,7 +43,7 @@ public:
 
     // Message thread: replace the shared program list's names (index = GM program
     // number 0..127) and notify the host (IUnitHandler) so it re-reads the list.
-    // Called whenever a soundfont/DLS (re)load changes the available presets.
+    // Called whenever a DLS/SoundFont (re)load changes the available presets.
     void setProgramNames (const juce::StringArray& names);
 
 private:

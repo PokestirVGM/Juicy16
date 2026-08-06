@@ -90,8 +90,10 @@ SurjectiveMidiKeyboardComponent::SurjectiveMidiKeyboardComponent (MidiKeyboardSt
           keyMappingOctave (5),
           octaveNumForMiddleC (3)
 {
-    addChildComponent (scrollDown = new SurjectiveMidiKeyboardUpDownButton (*this, -1));
-    addChildComponent (scrollUp   = new SurjectiveMidiKeyboardUpDownButton (*this, 1));
+    scrollDown = std::make_unique<SurjectiveMidiKeyboardUpDownButton> (*this, -1);
+    scrollUp = std::make_unique<SurjectiveMidiKeyboardUpDownButton> (*this, 1);
+    addChildComponent (*scrollDown);
+    addChildComponent (*scrollUp);
 
     bindKeysToMidiKeyboard();
 
@@ -154,7 +156,7 @@ void SurjectiveMidiKeyboardComponent::setKeyWidth (const float widthInPixels)
 {
     jassert (widthInPixels > 0);
 
-    if (keyWidth != widthInPixels) // Prevent infinite recursion if the width is being computed in a 'resized()' call-back
+    if (! juce::approximatelyEqual(keyWidth, widthInPixels)) // Prevent infinite recursion if the width is being computed in a 'resized()' call-back
     {
         keyWidth = widthInPixels;
         resized();
@@ -195,7 +197,7 @@ void SurjectiveMidiKeyboardComponent::setLowestVisibleKeyFloat (float noteNumber
 {
     noteNumber = jlimit ((float) rangeStart, (float) rangeEnd, noteNumber);
 
-    if (noteNumber != firstKey)
+    if (! juce::approximatelyEqual(noteNumber, firstKey))
     {
         const bool hasMoved = (((int) firstKey) != (int) noteNumber);
         firstKey = noteNumber;
@@ -264,7 +266,7 @@ void SurjectiveMidiKeyboardComponent::getKeyPosition (int midiNoteNumber, const 
     const int octave = midiNoteNumber / 12;
     const int note   = midiNoteNumber % 12;
 
-    x = roundToInt (octave * 7.0f * keyWidth_ + notePos [note] * keyWidth_);
+    x = roundToInt (static_cast<float>(octave) * 7.0f * keyWidth_ + notePos [note] * keyWidth_);
     w = roundToInt (MidiMessage::isMidiNoteBlack (note) ? blackNoteWidth * keyWidth_ : keyWidth_);
 }
 
@@ -374,7 +376,7 @@ int SurjectiveMidiKeyboardComponent::remappedXYToNote (juce::Point<int> pos, flo
 
                     if (pos.x >= kx && pos.x < kx + kw)
                     {
-                        mousePositionVelocity = pos.y / (float) blackNoteLength;
+                        mousePositionVelocity = static_cast<float>(pos.y) / static_cast<float>(blackNoteLength);
                         return note;
                     }
                 }
@@ -397,7 +399,7 @@ int SurjectiveMidiKeyboardComponent::remappedXYToNote (juce::Point<int> pos, flo
                 if (pos.x >= kx && pos.x < kx + kw)
                 {
                     const int whiteNoteLength = (orientation == horizontalKeyboard) ? getHeight() : getWidth();
-                    mousePositionVelocity = pos.y / (float) whiteNoteLength;
+                    mousePositionVelocity = static_cast<float>(pos.y) / static_cast<float>(whiteNoteLength);
                     return note;
                 }
             }
@@ -445,8 +447,8 @@ void SurjectiveMidiKeyboardComponent::paint (Graphics& g)
 
     if (orientation == verticalKeyboardFacingLeft)
     {
-        x1 = width - 1.0f;
-        x2 = width - 5.0f;
+        x1 = static_cast<float>(width) - 1.0f;
+        x2 = static_cast<float>(width) - 5.0f;
     }
     else if (orientation == verticalKeyboardFacingRight)
         x2 = 5.0f;
@@ -526,7 +528,7 @@ void SurjectiveMidiKeyboardComponent::drawWhiteNote (int midiNoteNumber,
         const float fontHeight = jmin (12.0f, keyWidth * 0.9f);
 
         g.setColour (textColour);
-        g.setFont (Font (fontHeight).withHorizontalScale (0.8f));
+        g.setFont (Font { FontOptions { fontHeight } }.withHorizontalScale (0.8f));
 
         switch (orientation)
         {
@@ -638,18 +640,19 @@ void SurjectiveMidiKeyboardComponent::drawUpDownButton (Graphics& g, int w, int 
 
     Path path;
     path.addTriangle (0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.5f);
-    path.applyTransform (AffineTransform::rotation (float_Pi * 2.0f * angle, 0.5f, 0.5f));
+    path.applyTransform (AffineTransform::rotation (MathConstants<float>::pi * 2.0f * angle, 0.5f, 0.5f));
 
     g.setColour (findColour (upDownButtonArrowColourId)
             .withAlpha (buttonDown ? 1.0f : (mouseOver ? 0.6f : 0.4f)));
 
-    g.fillPath (path, path.getTransformToScaleToFit (1.0f, 1.0f, w - 2.0f, h - 2.0f, true));
+    g.fillPath (path, path.getTransformToScaleToFit (
+        1.0f, 1.0f, static_cast<float>(w) - 2.0f, static_cast<float>(h) - 2.0f, true));
 }
 
 void SurjectiveMidiKeyboardComponent::setBlackNoteLengthProportion (float ratio) noexcept
 {
     jassert (ratio >= 0.0f && ratio <= 1.0f);
-    if (blackNoteLengthRatio != ratio)
+    if (! juce::approximatelyEqual(blackNoteLengthRatio, ratio))
     {
         blackNoteLengthRatio = ratio;
         resized();
@@ -660,7 +663,7 @@ int SurjectiveMidiKeyboardComponent::getBlackNoteLength() const noexcept
 {
     const int whiteNoteLength = orientation == horizontalKeyboard ? getHeight() : getWidth();
 
-    return roundToInt (whiteNoteLength * blackNoteLengthRatio);
+    return roundToInt (static_cast<float>(whiteNoteLength) * blackNoteLengthRatio);
 }
 
 void SurjectiveMidiKeyboardComponent::resized()
@@ -886,7 +889,7 @@ void SurjectiveMidiKeyboardComponent::mouseExit (const MouseEvent& e)
 
 void SurjectiveMidiKeyboardComponent::mouseWheelMove (const MouseEvent&, const MouseWheelDetails& wheel)
 {
-    const float amount = (orientation == horizontalKeyboard && wheel.deltaX != 0)
+    const float amount = (orientation == horizontalKeyboard && ! juce::approximatelyEqual(wheel.deltaX, 0.0f))
             ? wheel.deltaX : (orientation == verticalKeyboardFacingLeft ? wheel.deltaY
                     : -wheel.deltaY);
 

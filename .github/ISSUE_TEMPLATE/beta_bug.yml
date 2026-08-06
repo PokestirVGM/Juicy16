@@ -1,0 +1,84 @@
+name: Beta bug report
+description: Report a reproducible JuicySF Rack Beta candidate problem
+title: "[Beta] "
+labels: ["beta"]
+body:
+  - type: markdown
+    attributes:
+      value: Do not upload copyrighted game assets, private projects, or confidential banks. Use a minimal legally shareable fixture.
+  - type: input
+    id: candidate
+    attributes:
+      label: Version and candidate
+      placeholder: 0.5.0-beta.1 BC1
+    validations:
+      required: true
+  - type: input
+    id: artifact
+    attributes:
+      label: Artifact SHA-256 or source commit
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: OS and CPU architecture
+      placeholder: macOS 15.6 arm64 or Windows 11 x64
+    validations:
+      required: true
+  - type: input
+    id: host
+    attributes:
+      label: DAW version and plugin format
+      placeholder: Cubase 14.0.x VST3
+    validations:
+      required: true
+  - type: input
+    id: audio
+    attributes:
+      label: Sample rate and block size
+      placeholder: 48000 Hz, 256 samples
+  - type: input
+    id: bank
+    attributes:
+      label: Bank format and provenance
+      description: State SF2/SF3/DLS and whether a minimal bank can legally be shared.
+    validations:
+      required: true
+  - type: textarea
+    id: routing
+    attributes:
+      label: MIDI routing and event sequence
+      description: Include affected channel(s), reset/Bank Select/Program Change/CC/bend ordering, and transport start position.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Exact reproduction from a fresh project
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Expected and actual result
+    validations:
+      required: true
+  - type: dropdown
+    id: fresh
+    attributes:
+      label: Reproduces in a new empty project?
+      options: ["Yes", "No", "Not tested"]
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Redacted logs, validator output, or screenshots
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Submission safety
+      options:
+        - label: I removed private paths/data and have permission to share every attachment.
+          required: true

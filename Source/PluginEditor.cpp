@@ -11,19 +11,17 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "GuiConstants.h"
-#include "Version.h"
 
 //==============================================================================
 JuicySFAudioProcessorEditor::JuicySFAudioProcessorEditor(
     JuicySFAudioProcessor& p,
-    AudioProcessorValueTreeState& valueTreeState)
+    AudioProcessorValueTreeState& state)
 : AudioProcessorEditor{&p}
-, processor{p}
-, valueTreeState{valueTreeState}
+, valueTreeState{state}
 , midiKeyboard{p.keyboardState, SurjectiveMidiKeyboardComponent::horizontalKeyboard}
-, tablesComponent{valueTreeState, p.getFluidSynthModel()}
-, filePicker{valueTreeState}
-, slidersComponent{valueTreeState, p.getFluidSynthModel()}
+, tablesComponent{state, p.getFluidSynthModel()}
+, filePicker{state}
+, slidersComponent{state, p.getFluidSynthModel()}
 {
     // Cap the width at the on-screen keyboard's own natural size (its full MIDI
     // range at its fixed key width): resizing wider than that would just add blank
@@ -42,8 +40,8 @@ JuicySFAudioProcessorEditor::JuicySFAudioProcessorEditor(
     // show a fixed-size window despite the limits above.
     setResizable(true, true);
 
-    lastUIWidth.referTo(valueTreeState.state.getChildWithName("uiState").getPropertyAsValue("width",  nullptr));
-    lastUIHeight.referTo(valueTreeState.state.getChildWithName("uiState").getPropertyAsValue("height", nullptr));
+    lastUIWidth.referTo(state.state.getChildWithName("uiState").getPropertyAsValue("width",  nullptr));
+    lastUIHeight.referTo(state.state.getChildWithName("uiState").getPropertyAsValue("height", nullptr));
 
     // set our component's initial size to be the last one that was stored in the filter's settings
     setSize(lastUIWidth.getValue(), lastUIHeight.getValue());
@@ -63,11 +61,10 @@ JuicySFAudioProcessorEditor::JuicySFAudioProcessorEditor(
     addAndMakeVisible(tablesComponent);
     addAndMakeVisible(filePicker);
 
-    // status bar: build version, so it's obvious when a new build has loaded
-    statusLabel.setFont(Font(12.0f));
-    statusLabel.setText("JuicySF Rack v" JUICYSF_RACK_VERSION, dontSendNotification);
-    statusLabel.setColour(Label::textColourId, juce::Colours::lightgrey);
-    statusLabel.setMinimumHorizontalScale(1.0f);
+    // status bar: build version and a visible bank-load result
+    statusLabel.setFont(Font{juce::FontOptions{12.0f}});
+    statusLabel.setName("Version and bank load status");
+    statusLabel.setMinimumHorizontalScale(0.7f);
     addAndMakeVisible(statusLabel);
 
     // keyboard: light up for MIDI on any channel, but send notes on the channel
@@ -75,6 +72,7 @@ JuicySFAudioProcessorEditor::JuicySFAudioProcessorEditor(
     midiKeyboard.setMidiChannelsToDisplay(0xffff);
     valueTreeState.state.addListener(this);
     syncKeyboardChannel();
+    syncStatusLabel();
 }
 
 void JuicySFAudioProcessorEditor::syncKeyboardChannel() {
@@ -83,9 +81,24 @@ void JuicySFAudioProcessorEditor::syncKeyboardChannel() {
     midiKeyboard.setMidiChannel(juce::jlimit(1, 16, sel));
 }
 
+void JuicySFAudioProcessorEditor::syncStatusLabel() {
+    const ValueTree fontState{valueTreeState.state.getChildWithName("soundFont")};
+    const String status{fontState.getProperty("loadStatus", "idle").toString()};
+    const String message{fontState.getProperty("loadMessage", "No bank loaded.").toString()};
+    const String text{"JuicySF Rack v" JUICYSF_RACK_VERSION " — " + message};
+    statusLabel.setText(text, dontSendNotification);
+    statusLabel.setTooltip(message);
+    statusLabel.setColour(
+        Label::textColourId,
+        status == "error" ? juce::Colours::salmon : juce::Colours::lightgrey);
+}
+
 void JuicySFAudioProcessorEditor::valueTreePropertyChanged(ValueTree& tree, const Identifier& property) {
     if (tree.getType() == StringRef("uiState") && property == StringRef("selectedChannel"))
         syncKeyboardChannel();
+    if (tree.getType() == StringRef("soundFont")
+        && (property == StringRef("loadStatus") || property == StringRef("loadMessage")))
+        syncStatusLabel();
 }
 
 // called when the stored window size changes

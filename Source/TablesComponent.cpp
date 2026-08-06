@@ -7,11 +7,10 @@
 using namespace std;
 
 TablesComponent::TablesComponent(
-    AudioProcessorValueTreeState& valueTreeState,
-    FluidSynthModel& fluidSynthModel
+    AudioProcessorValueTreeState& state,
+    FluidSynthModel& model
 )
-: valueTreeState{valueTreeState}
-, channelList{valueTreeState, fluidSynthModel}
+: channelList{state, model}
 {
     channelList.setWantsKeyboardFocus(false);
     addAndMakeVisible(channelList);
