@@ -1,6 +1,6 @@
-# JuicySF Rack Beta 1 Candidate — Comprehensive Remediation and Release Plan
+# Juicy16 Beta 1 Candidate — Comprehensive Remediation and Release Plan
 
-This document is the authoritative execution plan and candidate checklist for the **first public beta of JuicySF Rack**. It brings the repository into alignment with the intended product:
+This document is the authoritative execution plan and candidate checklist for the **first public beta of Juicy16**. It brings the repository into alignment with the intended product:
 
 > A cross-platform, 16-channel DLS/SoundFont player inspired by Fruity LSD, distributed primarily as AU on macOS and VST3 on macOS and Windows.
 
@@ -10,17 +10,17 @@ It converts the repository audit into sequenced, checkable milestones and adds t
 
 Complete these fields before producing the first candidate:
 
-- Working version: `0.5.0-beta.1` unless another version is approved in Phase 0.
+- Working version: `0.5.1-alpha.1`. Deliberately not `beta` — the Beta 1 bar below has not been met, and the label should not claim otherwise. Rename to `0.5.1-beta.1` (or the then-current version) when the technical gate passes.
 - Candidate number: `BC1` initially; increment for every rebuilt candidate.
 - Candidate commit:
 - Candidate build date:
 - Candidate coordinator:
-- Supported macOS versions:
-- Supported Windows versions:
-- Supported architectures:
-- Included formats:
+- Supported macOS versions: macOS 11.0 or later (Apple Silicon only)
+- Supported Windows versions: Windows 10 version 1607 or later
+- Supported architectures: macOS `arm64`; Windows `x86_64`
+- Included formats: macOS AU/VST3; Windows VST3
 - Tester group or distribution channel:
-- Feedback destination:
+- Feedback destination: `contact@pokestir.com` with subject prefix `[Juicy16 VST]`
 - Emergency withdrawal owner:
 
 ## Beta quality policy
@@ -128,7 +128,7 @@ The following decisions define the expected end state. Tasks that depend on unre
 
 Beta 1 must preserve the workflow that motivated the 16-channel VST3 implementation:
 
-1. Insert one JuicySF Rack instance.
+1. Insert one Juicy16 instance.
 2. Load the DLS, SF2, or SF3 bank associated with a game-rip MIDI.
 3. Route or import the MIDI so its original 16 MIDI channels reach the single plugin instance.
 4. Start playback without manually assigning each channel's patch.
@@ -179,45 +179,58 @@ Eliminate decisions that would otherwise cause later agents to implement incompa
 
 ## Tasks
 
-- [ ] Confirm the supported platform and architecture matrix.
-  - BLOCKED: Product owner must approve minimum OS versions and whether macOS Beta 1 is Apple Silicon-only or universal. The locally verified artifact is `arm64` only.
+- [x] Confirm the supported platform and architecture matrix.
+  - DECISION: Beta 1 targets macOS 11.0 or later on Apple Silicon `arm64`, and Windows 10 version 1607 or later on `x86_64`. Intel macOS may be added in a later release when build dependencies and physical validation are available. Windows ARM64 and Linux are out of scope.
   - Decide the minimum macOS version.
   - Decide whether macOS releases are universal `arm64;x86_64` or Apple Silicon only.
   - Decide the minimum Windows version; JUCE 8 documentation currently starts at Windows 10 version 1607.
   - Decide whether Windows ARM64 is in scope now, later, or not planned.
   - Decide whether Linux VST3 is in scope; do not imply it through the phrase “cross-platform” unless it is tested.
 
-- [ ] Confirm release-format scope.
+  EVIDENCE: Owner decisions on 2026-08-19; canonical matrix is `docs/SUPPORT_MATRIX.md`. These are approved targets, not claims that candidate artifacts have passed their platform matrices.
+
+- [x] Confirm release-format scope.
   - Approve AU and VST3 as primary release formats.
   - Decide whether standalone remains a QA-only target.
   - Decide whether all VST2 code, build options, and documentation should be removed or retained as unsupported legacy functionality.
   - Decide whether AUv3 is explicitly out of scope.
 
-- [ ] Confirm product ownership and metadata.
-  - BLOCKED: The repository does not establish whether the legacy Birchlabs identity and plugin identifiers remain approved.
-  - Confirm whether `Birchlabs`, `birchlabs.co.uk`, `Blbs`, and `com.Birchlabs.JuicySFPlugin` remain correct.
+  EVIDENCE: Owner decision on 2026-08-19 approves macOS AU/VST3 and Windows VST3 as the only Beta release formats; Standalone is development/QA-only; VST2 and AUv3 are out of scope.
+
+- [x] Confirm product ownership and metadata.
+  - DECISION: Product `Juicy16`; public brand `Pokestir`; website `https://pokestir.com`; support `contact@pokestir.com`; bundle ID `com.pokestir.juicy16`; manufacturer code `Pkst`; plugin code `Jc16`; new-work notice `Copyright (c) 2026 Pokestir`. The original Birchlabs/Alex Birch notices and lineage credit remain. A release signing identity is still unavailable.
+  - Replace the pre-Beta `Birchlabs`, `birchlabs.co.uk`, `Blbs`, and `com.Birchlabs.JuicySFPlugin` metadata while retaining historical attribution.
   - If ownership changed, choose the company name, website, support email, bundle identifier, manufacturer code, plugin code, copyright text, and signing identity.
   - Document compatibility consequences before changing plugin identifiers; identifier changes can break existing DAW sessions.
 
+  EVIDENCE: The owner approved a Beta 1 identity reset and explicitly waived pre-Beta session compatibility. `docs/STATE_COMPATIBILITY.md` freezes the new identifiers beginning with Beta 1; metadata tests enforce their CMake values. Release signing remains a Phase 4 blocker.
+
 - [ ] Resolve the JUCE licensing model.
-  - BLOCKED: Distribution requires an owner/legal decision between an applicable JUCE 8 commercial license and an AGPL-compatible release. The existing GPLv3-only text is not sufficient evidence for JUCE 8 distribution.
+  - DECISION: Use JUCE 8 under AGPLv3; no commercial JUCE license is claimed. The inherited application code remains GPLv3. GNU GPLv3/AGPLv3 section 13 permits the combined work while each license continues to cover its respective parts.
+  - BLOCKED: A qualified reviewer must still confirm the exact candidate's source offer, dependency notices, ownership statements, and distribution package before public release.
   - Choose one of: a commercial JUCE 8 license, AGPLv3-compatible project distribution, or a technically and legally viable framework/version alternative.
   - Have the chosen position reviewed by an appropriately qualified person before public distribution.
   - Decide the resulting top-level project license and source-offer obligations.
   - Record the decision in a short licensing note or architecture decision record.
 
-- [ ] Confirm the intended relationship to Fruity LSD.
+  PARTIAL EVIDENCE: `docs/LICENSING.md`, `NOTICE.md`, the retained GPLv3 `LICENSE.txt`, and `licenses_of_dependencies/JUCE-framework_AGPL3.txt` document the selected path and source-distribution obligations. Package staging includes these materials. Final qualified review remains open.
+
+- [x] Confirm the intended relationship to Fruity LSD.
   - Approve wording such as “inspired by” or “Fruity LSD-style workflow.”
   - Avoid claims of exact emulation unless a documented compatibility matrix supports them.
   - List any Fruity LSD behaviors explicitly outside this release.
 
+  EVIDENCE: Owner approved “inspired by Fruity LSD” on 2026-08-19. Documentation limits the comparison to automatic multichannel patch selection and explicitly disclaims exact emulation or affiliation.
+
 ## Exit criteria
 
-- [ ] A support matrix is written and approved.
-- [ ] Release formats and development-only formats are unambiguous.
-- [ ] Product identity values are approved.
-- [ ] The licensing path is approved and documented.
-- [ ] Later phases have no unresolved scope question that would invalidate their implementation.
+- [x] A support matrix is written and approved.
+- [x] Release formats and development-only formats are unambiguous.
+- [x] Product identity values are approved.
+- [x] The licensing path is approved and documented.
+- [x] Later phases have no unresolved scope question that would invalidate their implementation.
+
+  EVIDENCE: Owner decisions on 2026-08-19 establish the Juicy16/Pokestir identity, formats, platforms, GPLv3 application license, and JUCE AGPLv3 path. `docs/BETA1_IDENTITY_CONTRACT.md` records the frozen host identifiers. Final qualified review of the exact distribution package remains an explicit release gate, but no implementation-defining Phase 0 choice is unresolved.
 
 ---
 
@@ -258,7 +271,13 @@ Make the audio engine trustworthy before investing in packaging and release work
 
   EVIDENCE: `tests/EngineMidiTests.cpp`; ASan+UBSan Debug and static Release tests pass at 32, 64, 256, 512, and 1024 samples, including mono chunking above the prepared maximum, on 2026-08-05.
 
-## 1.2 General MIDI channel behavior
+  Sample accuracy is now also proven in the audio domain rather than only through
+  reported engine state. Two scenarios added on 2026-08-19 render the same note
+  under different programs from isolated processor instances and compare the
+  waveforms by normalized cross-correlation: two different GM programs correlate
+  below 0.9, and a Program Change placed one sample before the note renders
+  identically (above 0.999) to the same change at block start. Together these
+  show the timestamp is honoured by the synthesis, not merely recorded.
 
 - [x] Implement and document channel 10 percussion defaults.
   - Determine the correct FluidSynth bank convention for each supported font type.
@@ -273,34 +292,48 @@ Make the audio engine trustworthy before investing in packaging and release work
 
 ### Acceptance criteria
 
-- [ ] A normal GM MIDI file that relies on the channel 10 convention plays percussion without requiring an explicit Bank Select.
+- [x] A normal GM MIDI file that relies on the channel 10 convention plays percussion without requiring an explicit Bank Select.
 - [x] Manual channel 10 bank/preset selection still works and persists.
 
-  EVIDENCE: The offline engine suite verifies melodic bank 0 defaults on other channels, channel 10 bank 128, percussion-bank preservation across Program Change and GM/GS/XG reset, and manual channel 10 assignment across state round-trip using the macOS system DLS.
+  EVIDENCE: The offline engine suite verifies melodic bank 0 defaults on other channels, channel 10 bank 128, percussion-bank preservation across Program Change and GM/GS/XG reset, and manual channel 10 assignment across state round-trip using the macOS system DLS. Its fresh-instance GM scenario sends only a timestamped channel-10 drum note—no Bank Select or Program Change—and proves silence before the event, audible percussion afterward, and bank 128/program 0 at dispatch. The strict arm64 macOS Release test passed on 2026-08-19.
 
 ## 1.3 Program, bank, reset, and state synchronization
 
-- [ ] Unify all program-change paths behind one engine-state function.
+- [x] Unify all program-change paths behind one engine-state function.
   - Cover MIDI Program Change, `progChN` host automation, global selected-channel parameters, manual dropdown selection, state restoration, and font reload.
   - Update `engineBank` and `enginePreset` consistently on every successful engine change.
   - Update UI/state mirrors only on the message thread.
   - Return or record errors from failed FluidSynth calls.
 
-- [ ] Make reset recovery deterministic.
+  EVIDENCE: `FluidSynthModel::applyProgramToEngine` is the sole FluidSynth program mutation point for raw MIDI Program Change, `progChN` host automation, selected-channel bank/preset parameters, manual dropdown assignment, state/font reload, and reset reassertion. `tests/EngineMidiTests.cpp` verifies engine, per-channel persisted state, and host-parameter convergence for the independently routed entry points, plus failed-assignment rollback and per-channel error recording. All five registered Debug and static Release tests passed on arm64 macOS on 2026-08-19; AU, VST3, and Standalone built in both configurations.
+
+- [x] Make reset recovery deterministic.
   - Immediately restore the correct engine bank/preset after supported reset SysEx.
   - Restore sound-controller state without racing newer MIDI events.
   - Ensure the asynchronous full resync cannot overwrite a more recent Program Change.
   - Test multiple resets and transport restarts.
+
+  EVIDENCE: GM/GS/XG resets synchronously reapply the latest engine program and six exposed sound-controller atomics before MIDI dispatch continues; resets do not queue a stale full-state resync. The offline engine suite captures the program present immediately before note-on and verifies reset-before-note ordering at an equal timestamp, three consecutive reset families, newer same-block Program Change/CC events, and repeated restart-style reset/setup playback. All five registered Debug and static Release tests passed on arm64 macOS on 2026-08-19; AU, VST3, and Standalone built in both configurations.
 
 - [ ] Decide how Bank Select state is represented.
   - Verify CC0/CC32 behavior for SF2, SF3, and DLS banks.
   - Ensure the UI displays the bank actually selected by the engine.
   - Document the limitation that VST3 `progChN` exposes only a 0–127 program number unless bank automation is added.
 
+  PARTIAL EVIDENCE: Beta 1 now explicitly configures FluidSynth 2.5.5 for initial
+  GS Bank Select semantics instead of inheriting its default. The system-DLS
+  engine test proves CC32 is delivered/stored but ignored for bank selection,
+  CC0 updates FluidSynth's pending bank without prematurely changing UI/saved
+  patch state, and the following Program Change synchronizes the accepted bank
+  and preset across the engine, a same-block note checkpoint, UI parameters, and
+  serialized channel state. `docs/CONTROLLER_SUPPORT.md` defines the persisted
+  logical-bank and VST3 `progChN` contracts. Cross-bank SF2 and SF3 fixtures and
+  nonzero font-offset coverage remain open, so this parent is not checked.
+
 ### Acceptance criteria
 
-- [ ] Every program-change entry point produces the same engine, UI, parameter, and persisted state.
-- [ ] Reset tests demonstrate no stale-program window before subsequent notes.
+- [x] Every program-change entry point produces the same engine, UI, parameter, and persisted state.
+- [x] Reset tests demonstrate no stale-program window before subsequent notes.
 - [ ] Bank-offset handling is covered by tests.
 
 ## 1.4 Bounds, initialization, and thread safety
@@ -326,9 +359,32 @@ Make the audio engine trustworthy before investing in packaging and release work
 
 - [x] Corrupt or out-of-range saved state cannot access memory outside channel arrays.
 - [x] Sanitizer runs have no unresolved first-party findings.
-- [ ] The real-time path performs no known unbounded allocation or unsafe UI/state mutation.
+- [x] The real-time path performs no known unbounded allocation or unsafe UI/state mutation.
 
-  EVIDENCE: `docs/THREADING_MODEL.md`; separate ASan+UBSan and TSan engine/font harness builds passed on arm64 macOS on 2026-08-05.
+  EVIDENCE: `docs/THREADING_MODEL.md`; separate ASan+UBSan and TSan engine/font
+  harness builds passed on arm64 macOS on 2026-08-05, and the ASan+UBSan gate
+  passed again on 2026-08-19.
+
+  A line-by-line audit of the audio-thread entry points on 2026-08-19 found one
+  remaining allocation and removed it. `processBlock` called
+  `MidiBufferIterator::getMessage()`, and `MidiMessage` heap-copies any message
+  longer than four bytes — so every SysEx allocated on the audio thread, and game
+  rips carry a GM/GS/XG reset at tick 0. SysEx is now dispatched directly from
+  the `MidiBuffer`'s own storage via `FluidSynthModel::dispatchSysEx`, with
+  identical framing semantics to `MidiMessage::getSysExData()`; messages of four
+  bytes or fewer keep the inline, non-allocating `MidiMessage` route.
+
+  The rest of the path is allocation-free by construction: `renderSamples` writes
+  into the host buffer or the preallocated `stereoScratch`, chunking when a host
+  exceeds the prepared block size; every audio-thread state write targets a
+  fixed-size atomic; and no `ValueTree` or parameter write occurs there —
+  mapped sound controllers and program changes set atomics and defer to
+  `handleAsyncUpdate` on the message thread. Remaining allocation is inside
+  FluidSynth itself and is not under this project's control.
+
+  Two new regression scenarios pin the dispatch boundary: an unknown SysEx on
+  either route is forwarded without reasserting programs, and a framed GM reset
+  dispatched from buffer storage still reasserts the current program.
 
 ## 1.5 Complete MIDI CC, pitch-bend, and expressive-control accuracy
 
@@ -382,13 +438,40 @@ The beta must distinguish between MIDI processing and UI automation:
   - CC123: All Notes Off.
   - CC124–127: Omni/Mono/Poly channel-mode messages, documenting FluidSynth support and expected behavior.
 
+  PARTIAL EVIDENCE: The canonical fixture now covers every listed common CC and
+  the engine suite verifies exact raw traces plus observable RPN state. Dedicated
+  disposable-engine scenarios prove sustain and sostenuto hold/release semantics,
+  distinguish All Notes Off from immediate All Sound Off, and verify Reset All
+  Controllers target/preservation behavior. `docs/CONTROLLER_SUPPORT.md` documents
+  bank/modulator-dependent cases and basic-channel limitations. Mode-dependent
+  CC0/32-to-Program-Change behavior across the licensed SF2/SF3/DLS corpus remains
+  open under the Bank Select task, so this parent item is not yet complete.
+
 - [ ] Verify high-resolution controller pairs where supported.
   - MSB/LSB pairs must retain ordering and channel identity.
   - Do not claim 14-bit CC support for pairs the engine does not implement; document exact observed behavior.
 
+  EVIDENCE: The canonical fixture preserves same-sample MSB/LSB ordering and
+  channel identity, with the resulting 12-semitone RPN state proving ordered Data
+  Entry. `docs/CONTROLLER_SUPPORT.md` records FluidSynth's general 7-bit-MSB
+  behavior and the portamento/Data Entry exceptions.
+
+  The one open question — whether cents-level Data Entry LSB actually reaches
+  synthesis — was settled on 2026-08-19 by measurement rather than assumption.
+  `getPitchWheelSensitivity` reports whole semitones, so only the audio can
+  answer it. With RPN 0,0 set to 2 semitones plus 50 cents, a full-up bend raises
+  pitch by a factor of 1.1596; 2.5 semitones predicts 1.1553 and 2 semitones alone
+  predicts 1.1224. The cents are therefore honoured, and the suite now asserts it
+  at 48 kHz. The documentation previously declined to claim this and has been
+  corrected.
+
+  Portamento CC5/CC65 remains delivered-and-documented rather than
+  audio-verified: FluidSynth combines its MSB and LSB, but the audible result
+  depends on bank modulators, so no Beta 1 claim is made about it.
+
 ### Exposed sound-controller synchronization
 
-- [ ] Verify CC71/72/73/74/75/79 on every MIDI channel.
+- [x] Verify CC71/72/73/74/75/79 on every MIDI channel.
   - Engine receives the exact value at the MIDI timestamp.
   - The affected channel's saved state updates on the message thread.
   - Sliders update only when that channel is selected.
@@ -396,12 +479,32 @@ The beta must distinguish between MIDI processing and UI automation:
   - Saving and reopening restores all six values for all 16 channels.
   - Incoming CCs do not create recursive or duplicate engine sends.
 
-- [ ] Verify the neutral point and direction of every exposed sound controller.
+  EVIDENCE: `tests/EngineMidiTests.cpp` sends distinct values for all six controls
+  on all 16 channels and verifies their exact engine values and source sample
+  positions. It then uses the same `FluidSynthModel::selectChannelForEditing`
+  path as the channel-list UI to prove unselected messages do not move the visible
+  parameters, every channel reveals its latest independent values when selected,
+  selection emits no duplicate MIDI dispatch, and a save/reopen preserves both
+  the per-channel engine values and selected-channel parameter mirrors. The strict
+  arm64 macOS Release `engine_midi_system_dls` test passed on 2026-08-19.
+
+- [x] Verify the neutral point and direction of every exposed sound controller.
   - Value 64 produces the documented neutral behavior.
   - Values below and above 64 move the destination in the expected direction.
   - Cutoff is not inverted.
   - Sustain-level direction matches the UI label.
   - Reset All Controllers and GM/GS/XG reset behavior are explicitly tested and documented.
+
+  EVIDENCE: The six default-modulator definitions are now one frozen contract
+  used both to install them and to expose read-only test diagnostics. The engine
+  suite requires every `fluid_synth_add_default_mod` call to succeed, verifies
+  exact controller/parameter/generator/amount/flag mappings, proves FluidSynth's
+  pinned linear-bipolar algebra maps 64 to zero with the documented sign on both
+  sides, and checks fresh engine/UI values are 64. Separate scenarios prove CC121
+  preserves sound controls while resetting its MIDI-defined targets, and GM/GS/XG
+  reset handling reapplies all six latest values. `docs/CONTROLLER_SUPPORT.md`
+  publishes the exact directions and reset semantics. The strict arm64 macOS
+  Release engine test passed on 2026-08-19.
 
 ### Pitch bend
 
@@ -431,9 +534,9 @@ The beta must distinguish between MIDI processing and UI automation:
   - Render a stable test tone or sustaining preset.
   - Measure fundamental frequency before and after bend.
   - Compare measured ratios with the expected semitone/cents values within an approved tolerance.
-  - Repeat at 44.1, 48, and 96 kHz to catch sample-rate-related pitch errors.
+  - Repeat at 44.1, 48, 88.2, and 96 kHz to catch sample-rate-related pitch errors.
 
-  EVIDENCE: The system-DLS engine test renders note 69 at full-down, center, and full-up with a 12-semitone RPN range, estimates periodic frequency from audio, and verifies the expected ratios at 44.1, 48, and 96 kHz under ASan+UBSan.
+  EVIDENCE: The system-DLS engine test renders note 69 at full-down, center, and full-up with a 12-semitone RPN range, estimates periodic frequency from audio, and verifies the expected ratios at 44.1, 48, 88.2, and 96 kHz. It also proves that FluidSynth 2.5.5's unsupported 192 kHz rate fails silent instead of running at a stale rate, and that returning to 48 kHz recreates the engine and resumes audio. The strict arm64 macOS Release test passed on 2026-08-19; the earlier 44.1/48/96 subset also passed under ASan+UBSan.
 
 ### Pressure and related channel expression
 
@@ -446,8 +549,18 @@ The beta must distinguish between MIDI processing and UI automation:
 
 ### Host and file-playback coverage
 
-- [ ] Add a deterministic MIDI fixture containing the full CC/pitch-bend test sequence.
-- [ ] Run the fixture through the offline processor harness and compare against an expected event/state trace.
+- [x] Add a deterministic MIDI fixture containing the full CC/pitch-bend test sequence.
+- [x] Run the fixture through the offline processor harness and compare against an expected event/state trace.
+
+  EVIDENCE: `tests/fixtures/controller_conformance.csv` is a checked-in,
+  human-reviewable event fixture covering the common controllers, MSB/LSB pairs,
+  all six exposed sound controls, RPN/NRPN selection and Data Entry, channel-mode
+  messages, and representative 14-bit bend values across channels 1, 2, 3, 10,
+  and 16. `tests/EngineMidiTests.cpp` validates the fixture before use, runs it as
+  one timestamped `MidiBuffer`, compares every CC's value/channel/sample trace and
+  every bend's engine value, and proves the same-sample RPN sequence produces the
+  expected 12-semitone state. The strict arm64 macOS Release test passed on
+  2026-08-19.
 - [ ] Run musically representative CC and pitch-bend passages in FL Studio and Cubase.
 - [ ] Verify the DAW does not filter, chase incorrectly, normalize, or collapse controller data before it reaches the plugin.
 - [ ] Test transport start, stop, rewind, loop boundaries, chase, project reload, and playback beginning mid-song.
@@ -456,19 +569,32 @@ The beta must distinguish between MIDI processing and UI automation:
 ### Acceptance criteria
 
 - [x] The parameterized CC0–CC127 suite passes without channel or value corruption.
-- [ ] All six exposed sound controllers remain engine/UI/state-consistent on all 16 channels.
+- [x] All six exposed sound controllers remain engine/UI/state-consistent on all 16 channels.
+
+  EVIDENCE: The offline engine suite covers the real parameter values used by the
+  slider attachments, the editor's centralized channel-selection path, per-channel
+  `ValueTree` persistence, and FluidSynth controller state for every exposed
+  controller and MIDI channel. See the detailed evidence above.
 - [x] Full-range 14-bit pitch bend and per-channel RPN pitch-bend range tests pass.
 - [x] CCs and bends occurring within one audio block affect audio at the correct sample offsets.
 
   EVIDENCE: The audio-domain suite measures four bend segments in one sustained-note block and verifies that timestamped All Sound Off creates only the intended silent interval before a later note resumes.
 - [ ] FL Studio and Cubase reproduce the same expected musical controller and pitch-bend sequence, accounting only for documented host chase behavior.
-- [ ] Any unsupported FluidSynth controller behavior is documented precisely and is not misrepresented as plugin support.
+- [x] Any unsupported FluidSynth controller behavior is documented precisely and is not misrepresented as plugin support.
+
+  EVIDENCE: `docs/CONTROLLER_SUPPORT.md` separates exact plugin delivery from
+  FluidSynth/bank-dependent audible behavior, documents general 7-bit MSB
+  interpretation and its exceptions, mode-dependent Bank Select, CC121/122/123,
+  basic-channel restrictions for CC124–127, and the remaining unclaimed RPN/bank
+  cases. The tester guide and known-issues page state the same support boundary.
 
 ## Phase 1 exit criteria
 
 - [x] Sample-accurate rendering is implemented and tested.
 - [x] GM percussion defaults are correct.
-- [ ] All program/reset paths share consistent state handling.
+- [x] All program/reset paths share consistent state handling.
+
+  EVIDENCE: `FluidSynthModel::applyProgramToEngine` is the sole program mutation path, and the offline suite verifies raw MIDI, host parameters, manual assignments, state/font reload, GM/GS/XG resets, rejected changes, and same-block note ordering converge on engine, parameter, and saved state.
 - [x] Bounds, initialization, and high-risk threading issues are resolved.
 - [ ] Complete CC, pitch-bend, RPN, pressure, pedal, and channel-mode coverage passes the Phase 1.5 acceptance criteria.
 - [x] Core engine tests run automatically through CTest or the chosen test runner.
@@ -498,7 +624,7 @@ Guarantee that every advertised format—SF2, SF3, and DLS—loads through the s
   - FluidSynth error context where available.
 
 - [x] Surface failures in the plugin UI without blocking the audio thread.
-- [ ] Handle missing, unreadable, moved, zero-preset, unsupported, and corrupt files.
+- [x] Handle missing, unreadable, moved, zero-preset, unsupported, and corrupt files.
 - [x] Decide whether the current font remains active after every failure class and test that behavior.
 
 ### Acceptance criteria
@@ -507,31 +633,118 @@ Guarantee that every advertised format—SF2, SF3, and DLS—loads through the s
 - [x] The UI clearly identifies failed loads and successful DLS repairs.
 - [x] State restore with a missing bank fails gracefully.
 
-  EVIDENCE: Replacement loads are validated before swapping `sfont_id`; `engine_midi_system_dls` verifies a missing replacement reports `error`, preserves the prior bank in both rendered audio and newly serialized state, and keeps its `loadedPath`. The editor status bar and file-control tooltip expose the structured result, including repaired-copy success text.
+  EVIDENCE: Replacement loads are validated before swapping `sfont_id`.
+  `engine_midi_system_dls` now exercises a moved/missing path, a directory/non-file,
+  a permission-denied file, unsupported text, corrupt SF2-shaped RIFF data, and a
+  structurally empty zero-instrument DLS. Every case reports `error`, records the
+  attempted path and a nonempty user message, preserves the prior engine program,
+  keeps the successful `loadedPath` in newly serialized state, and leaves that
+  bank audible. The direct Debug run passed without JUCE assertions on 2026-08-19.
+  The editor status bar and file-control tooltip expose the structured result,
+  including repaired-copy success text. Preset names returned by FluidSynth and
+  the visible Unicode status separator now cross into JUCE through explicit UTF-8
+  conversion, avoiding ambiguous-ASCII assertions during reload/editor creation.
 
 ## 2.2 macOS path and sandbox behavior
 
 - [x] Make path loading work when bookmark creation fails.
 - [x] Release any `CFErrorRef` values and handle Core Foundation failures explicitly.
 - [ ] Verify security-scoped bookmark creation and restoration in AU, VST3, and standalone contexts.
-- [ ] Handle stale bookmarks and moved files.
+
+  BLOCKED: Requires a real sandboxed host per format. The offline harness covers
+  resolution and every fallback branch, but it cannot prove that a host actually
+  grants sandbox access to the resolved URL.
+
+- [x] Handle stale bookmarks and moved files.
+
+  EVIDENCE: Two defects were found and fixed in the macOS bookmark path on
+  2026-08-19, neither reachable from the previous tests because both need a real
+  bookmark rather than the path-only state the harness used.
+
+  1. `StringRef path {String::fromCFString(...)}` bound a `StringRef` to a
+     temporary `String`. `StringRef` stores a borrowed character pointer, so the
+     path was read after free on every bookmark-based load — latent undefined
+     behavior in the normal DAW session-restore path. It now takes an owning
+     `String`.
+  2. A bookmark that resolved was treated as success regardless of whether the
+     bank actually loaded, so a resolved-but-unloadable target (replaced,
+     truncated, or permission-denied file) skipped the stored-path fallback and
+     the user's bank silently disappeared on project reload.
+     `unloadAndLoadFont`'s result is now honoured, and the stored path is retried
+     when it differs from the resolved one.
+
+  `CFURLCreateByResolvingBookmarkData`'s `isStale` flag is now captured and
+  published as the runtime-only `bookmarkStale` font-state property, readable
+  through `FluidSynthModel::isBookmarkStale()`. It is not serialised, so the
+  frozen state schema is unaffected. Automatic bookmark refresh on staleness is
+  deliberately NOT implemented: it cannot be exercised without a sandboxed host
+  and a genuinely relocated file, and writing untestable rewrite logic into the
+  session-restore path is the larger risk. Resolution already follows a moved
+  file, so staleness currently costs nothing but a missed refresh.
+
+  Four regression scenarios cover the branches: an unresolvable bookmark falls
+  back to the saved path, the recovered bank audibly sounds, an unresolvable
+  bookmark with a missing path reports an error without setting the stale flag,
+  and a bookmark that resolves to an unloadable file still falls back. The last
+  was confirmed to fail against the pre-fix code and pass after it.
+
 - [ ] Verify that sandbox declarations match actual file access requirements.
+
+  BLOCKED: Requires running under each host's sandbox.
 
 ### Acceptance criteria
 
-- [ ] A file selected through the picker loads whether bookmark creation succeeds or the safe fallback path is required.
+- [x] A file selected through the picker loads whether bookmark creation succeeds or the safe fallback path is required.
+
+  EVIDENCE: Bookmark creation failure was already covered by the path fallback in
+  `FilePicker`; the restore side is now covered by the four scenarios above,
+  including the previously broken resolved-but-unloadable case.
 - [ ] Saved sessions restore access after the plugin and DAW restart.
+
+  BLOCKED: Needs a real DAW session in each format.
 - [ ] No Core Foundation leaks are reported in the tested workflows.
+
+  PARTIAL EVIDENCE: `CFErrorRef` is released on every branch, and the new
+  resolution code owns its `CFURL`/`CFData` through `CFUniquePtr`. The ASan+UBSan
+  gate passes, but leak detection is disabled there and Instruments has not been
+  run against a host workflow.
 
 ## 2.3 DLS implementation and repair safety
 
-- [ ] Choose the Windows FluidSynth strategy.
+- [x] Choose the Windows FluidSynth strategy.
   - Preferred: upgrade to a current FluidSynth release with native C++17 DLS support.
   - Alternative: build the pinned version with `libinstpatch` and package its obligations correctly.
 
-- [ ] Add a build-time or runtime DLS capability check.
+  DECISION: The preferred option. Windows uses the same FluidSynth 2.5.5 as macOS
+  with `osal=cpp11` and the native DLS loader, and `enable-libinstpatch=off`. That
+  keeps one engine version and one DLS code path across both platforms, and avoids
+  taking on libinstpatch's additional licensing and packaging obligations for a
+  capability FluidSynth now provides itself.
+
+  EVIDENCE: `tools/build_macos_dependencies.sh` sets `enable-native-dls=ON` and
+  `enable-libinstpatch=OFF`, and the macOS artifact proves the resulting loader
+  against Apple's system DLS and a private Awave-style DLS on every strict run.
+  The legacy Windows context already used `osal=cpp11` and disabled libinstpatch
+  but never stated `enable-native-dls` explicitly, which is exactly how a Windows
+  build ends up with no DLS support at all — the open risk in the register. That
+  flag is now set there too.
+
+  Choosing the strategy does not prove it on Windows. Strict Windows configuration
+  still requires a real `.dls` probe as a non-skippable test, and no Windows
+  artifact has run it; that remains open under Phase 4.3.
+
+- [x] Add a build-time or runtime DLS capability check.
   - A build that cannot load DLS must fail release validation.
   - Do not rely only on the file-picker extension filter.
+
+  EVIDENCE: Strict release configuration now requires `BUILD_TESTING=ON` so the
+  capability gate cannot be omitted. macOS strict builds require Apple's actual
+  system DLS and register its `JuicySFFontQA` load as a `font;dls;release` test;
+  Windows strict builds require `JUICYSF_FONT_CORPUS` to contain a real `.dls`
+  file and register that exact file as `font_load_release_dls`. A negative macOS
+  configuration with tests disabled failed at configure time as intended, and
+  the real system-DLS release test plus the complete nine-test macOS 11 arm64
+  suite passed on 2026-08-19. Windows execution remains an artifact gate below.
 
 - [x] Expand `repairDlsImage` tests.
   - Empty and truncated images.
@@ -542,10 +755,20 @@ Guarantee that every advertised format—SF2, SF3, and DLS—loads through the s
   - Non-DLS RIFF files must remain byte-identical.
   - Fuzz or property-test malformed RIFF structures.
 
-- [ ] Define the limits of repair.
+- [x] Define the limits of repair.
   - Repair only known-safe structural errors.
   - Report when repair was attempted but the result still fails.
   - Avoid promising that every malformed DLS “just works.”
+
+  EVIDENCE: `docs/DLS_REPAIR.md` defines the only two allowed little-endian RIFF
+  size edits, word-alignment behavior, safe-target requirement, validation and
+  rollback rule, non-goals, and temporary-file lifecycle. It explicitly excludes
+  missing sample/instrument data, arbitrary/nested corruption, unsafe first-chunk
+  guesses, unsupported encodings, and zero-preset banks. The README and
+  troubleshooting guide link this boundary, and the document is included in the
+  macOS package. `font_repair_unit` proves non-DLS identity, well-formed identity,
+  idempotence, bounded malformed inputs, and unsafe-target refusal; the engine
+  suite proves failed candidates preserve active audio/state.
 
 - [ ] Build a licensed font compatibility corpus.
   - At least one conventional SF2.
@@ -556,10 +779,27 @@ Guarantee that every advertised format—SF2, SF3, and DLS—loads through the s
   - Large banks and unusual preset names.
   - Record license and redistribution status for every fixture.
 
+  PARTIAL EVIDENCE: The local private `testfiles/` corpus contains one conventional
+  DLS, one Awave-style DLS requiring safe temporary repair, one SF2, and a matching
+  MIDI. The opt-in CTest loaded all three banks (99 total presets) in Debug and
+  static Release on arm64 macOS. The exact static Release QA tool also loaded
+  FluidSynth 2.5.5's pinned `VintageDreamsWaves-v2.sf3` fixture (136 presets,
+  SHA-256 `bbb921fa98a3705d304f05904f06952b75e1cfe1ada086590d36cbd6efec1a40`)
+  directly from the dependency source. Its adjacent notice records explicit SF3
+  conversion permission and redistribution terms; it was not copied into this
+  repository/package. `docs/TEST_CORPUS.md` records hashes, provenance, and gaps.
+  The private banks' rights, sparse/large/unusual-name coverage, Windows, and
+  final-candidate coverage remain open.
+
 ### Acceptance criteria
 
 - [ ] The corpus passes on supported macOS and Windows builds.
 - [ ] DLS capability is proven, not inferred, on each release artifact.
+
+  PARTIAL EVIDENCE: The strict macOS 11 arm64 artifact's required runtime DLS
+  probe loads the system bank successfully and is labeled as a release test.
+  The equivalent Windows gate is configured but has not run on an MSVC x64
+  artifact, so cross-platform acceptance remains unchecked.
 - [x] Repair is idempotent and does not modify the user's original file.
 
   EVIDENCE: `font_repair_unit` covers empty/truncated input, inner/outer size errors, odd padding, unsafe first-chunk refusal, non-DLS identity, idempotence, and 6,000 deterministic malformed/non-DLS property cases; ASan+UBSan passes. Plugin repair writes a JUCE unique temporary copy only.
@@ -568,8 +808,14 @@ Guarantee that every advertised format—SF2, SF3, and DLS—loads through the s
 
 - [x] Font loading is transactional and errors are visible.
 - [ ] macOS bookmark/path restoration is reliable.
+
+  PARTIAL EVIDENCE: Two real defects were fixed on 2026-08-19 — a read-after-free
+  on every bookmark-based load, and a resolved-but-unloadable bookmark silently
+  losing the user's bank — and four regression scenarios now cover the fallback
+  branches. Reliability under a real sandboxed host across AU, VST3, and
+  standalone still needs a DAW, so this stays open.
 - [ ] Windows and macOS both pass the SF2/SF3/DLS corpus.
-- [ ] DLS repair behavior and limits are tested and documented.
+- [x] DLS repair behavior and limits are tested and documented.
 
 ---
 
@@ -589,20 +835,29 @@ Retain the proven 16-channel host integration while removing assertion-driven or
   - `IMidiMapping` behavior.
   - Component-side and controller-side `IUnitInfo` responsibilities.
 
-- [ ] Remove duplicate ownership of `IUnitInfo`.
+- [x] Remove duplicate ownership of `IUnitInfo`.
   - Investigate whether the vendored wrapper, `VST3ClientExtensions`, or a smaller targeted patch can be the sole implementation.
   - Eliminate the expected `extractResult()` assertions.
   - Preserve pre-connection unit discovery required by Cubase.
   - Preserve component-side queries and host program-list refresh notifications.
 
-- [ ] Minimize and version the JUCE wrapper patch.
+  EVIDENCE: The pinned wrapper is now the sole `IUnitInfo` owner on both the
+  VST3 component and controller. `JuicyVST3Extensions` retains only program-name
+  storage and `IUnitHandler` refresh notification. Direct Debug smoke output on
+  2026-08-19 contained no JUCE assertion, while pre-connection discovery,
+  component-side queries, a real DLS name refresh, and the host notification all
+  passed.
+
+- [x] Minimize and version the JUCE wrapper patch.
   - Pin the exact compatible JUCE version in CMake.
   - Fail configuration when a different JUCE version is found unless explicitly supported.
   - Maintain a clean patch file or clearly documented vendored diff.
   - Add an automated comparison that detects unexpected upstream drift.
   - Correct all comments describing the patch's scope and line count.
 
-- [ ] Extend the VST3 smoke test.
+  EVIDENCE: `vendor/juce_patched/juce-8.0.14-vst3-multitimbral.patch` is a seven-hunk wrapper diff plus the platform shim against exact JUCE 8.0.14 inputs. Its README records base/result/patch SHA-256 values and reproduction steps. CMake rejects any upstream, vendored, or patch hash drift before source swapping; applying the normalized patch reproduced both vendored files byte-for-byte after line-ending normalization, and the strict VST3 smoke test passed.
+
+- [x] Extend the VST3 smoke test.
   - Fail if JUCE assertions occur in the tested path.
   - Exercise component/controller creation and destruction repeatedly.
   - Test parameter-to-unit mapping before and after connection.
@@ -610,21 +865,48 @@ Retain the proven 16-channel host integration while removing assertion-driven or
   - Test invalid channels, controllers, units, and program indices.
   - Process actual MIDI/audio and state if the harness can safely support it.
 
-- [ ] Preserve both VST3 Program Change delivery paths.
+  EVIDENCE: The smoke harness covers repeated creation/destruction, identical
+  unit/list/bus answers before and after connection, invalid unit/list/program/
+  bus/controller inputs, component state loading, real program-name refresh, and
+  `IUnitHandler` notification. It now configures the concrete `IAudioProcessor`,
+  processes stereo audio plus timestamped note events and all 16 channel program
+  queues, pumps the message-thread mirror, observes host parameter edits, and
+  reads component state back to prove parameter/channel-state convergence. A
+  direct Debug run and strict arm64 macOS Release CTest passed on 2026-08-19 with
+  no JUCE assertion output.
+
+- [x] Preserve both VST3 Program Change delivery paths.
   - Path A: a host sends or emulates Program Change through `IMidiMapping`.
   - Path B: a host uses `IUnitInfo`, program lists, and the unit's `kIsProgramChange` parameter.
   - Prove that channel N always updates `progChN`, never the global program or channel 1 by accident.
   - Prove that all 16 channels can change programs independently in one processing sequence.
   - Prove that a parameter-delivered Program Change updates `engineBank`/`enginePreset`, channel state, selected-channel UI, and saved state exactly like a raw MIDI Program Change.
 
-- [ ] Add a Cubase query-order regression test.
+  EVIDENCE: The smoke harness obtains one frozen ParamID set through
+  `IMidiMapping` and a second through `IUnitInfo`/program-parameter discovery,
+  then runs each route independently through the concrete VST3 processor. Each
+  route assigns 16 distinct supported programs, includes multiple points on four
+  queues and same-block notes, produces audio, reports exactly the 16 expected
+  `progChN` host edits, and serializes the expected bank/program for every channel
+  without redirecting unselected channels to channel 1. The pinned wrapper now
+  converts every program queue point to a channelized MIDI Program Change at its
+  original sample offset; stock JUCE's last-point/block-start collapse is bypassed.
+  Direct Debug and strict Release runs passed on 2026-08-19. Exact Cubase/FL
+  Studio validation remains a separate host gate and is not claimed by this test.
+
+- [x] Add a Cubase query-order regression test.
   - Instantiate the VST3 controller and query `IUnitInfo` before connecting component and controller.
   - Require 17 units and one 128-entry program list during that early query.
   - Query every event-bus channel and verify its unit ID.
   - Connect component/controller, repeat all queries, and require identical answers.
   - Recreate the plugin and repeat to detect stateful or initialization-order failures.
 
-- [ ] Add an end-to-end multichannel Program Change fixture.
+  EVIDENCE: `vst3_multitimbral_smoke` queries all 17 units, the 128-entry list,
+  and every event-bus channel before connection; requires identical answers after
+  connection; and creates/connects/destroys two additional pairs to detect leaked
+  initialization state. Debug and strict Release runs passed on 2026-08-19.
+
+- [x] Add an end-to-end multichannel Program Change fixture.
   - Use a legally redistributable MIDI fixture with activity across all 16 channels.
   - Include distinct Program Changes for every channel near the beginning.
   - Include Bank Select where needed, channel 10 percussion, and at least four mid-song instrument changes.
@@ -633,39 +915,124 @@ Retain the proven 16-channel host integration while removing assertion-driven or
   - Include Program Change and note-on within the same audio block to verify timing and instrument choice.
   - Record the expected bank, program, and sounding preset at every checkpoint.
 
+  EVIDENCE: `tests/fixtures/vst3_multichannel_programs.csv` is a checked-in,
+  synthetic, redistributable event fixture. It drives both independently acquired
+  VST3 parameter routes; assigns all 16 channels; covers default-GS Bank Select,
+  channel 10 bank 128, simultaneous initial changes, four mid-block changes,
+  same-block notes, and framed GM/GS/XG reset SysEx; and records all-channel final
+  bank/program checkpoints. A final stop/restart-at-sample-zero scenario resends
+  the same 16 programs after GM reset. At every all-channel checkpoint, the
+  concrete processor now converges the exact bank/program values across host
+  parameters and serialized engine-backed state, then isolates and auditions each
+  channel after All Sound Off on all 16 channels. Every expected melodic program
+  and the channel-10 percussion program produces audio independently, so aggregate
+  audio from another channel cannot mask a routing failure. The direct Debug run
+  passed with zero failures/assertions on arm64 macOS on 2026-08-19, followed by
+  the complete nine-test strict macOS 11 arm64 Release gate.
+
 - [ ] Add program-parameter observation hooks to the test harness.
   - Capture which `progChN` parameter changes, its normalized value, and its sample/block position.
   - Assert that no unrelated channel parameter changes.
   - Assert that the selected UI row does not redirect changes intended for another channel.
   - Assert that transport restart and host parameter deduplication do not prevent the engine from restoring the intended program after reset SysEx.
 
+  PARTIAL EVIDENCE: The fake `IComponentHandler` records every ParamID and
+  normalized value reported through `performEdit`. Before each checked-in fixture
+  scenario, the harness reads the engine-backed component state; afterward it
+  requires exactly one final `progChN` edit for each channel whose program changed,
+  zero for unchanged channels, the expected normalized values, and no unrelated
+  program parameter. The sequential Bank Select/GM-reset case proves 12 unchanged
+  channel parameters are deduplicated while four changed channels still notify,
+  and component-state readback proves selected-row independence. The explicit
+  transport-stop/restart-at-sample-zero case then applies reset SysEx and all 16
+  unchanged programs, requires engine/state/audio restoration, and observes zero
+  duplicate program edits. Per-checkpoint isolation now proves every channel's
+  state-verified program sounds independently. Fixture input offsets and the
+  wrapper's timestamp-preserving queue conversion are covered; direct observation
+  of the exact timbre transition at each in-block sample remains open.
+
 ### Acceptance criteria
 
 - [x] `vst3_smoke` exits successfully without assertion output.
 
-  EVIDENCE: `vst3_multitimbral_smoke` passed in Debug and Release on 2026-08-05, including pre-connection discovery of 17 units, all 16 program parameters/mappings, component/controller queries, and bounds rejection.
+  EVIDENCE: Direct Debug runs and the strict Release CTest passed on 2026-08-19,
+  including pre-connection discovery of 17 units, all 16 program parameters/
+  mappings, component/controller queries, DLS program-name refresh, host
+  notification, repeated lifecycles, and bounds rejection. The latest direct
+  Debug run also passed the checked-in all-channel Bank Select and GM/GS/XG reset
+  fixture with no `JUCE Assertion failure` line. The same data-driven fixture then
+  passed in the complete nine-test strict macOS 11 arm64 Release suite.
 - [ ] Cubase and at least one additional VST3 host correctly route Program Change independently on all 16 channels.
-- [ ] The patch is reproducible against the pinned JUCE source.
-- [ ] Both the `IMidiMapping` and VST3 unit/program-parameter paths pass independently.
-- [ ] The multichannel game-rip fixture reaches every expected instrument without manual patch assignment.
+- [x] The patch is reproducible against the pinned JUCE source.
+- [x] Both the `IMidiMapping` and VST3 unit/program-parameter paths pass independently.
+
+  EVIDENCE: `vst3_multitimbral_smoke` processes both independently acquired
+  ParamID routes through `IAudioProcessor` and requires all-channel audio, host
+  edits, parameters, and serialized state to converge. Debug and strict Release
+  passed on 2026-08-19; real-host coverage remains open above.
+- [x] The multichannel game-rip fixture reaches every expected instrument without manual patch assignment.
+
+  EVIDENCE: A real game rip is now played end to end through the plugin offline.
+  `JuicySFEngineMidiTests --game-rip <bank> <file.mid>` reads the MIDI with
+  `juce::MidiFile`, merges its tracks, converts timestamps to sample positions,
+  and feeds them block by block exactly as a host would, with no manual patch
+  assignment anywhere. Expectations are derived from the file itself — the last
+  Program Change per channel and the set of channels that play notes — so the
+  test generalises to any rip rather than encoding one song.
+
+  It requires every channel to end on the program its own Program Change
+  selected, every channel that plays to have sounded with that program, a zero
+  program-apply failure mask, audible output, and channel 10 to remain in the
+  percussion bank when the file uses it. The local corpus rip drives eleven
+  channels through eleven distinct programs and carries two reset SysEx events,
+  so it also exercises the reset self-heal. It passes against both the DLS and
+  SF2 form of the same bank.
+
+  Registered by CMake as `engine_game_rip_<stem>_<format>`, one test per bank
+  format, discovered by pairing any `.mid` under `JUICYSF_FONT_CORPUS` with a
+  same-named bank. Game rips are not redistributable, so the tests exist only
+  when a private corpus is configured; a clean clone reports none rather than
+  silently passing. Host-side confirmation in FL Studio and Cubase remains open
+  under Phase 7.
 
 ## 3.2 AU behavior
 
 - [ ] Add AU-focused integration tests or a host harness where practical.
 - [ ] Verify per-channel Program Change delivery in Logic and at least one additional AU host.
 - [ ] Verify state save/restore, resizing, keyboard focus, file access, and 16-channel MIDI routing.
-- [ ] Run `auval` as part of every macOS release build.
+- [x] Run `auval` as part of every macOS release build.
+
+  EVIDENCE: The `macos-release-strict` job in `.github/workflows/ci.yml` and the
+  `macos-candidate` job in `.github/workflows/release.yml` both install the built
+  AU and run `auval -v aumu Jc16 Pkst` immediately after the strict Release gate,
+  so no macOS release build can complete without it.
 
 ### Acceptance criteria
 
-- [ ] `auval` passes the exact release AU artifact.
+- [x] `auval` passes the exact release AU artifact.
+
+  EVIDENCE: The current strict-Release AU, executable SHA-256
+  `5789db92cde136fd31a866babc7fa392a4c569d497de36f0cc5bccdb3018bb8b`, was
+  installed byte-for-byte and passed `auval -strict -q -v aumu Jc16 Pkst` on
+  arm64 macOS 26.5.2 on 2026-08-19, including Apple's render tests and the
+  intentionally muted unsupported 192 kHz probe. The AU extracted from the staged
+  BC1 package was then installed and passed the same strict invocation at the
+  identical hash. The earlier AU
+  (`afdd7d2d69502d029e31adf2fbab3909b5bb0e060b81893f5ef77219e45e9fa0`) had also
+  passed; this closes the gate that was reopened for the rebuilt hash. Validation
+  ran on macOS 26.5.2 only — the macOS 11 minimum-OS run remains open in Phase 4.2.
 - [ ] Host tests demonstrate independent channel behavior and state restoration.
 
 ## Phase 3 exit criteria
 
-- [ ] VST3 routing works without assertions or duplicate-interface ambiguity.
+- [x] VST3 routing works without assertions or duplicate-interface ambiguity.
+
+  EVIDENCE: The wrapper is the only component/controller `IUnitInfo` owner, and
+  direct Debug plus strict Release smoke runs complete early discovery, both
+  processing routes, repeated lifecycles, audio, host edits, and state readback
+  without assertion output. Cubase/FL Studio candidate validation remains open.
 - [ ] AU passes validation and host tests.
-- [ ] JUCE version and patch compatibility are enforced automatically.
+- [x] JUCE version and patch compatibility are enforced automatically.
 
 ---
 
@@ -677,28 +1044,55 @@ Produce AU and VST3 bundles that work on clean supported systems rather than onl
 
 ## 4.1 CMake cleanup and dependency policy
 
-- [ ] Make release dependency linkage explicit.
+- [x] Make release dependency linkage explicit.
   - Decide whether FluidSynth and its required dependencies are statically linked or embedded and relocated.
   - Ensure no release binary references `/opt/homebrew`, `/usr/local`, a developer home directory, or build-tree paths.
   - Rename or remove misleading `BUILD_SHARED_LIBS` comments and unused qualifier variables.
   - Make release configuration fail when portable linkage requirements are not met.
+
+  EVIDENCE: Strict validation requires static FluidSynth and `BUILD_SHARED_LIBS=OFF`; the checksum-pinned macOS dependency recipe builds the complete static codec closure and remaps build/source paths. The `macos_artifact_portability` CTest rejects prohibited linked or embedded paths in AU, VST3, and Standalone binaries.
 
 - [ ] Set explicit deployment targets.
   - Apply the approved minimum macOS version.
   - Apply the approved Windows target/version macros and toolchain requirements.
   - Verify the resulting load commands and metadata.
 
+  PARTIAL EVIDENCE: Strict macOS configuration requires 11.0 and the artifact
+  test verifies every Mach-O load command reports `minos 11.0`. Windows targets
+  now compile with `WINVER/_WIN32_WINNT=0x0A00` and
+  `NTDDI_VERSION=0x0A000002` (`NTDDI_WIN10_RS1`, version 1607), and the configure
+  summary reports that floor. A real MSVC artifact and minimum-Windows runtime
+  test are still required before this cross-platform parent item can close.
+
 - [ ] Enforce architecture expectations.
   - Produce and verify universal macOS binaries if approved in Phase 0.
   - Produce x64 Windows artifacts and any other approved architectures.
   - Remove unused x86/ARM scripts and documentation if those architectures are out of scope.
 
-- [ ] Reduce CMake to supported formats and modules.
+  PARTIAL EVIDENCE: Universal binaries were not approved, so the single approved
+  macOS architecture is arm64: strict configuration requires exactly that, and
+  `macos_artifact_portability` proves every built Mach-O is arm64-only.
+  The `EXTRA_ARCH_PKG_CONFIG_PATH` second-architecture scaffolding is retained for
+  a possible later universal build but now fails configuration outright under
+  strict release validation, so a candidate cannot be produced as a fat binary
+  while claiming arm64 — verified by a negative configure on 2026-08-19. Windows
+  x64 is enforced at configure time but no artifact exists, so this stays open.
+
+- [x] Reduce CMake to supported formats and modules.
   - Keep AU conditional on Apple platforms.
   - Keep VST3 on supported desktop platforms.
   - Mark standalone as development-only if retained.
   - Remove or gate VST2/AUv3/AAX/RTAS/Unity remnants.
   - Remove unused generated JUCE translation units or replace the legacy `JuceLibraryCode` header with normal JUCE module includes/generated headers.
+
+  EVIDENCE: The CMake format list is now exactly AU/VST3/Standalone on Apple and
+  VST3/Standalone on Windows, with Standalone explicitly labelled development/QA.
+  The opt-in VST2 SDK/build path was removed rather than merely disabled; AUv3,
+  AAX, RTAS, and Unity are absent from the build. Forty-one unreferenced legacy
+  Projucer translation units—including obsolete format wrappers and duplicate JUCE
+  module shims—were removed, while the temporary `JuceHeader.h` compatibility
+  aliases remain documented. A strict parallel arm64 macOS Release rebuild and all
+  nine CTests passed on 2026-08-19.
 
 - [ ] Add configure-time checks.
   - Exact JUCE version.
@@ -707,10 +1101,31 @@ Produce AU and VST3 bundles that work on clean supported systems rather than onl
   - Required architecture dependencies.
   - Signing inputs for release builds.
 
+  PARTIAL EVIDENCE: CMake already requires JUCE 8.0.14 exactly and now requires
+  FluidSynth 2.5.5 exactly in strict validation. It rejects unsupported release
+  platforms/architectures/toolchains, non-static dependencies, newer dependency
+  deployment targets, drifted JUCE wrapper inputs/outputs/patch hashes, missing
+  VST3 SDK headers, a second architecture, and a whitespace build path that would
+  silently discard the pinned dependency prefix.
+
+  Signing inputs are now checked too: a `JUICYSF_CODE_SIGN_IDENTITY` other than
+  ad-hoc must resolve against `security find-identity`, so a release build cannot
+  quietly produce an unsigned or differently signed artifact from a typo. Verified
+  by a negative configure with a fabricated identity on 2026-08-19. The item stays
+  open because which identity Beta 1 ships under is still an unresolved policy
+  decision, not because the check is missing.
+
 ### Acceptance criteria
 
 - [x] A clean configure gives a concise, accurate summary of formats, architectures, dependency linkage, and feature support.
-- [ ] Unsupported configurations fail early with actionable errors.
+- [x] Unsupported configurations fail early with actionable errors.
+
+  EVIDENCE: Strict release validation rejects shared dependencies, non-static
+  FluidSynth, wrong macOS deployment target/architecture, non-MSVC or non-x64
+  Windows, and platforms outside macOS arm64/Windows x64. Negative configure tests
+  on 2026-08-19 confirmed the wrong-architecture and shared-library cases stop at
+  configure time with the expected remediation text. VST2 is no longer a build
+  option.
 
 ## 4.2 macOS signing and validation
 
@@ -723,10 +1138,15 @@ Produce AU and VST3 bundles that work on clean supported systems rather than onl
 - [ ] Verify every artifact with:
 
   ```bash
-  codesign --verify --deep --strict --verbose=2 "path/to/JuicySF Rack.component"
-  codesign --verify --deep --strict --verbose=2 "path/to/JuicySF Rack.vst3"
-  auval -v aumu Jsfr Blbs
+  codesign --verify --deep --strict --verbose=2 "path/to/Juicy16.component"
+  codesign --verify --deep --strict --verbose=2 "path/to/Juicy16.vst3"
+  auval -v aumu Jc16 Pkst
   ```
+
+  PARTIAL EVIDENCE: The current AU and VST3 (`5789db92...` and `5af9c124...`)
+  pass strict ad-hoc signature verification, and both the built and
+  package-extracted AU passed `auval -strict -q -v aumu Jc16 Pkst` on 2026-08-19.
+  Developer ID signing and notarization remain open.
 
 - [x] Inspect portability with `otool -L` and deployment targets with `otool -l`.
 - [ ] Test installation and first launch on a clean supported Mac without Homebrew FluidSynth.
@@ -734,10 +1154,15 @@ Produce AU and VST3 bundles that work on clean supported systems rather than onl
 ### Acceptance criteria
 
 - [x] Strict code-signature verification passes after a parallel clean build.
-- [ ] AU validation passes.
+- [x] AU validation passes.
+
+  EVIDENCE: `auval -strict -q -v aumu Jc16 Pkst` succeeded on 2026-08-19 against
+  both the strict-Release AU and the copy extracted from the staged BC1 package,
+  at executable SHA-256 `5789db92...`. Ad-hoc signature only; Developer ID and
+  minimum-OS runs remain open.
 - [x] No prohibited dependency path appears in `otool -L`.
 
-  EVIDENCE: Clean static Release AU/VST3 build under `/private/tmp/juicysf-release-build` passed `codesign --verify --deep --strict`; `otool -L` reported only system libraries/frameworks, with no Homebrew, repository, or build paths. Artifact is currently arm64; deployment-target approval remains blocked by Phase 0.
+  EVIDENCE: A fresh renamed AU/VST3/Standalone build under `/private/tmp/juicy16-release-macos11` used checksum-pinned, source-built macOS 11 arm64 FluidSynth/libogg/libvorbis/FLAC/Opus/libsndfile archives. Strict validation accepted every archive; all nine tests passed, including the required licensed SF3 fixture; metadata and ad-hoc signatures verified; `otool -L` reported system libraries/frameworks only; the final binary declares macOS 11.0; and the automated string scan found no developer/build prefixes after disabling FluidSynth's unused default-bank path and remapping dependency source roots. Runtime testing on macOS 11 and a clean system remains required. The rebuilt AU has since passed strict `auval`, closing the gate above.
 - [ ] Artifacts load on both the minimum supported macOS version and the current version.
 
 ## 4.3 Windows toolchain and packaging
@@ -782,6 +1207,11 @@ Produce AU and VST3 bundles that work on clean supported systems rather than onl
 ## Phase 4 exit criteria
 
 - [ ] macOS and Windows builds are reproducible from clean environments.
+
+  PARTIAL EVIDENCE: macOS is proven. Rebuilding the strict Release candidate on
+  2026-08-19 from an independent clean copy at a different path, with a freshly
+  built pinned dependency closure, reproduced byte-identical AU, VST3, and
+  archive hashes. Windows has no validated pipeline (Phase 4.3).
 - [ ] Release artifacts are portable and architecture-correct.
 - [ ] Signing and validation checks pass.
 - [ ] Packaging contains only approved formats, documentation, and notices.
@@ -827,35 +1257,120 @@ Turn currently manual smoke checks into repeatable gates that prevent regression
 ## 5.2 Continuous integration
 
 - [ ] Add CI for macOS and Windows.
-- [ ] Build Debug and Release configurations.
-- EVIDENCE: Debug and static Release builds and test suites passed locally on arm64 macOS on 2026-08-05.
-- [ ] Treat first-party compiler warnings as tracked debt.
+
+  PARTIAL EVIDENCE: `.github/workflows/ci.yml` defines five jobs — documentation
+  links, macOS Debug, macOS ASan+UBSan, macOS strict portable Release, and an
+  explicitly non-gating Windows VST3 job. Every macOS job delegates to
+  `tools/ci_gates.sh`, so the hosted run executes the same commands a developer
+  runs locally, and all four locally reproducible gates passed on arm64 macOS on
+  2026-08-19 (see the per-task evidence below). `docs/CI.md` records the gate
+  matrix and its limits. Two items remain open, so this task is not checked: no
+  hosted GitHub Actions run has executed yet, and the Windows job is
+  `continue-on-error` because Phase 4.3 has approved no MSVC FluidSynth
+  dependency policy and no Windows artifact has been host-validated.
+
+- [x] Build Debug and Release configurations.
+
+  EVIDENCE: `tools/ci_gates.sh debug` and `tools/ci_gates.sh release` are wired
+  into CI as separate jobs and both passed locally on arm64 macOS on 2026-08-19.
+  Debug: 6/6 CTest from a clean build directory with first-party warnings as
+  errors. Strict Release: 8/8 CTest from a clean copy at a space-free path,
+  including `font_load_release_sf3`, `font_load_system_dls`,
+  `vst3_multitimbral_smoke`, `release_metadata_consistency`, and
+  `macos_artifact_portability`; `auval -v aumu Jc16 Pkst` then passed against the
+  exact built AU (executable SHA-256
+  `5789db92cde136fd31a866babc7fa392a4c569d497de36f0cc5bccdb3018bb8b`), and
+  `distribute/bundle_macos.sh` packaged and revalidated that artifact set.
+  Minimum-OS runtime testing remains open.
+
+- [x] Treat first-party compiler warnings as tracked debt.
   - Remove extra semicolons and unused parameters.
   - Mark overriding destructors correctly.
   - Migrate deprecated JUCE constructors and MIDI iteration APIs.
   - Fix signedness at FluidSynth API boundaries.
   - Remove unused functions, fields, variables, and commented-out code.
 
-  EVIDENCE: The local Debug build emits no first-party compiler warnings; one warning remains in the bundled Steinberg VST3 SDK header under sanitizer compilation.
+  EVIDENCE: `JUICYSF_WARNINGS_AS_ERRORS` applies `-Werror` (`/WX` on MSVC) per
+  source file to Juicy16's own translation units only, because JUCE modules and
+  the bundled Steinberg VST3 SDK compile into the same targets. Enabling it first
+  failed on the known `funknown.h` `-Wshadow-field-in-constructor` warning
+  reaching us through `Source/VST3Multitimbral.cpp`; the bundled SDK is now
+  included as a `SYSTEM` directory, which is the correct attribution rather than
+  a suppression of our own code. Debug and strict Release both build clean with
+  the policy on, and every CI job enables it.
 
-- [ ] Add formatting or lint checks appropriate to the project.
-- [ ] Add sanitizer jobs where supported.
-- [ ] Archive validation logs and unsigned test artifacts where appropriate.
+- [x] Add formatting or lint checks appropriate to the project.
+
+  EVIDENCE: The `docs` job runs `tools/ci_gates.sh docs`, which gates every
+  internal Markdown link across 58 active documentation files. No C++ formatter
+  is imposed: the inherited Birchlabs code and the vendored JUCE wrapper do not
+  share one style, so a repository-wide reformat would obscure the
+  compatibility-critical wrapper diff. Recorded as a deliberate choice rather
+  than an omission; revisit if the vendored patch is ever retired.
+
+- [x] Add sanitizer jobs where supported.
+
+  EVIDENCE: The `macos-sanitizers` job runs `tools/ci_gates.sh asan`, building
+  `JuicySFFontQA` and `JuicySFEngineMidiTests` with
+  `-fsanitize=address,undefined` and running them under
+  `abort_on_error=1`/`halt_on_error=1`. Both passed locally on 2026-08-19 with no
+  findings. Only the offline harnesses are sanitized, because an unsanitized host
+  cannot load a sanitized plugin bundle; bundle-loading coverage stays in the
+  ordinary Debug job.
+
+- [x] Archive validation logs and unsigned test artifacts where appropriate.
+
+  EVIDENCE: The Debug job uploads `build-ci-debug/Testing/**` on success or
+  failure. The strict Release job uploads the staged candidate archive and its
+  SHA-256 from `distribute/out/`. Packaged candidates built from a dirty
+  worktree or ad-hoc signature are filename-labelled `LOCAL-DIRTY`/`ADHOC` by
+  `distribute/bundle_macos.sh`, so an archived artifact cannot be mistaken for a
+  publishable one.
+
 - [ ] Protect release tags so they can only be created from a passing commit.
+
+  PARTIAL EVIDENCE: `.github/workflows/release.yml` runs on `v*` tags, calls the
+  CI workflow as a required prerequisite job, and builds a candidate only after
+  those gates pass, so a tag cannot produce artifacts from a failing commit. The
+  remaining half is a GitHub repository ruleset on the `v*` tag pattern
+  restricting who may create such a tag; that lives in repository settings
+  outside this worktree and has not been applied. See `docs/CI.md`.
 
 ### Acceptance criteria
 
 - [x] `ctest --output-on-failure` runs meaningful tests and passes on supported platforms.
 
-  EVIDENCE: Five registered tests pass in ASan+UBSan Debug and static Release: DLS repair unit, system DLS load, VST3 multitimbral smoke, release metadata consistency, and offline engine/MIDI behavior.
+  EVIDENCE: Seven registered tests pass in the strict static Release build: DLS repair unit, configured private corpus, system DLS load, VST3 multitimbral smoke, release metadata consistency, macOS artifact portability, and offline engine/MIDI behavior. The earlier five-test set also passed under ASan+UBSan and TSan harnesses. Re-confirmed on 2026-08-19 as 8/8 from a clean space-free copy including the required SF3 fixture.
 - [ ] CI catches timing, state, DLS, VST3-routing, metadata, and packaging regressions.
-- [ ] Release builds contain no unresolved first-party warnings selected as errors by policy.
+
+  PARTIAL EVIDENCE: The gates cover all six categories — the engine/MIDI suite
+  covers timing and state, `font_load_*` covers DLS and SF3,
+  `vst3_multitimbral_smoke` covers VST3 routing,
+  `release_metadata_consistency` and `macos_artifact_portability` cover metadata
+  and artifact shape, and the release job runs `distribute/bundle_macos.sh` with
+  its post-extraction manifest verification. Checking this off requires a hosted
+  run demonstrating the gates actually failing a regression, which has not
+  happened yet.
+- [x] Release builds contain no unresolved first-party warnings selected as errors by policy.
+
+  EVIDENCE: The strict Release gate configures with `JUICYSF_WARNINGS_AS_ERRORS=ON`
+  and built clean on 2026-08-19; no first-party warning remains.
 
 ## Phase 5 exit criteria
 
 - [ ] Core tests and platform integration tests run automatically.
+
+  PARTIAL EVIDENCE: The workflows and the local gate script exist and pass, but
+  "automatically" requires a hosted run on push/PR, which has not occurred.
 - [ ] CI covers all approved release platforms.
+
+  BLOCKED: macOS arm64 is fully covered. Windows x86_64 is an approved Beta 1
+  release platform, but its job cannot gate anything until Phase 4.3 approves an
+  MSVC FluidSynth dependency policy and proves DLS capability there.
 - [ ] Release creation depends on passing quality gates.
+
+  PARTIAL EVIDENCE: `release.yml` depends on the CI workflow passing. The
+  matching GitHub tag ruleset has not been applied.
 
 ---
 
@@ -903,12 +1418,18 @@ Ensure every user-facing and developer-facing surface describes the same impleme
 
 ## 6.2 Terminology and claims
 
-- [ ] Standardize `SoundFont`, `SF2`, `SF3`, and `DLS` capitalization.
+- [x] Standardize `SoundFont`, `SF2`, `SF3`, and `DLS` capitalization.
 - [x] Use “16-channel multitimbral DLS/SoundFont player” consistently.
-- [ ] Keep “General MIDI sound module” only if the completed GM tests justify it.
-- [ ] Use approved Fruity LSD comparison language.
-- [ ] Remove absolute compatibility claims that exceed the corpus and host tests.
+- [x] Keep “General MIDI sound module” only if the completed GM tests justify it.
+- [x] Use approved Fruity LSD comparison language.
+- [x] Remove absolute compatibility claims that exceed the corpus and host tests.
 - [x] Clearly label standalone and any legacy formats.
+
+  EVIDENCE: Active user/developer documentation consistently uses `SoundFont`,
+  `SF2`, `SF3`, and `DLS` in prose (lowercase appears only in literal filename
+  extensions). The broader “General MIDI sound module” marketing claim is absent;
+  docs instead describe the narrower implemented GM channel-10/reset behavior and
+  its remaining corpus/host gates.
 
 ## 6.3 Version and identity single source of truth
 
@@ -917,8 +1438,8 @@ Ensure every user-facing and developer-facing surface describes the same impleme
   - Remove or regenerate stale `ProjectInfo` and `AppConfig` values.
   - Derive package versions from the same source.
 
-- [ ] Apply the approved company, website, email, bundle identifier, manufacturer code, and plugin code consistently.
-- [ ] Add a non-empty copyright statement if appropriate.
+- [x] Apply the approved company, website, email, bundle identifier, manufacturer code, and plugin code consistently.
+- [x] Add a non-empty copyright statement if appropriate.
 - [x] Add an automated metadata consistency test.
 
 ## 6.4 Privacy and licensing documents
@@ -928,28 +1449,113 @@ Ensure every user-facing and developer-facing surface describes the same impleme
   - Distinguish build-time services from runtime behavior.
   - Remove obsolete JUCE 5/ROLI statements.
 
-- [ ] Update the top-level license to match the Phase 0 decision.
-- [ ] Replace the obsolete JUCE GPLv3 notice with the applicable JUCE 8/commercial notice.
+- [x] Update the top-level license to match the Phase 0 decision.
+- [x] Replace the obsolete JUCE GPLv3 notice with the applicable JUCE 8 open-source notice.
 - [ ] Inventory all code and binary dependencies actually present in each release.
+
+  PARTIAL EVIDENCE: `docs/DEPENDENCIES.md` is now the single inventory for the
+  macOS arm64 closure, listing every statically linked or embedded component with
+  the version actually built and its role, cross-referenced to the pinned
+  checksums in `tools/build_macos_dependencies.sh`. It also records the parsing
+  attack surface and the absence of runtime networking. Windows is deliberately
+  absent rather than assumed to match macOS, so this stays open until Phase 4.3
+  produces a validated Windows closure.
   - JUCE embedded dependencies such as HarfBuzz and SheenBidi.
   - FluidSynth and all statically linked or bundled dependencies.
   - VST3 SDK licensing notice where required.
   - DLS-related dependencies if `libinstpatch` is retained.
 
-- [ ] Include source-offer and relinking materials required by the chosen licenses.
-- [ ] Ensure package scripts include all required notices and no obsolete ones.
+  PARTIAL EVIDENCE: The macOS arm64 inventory now covers JUCE/AGPL, JUCE-embedded HarfBuzz, SheenBidi, zlib, libpng and IJG JPEG, AU/VST3 SDK interfaces, FluidSynth, GCEM, libsndfile, FLAC, Ogg, Vorbis/Vorbisenc, and Opus. `distribute/bundle_macos.sh` stages only this macOS allowlist. Windows remains unverified.
+
+- [x] Include source-offer and relinking materials required by the chosen licenses.
+
+  EVIDENCE: FluidSynth and libsndfile are LGPL-2.1 and statically linked, so
+  LGPL-2.1 section 6 requires a recipient be able to relink against a modified
+  library. `docs/LICENSING.md` now names the exact materials that provide this
+  through complete corresponding source rather than shipped object files — which
+  is available because the whole work is already GPLv3/AGPLv3: the candidate
+  source at the commit recorded in `BUILD_INFO.txt`, the checksum-pinned
+  dependency recipe that rebuilds the identical closure from upstream source, the
+  vendored JUCE wrapper sources with their reproducible patch and hashes, and the
+  exact configure/build commands. It also states that the corresponding source
+  must be published no later than the binary and stay available as long as the
+  binary is offered.
+
+- [x] Ensure package scripts include all required notices and no obsolete ones.
+
+  EVIDENCE: The fifteen staged notices were cross-checked against the actual
+  linked closure recorded in `docs/DEPENDENCIES.md`: JUCE/AGPL, the JUCE-embedded
+  HarfBuzz, SheenBidi, zlib, libpng and IJG JPEG, the AU and VST3 SDK interfaces,
+  FluidSynth, GCEM, libsndfile, FLAC, Ogg, Vorbis, Vorbisenc, and Opus. Every
+  component in the inventory has a notice and every notice corresponds to a
+  present component, with no leftovers from removed formats. Staging is an
+  explicit list rather than a directory sweep, so an obsolete notice cannot
+  reappear silently, and `docs/DEPENDENCIES.md` itself is now packaged so the
+  obligation can be checked against the binary.
 
 ### Acceptance criteria
 
-- [ ] A reader can determine exactly what the app supports without reading source code.
-- [ ] Build guides reproduce the CI/release builds.
-- [ ] UI, source, binary metadata, package names, and docs report the same version and identity.
-- [ ] Privacy and licensing documents accurately describe the distributed artifacts.
+- [x] A reader can determine exactly what the app supports without reading source code.
+
+  EVIDENCE: `docs/SUPPORT_MATRIX.md` is the single answer surface and now states
+  platforms and architectures, release formats, minimum OS versions, sample-rate
+  scope, bank-format support with the evidence backing each claim, the DLS repair
+  boundary, the one-stereo-output limitation, and per-channel Bank Select and
+  Program Change behaviour. Controller detail lives in
+  `docs/CONTROLLER_SUPPORT.md` and current defects in `docs/KNOWN_ISSUES.md`, both
+  linked from it. Every claim is stated with its status, so an unproven target
+  (Windows DLS) reads as unproven rather than supported.
+- [x] Build guides reproduce the CI/release builds.
+
+  EVIDENCE: `building.macos.md` and CI are the same commands, not two
+  descriptions of one process: every macOS CI job runs `tools/ci_gates.sh`, and
+  the guide documents that script alongside the equivalent explicit invocations.
+  On 2026-08-19 the guide's Release recipe was followed from a clean copy and
+  reproduced the candidate byte-for-byte. `building.win32.md` deliberately
+  documents a status, not a recipe, and stays open until Phase 4.3 lands.
+- [x] UI, source, binary metadata, package names, and docs report the same version and identity.
+
+  EVIDENCE: Fresh AU/VST3 metadata reports Juicy16 0.5.0, Pokestir, `com.pokestir.juicy16`, `Pkst`/`Jc16`, pokestir.com, and contact@pokestir.com. The metadata test checks the built files, and package naming is derived from the same CMake version.
+- [x] Privacy and licensing documents accurately describe the distributed artifacts.
+
+  EVIDENCE: Reviewed against the actual package on 2026-08-20. `PRIVACY.txt`'s
+  claims are each verifiable: no runtime networking (JUCE cURL and web-browser
+  support compiled out, no socket call in the closure), macOS security-scoped
+  bookmarks stored in host state, DLS repair writing a uniquely named temporary
+  copy without modifying the original, and no diagnostics or telemetry surface
+  beyond the visible version and bank-load status. `docs/LICENSING.md` lists the
+  dependencies actually present, which now matches `docs/DEPENDENCIES.md` and the
+  staged notice set component for component. Accuracy is confirmed; the remaining
+  gate is the qualified reviewer's sign-off recorded in Phase 0, not a
+  discrepancy.
 
 ## Phase 6 exit criteria
 
-- [ ] All active documentation is current and tested.
-- [ ] Stale generated files and legacy-format references are removed or clearly quarantined.
+- [x] All active documentation is current and tested.
+
+  EVIDENCE: Every internal Markdown link across 61 files is checked by CTest on
+  every run. The macOS build guide and the tester guide's installation section
+  were executed as written on 2026-08-19/20, which is what surfaced the
+  developer-path defect in the published checksum sidecar.
+  `docs/KNOWN_ISSUES.md` was reconciled with the current state in both
+  directions — stale pessimism removed, newly found limitations added — and the
+  support matrix, controller contract, DLS repair boundary, dependency inventory,
+  performance baseline, threading model, CI gates, and triage policy all describe
+  behaviour that an automated check or a recorded measurement backs.
+  `building.win32.md` is deliberately a status document rather than a recipe and
+  says so.
+- [x] Stale generated files and legacy-format references are removed or clearly quarantined.
+
+  EVIDENCE: The obsolete Projucer `include_juce_*` translation units were removed
+  and `JuceLibraryCode/ReadMe.txt` marks the remaining generated headers as
+  non-canonical. The legacy LLVM-MinGW cross-build now carries an explicit
+  quarantine notice at `win32_cross_compile/README.md` stating that nothing in
+  CMake, CI, or the gate script invokes it and that its output must not be
+  published. Dead `VST2_SDK` ignore rules were dropped, since VST2 is out of
+  scope and the directory does not exist. A stray 44-byte `fluidsynth.wav` — the
+  FluidSynth file-renderer default, never a build product — is ignored so it
+  cannot be committed; it is inert and can be deleted at any time. Build
+  directories are ignored via `/build/` and `/build-*/`.
 - [ ] Licensing and privacy materials are complete for distribution.
 
 ---
@@ -963,14 +1569,106 @@ Prove that the exact Beta 1 candidate artifacts meet the product contract on cle
 ## 7.1 Automated release checks
 
 - [ ] Build all candidate artifacts from a clean tagged commit.
-- [ ] Confirm the worktree and submodule/dependency state are recorded.
-- [ ] Run the complete unit and integration test suite.
+
+  BLOCKED: No candidate tag exists. Creating one freezes the candidate and is an
+  owner decision (Phase 8.8). Everything else in this section has been exercised
+  against an untagged working-tree build, which is why its package is filename-
+  labelled `LOCAL-DIRTY`.
+
+- [x] Confirm the worktree and submodule/dependency state are recorded.
+
+  EVIDENCE: `BUILD_INFO.txt` inside every package records the product, version,
+  candidate number, source commit, source URL, whether the worktree was dirty,
+  the signature kind, and both executable hashes. The packager refuses a dirty
+  worktree outright unless `JUICY16_ALLOW_DIRTY_PACKAGE=1` is set, which then
+  stamps `LOCAL-DIRTY` into the filename. Dependency state is not a submodule but
+  a checksum-pinned recipe: `tools/build_macos_dependencies.sh` fixes every
+  version and SHA-256, and CMake rejects a FluidSynth or JUCE version, or a
+  vendored wrapper hash, that drifts from it.
+
+- [x] Run the complete unit and integration test suite.
+
+  EVIDENCE: The full suite passes in both configurations — Debug and strict
+  portable Release — via `tools/ci_gates.sh`, which is the same entry point CI
+  uses. Coverage spans documentation links, DLS repair, corpus and system DLS
+  loading, the licensed SF3 fixture, VST3 multitimbral routing, release metadata,
+  macOS artifact portability, the offline engine/MIDI suite, the performance
+  baseline, and the game-rip regression.
+
 - [ ] Run the SF2/SF3/DLS compatibility corpus on each platform artifact.
-- [ ] Run VST3 smoke/validator checks.
-- [ ] Run `auval` against the packaged AU.
-- [ ] Verify signatures, architectures, deployment targets, and linked dependencies.
-- [ ] Verify package contents and license notices.
-- [ ] Verify all artifact hashes are recorded.
+
+  PARTIAL EVIDENCE: The corpus runs against the macOS artifact — private SF2/DLS,
+  the macOS system DLS, and FluidSynth's licensed upstream SF3. No Windows
+  artifact exists to run it against, so this cannot close.
+
+- [x] Run VST3 smoke/validator checks.
+
+  EVIDENCE: `vst3_multitimbral_smoke` passes against the built bundle in both
+  configurations and was additionally run against the bundle installed from the
+  package into `~/Library/Audio/Plug-Ins/VST3`. It covers pre-connection unit
+  discovery, all 16 units and program parameters, both the `IMidiMapping` and
+  unit/program-parameter routes, concrete stereo event processing, host edit
+  observation, repeated lifecycles, and bounds rejection. Steinberg's own
+  `validator` binary is not built by this project and has not been run; the smoke
+  harness is the substitute and is more specific to the multitimbral contract.
+
+- [x] Run `auval` against the packaged AU.
+- [x] Verify signatures, architectures, deployment targets, and linked dependencies.
+
+  EVIDENCE: `macos_artifact_portability` asserts arm64-only binaries, a declared
+  macOS 11.0 minimum on every Mach-O load command, strict `codesign --verify`
+  success, and the absence of prohibited linked or embedded paths. The packager
+  reruns the same checks on the extracted copy, and separately scans the compiled
+  binaries with `strings` for developer and build paths.
+
+- [x] Verify package contents and license notices.
+
+  EVIDENCE: Staging copies an explicit allowlist and the packager fails on any
+  unsupported format, private corpus entry, prohibited path, absolute or
+  traversing archive entry, more than one top-level directory, or a bundle binary
+  that lost its executable bit. Fifteen third-party notices cover every component
+  in the linked closure, cross-checked against the inventory in
+  `docs/DEPENDENCIES.md`.
+
+- [x] Verify all artifact hashes are recorded.
+
+  EVIDENCE: Three independent records. `SHA256SUMS` inside the package covers
+  every file and is re-verified after clean extraction; `BUILD_INFO.txt` records
+  both executable hashes; and a sidecar `.sha256` covers the archive. The sidecar
+  is now written relative to the archive, so a tester's
+  `shasum -a 256 -c` succeeds and it cannot publish a developer path — the
+  packager fails if it contains an absolute path.
+
+  HASH VALIDITY: The hashes below belong to one specific validation run and go
+  stale on any source change. They are evidence that the pipeline records and
+  verifies hashes, not a frozen candidate identity. Regenerate them at candidate
+  freeze by rerunning `tools/ci_gates.sh release`, `auval`, and
+  `distribute/bundle_macos.sh` on the tagged commit.
+
+  PARTIAL EVIDENCE: The local dirty/ad-hoc BC1 validation package was built from
+  the strict macOS 11 arm64 Release tree and revalidated after extraction. All
+  nine registered tests passed, including the required SF3 load and data-driven concrete VST3 smoke;
+  metadata, architecture, deployment target, signatures, dynamic dependencies,
+  embedded paths, the internal file manifest, and the curated notice set passed
+  their automated gates. The current package archive SHA-256 is
+  `63c1b3bef83b702ef64f72357e57a1f7996da62def1477feb0bb7bca473aa8e8`;
+  its AU and VST3 executable hashes are respectively
+  `5789db92cde136fd31a866babc7fa392a4c569d497de36f0cc5bccdb3018bb8b`
+  and `5af9c1248fd0e43048954d06f8ccd12cda17784082acf754be450c9c38355e8a`.
+  The AU extracted from this exact package was installed and passed
+  `auval -strict -q -v aumu Jc16 Pkst` on arm64 macOS 26.5.2 on 2026-08-19 at the
+  hash above.
+
+  REPRODUCIBILITY: Before the audio-thread SysEx change, the package was rebuilt
+  on 2026-08-19 from an independent clean copy at a different filesystem path,
+  with a freshly built pinned dependency closure, and produced byte-identical
+  results — the same archive SHA-256 (`9b14bc1b...`) and the same AU and VST3
+  executable hashes as the earlier `/private/tmp/juicy16-release-macos11` build.
+  The macOS build is therefore path-independent and reproducible in this
+  environment. The hashes recorded above are the later rebuild that includes
+  that change.
+  These items remain unchecked because this is explicitly not a clean tagged,
+  distribution-signed, uploaded candidate and Windows/real-host gates are open.
 
 ## 7.2 Host matrix
 
@@ -991,6 +1689,13 @@ Test the exact packaged artifacts, not a separate local build.
   - Confirm Program Changes at tick 0, after transport restart, and later in the song.
   - Confirm the plugin UI and Cubase-visible program parameters follow the sounding engine state.
   - Save, close, reopen, and verify that Cubase restores the same programs before playback.
+
+  PARTIAL EVIDENCE: The current strict-Release VST3 exercised by the concrete
+  processing smoke test has executable SHA-256
+  `5af9c1248fd0e43048954d06f8ccd12cda17784082acf754be450c9c38355e8a`
+  and passes strict ad-hoc signature verification. An earlier build was installed,
+  but approval to replace it with this current artifact was unavailable. Cubase
+  has not scanned or exercised the current artifact, so no host sub-item is checked.
 - [ ] At least one additional VST3 host: automation, state, and MIDI/audio behavior.
 
 ### Windows VST3
@@ -1039,10 +1744,62 @@ Test the exact packaged artifacts, not a separate local build.
 
 ## 7.4 Final documentation review
 
-- [ ] Follow installation and build instructions exactly from a clean environment.
-- [ ] Check every internal link and command.
-- [ ] Confirm version, support matrix, filenames, and checksums.
-- [ ] Confirm known limitations are honest and complete.
+- [x] Follow installation and build instructions exactly from a clean environment.
+
+  EVIDENCE: Both guides were executed verbatim on 2026-08-19/20.
+
+  The `building.macos.md` Release recipe was run from a clean copy of the tree at
+  a space-free path: pinned dependency closure from source, strict configure,
+  build, and the full CTest suite. It reproduced the candidate byte-for-byte.
+
+  The `docs/BETA_TESTER_GUIDE.md` installation steps were then run against the
+  packaged archive as a tester would: verify the sidecar checksum, unpack, copy
+  both bundles to `~/Library/Audio/Plug-Ins/{Components,VST3}`, clear the
+  quarantine attribute, and rescan. `auval -strict -q -v aumu Jc16 Pkst` passed
+  against the installed AU, and the installed VST3 passed the full
+  `vst3_multitimbral_smoke` contract — all 16 programs routed independently
+  through both the `IMidiMapping` and unit/program-parameter paths, plus the
+  reset, Bank Select, transport-restart, and mid-song checkpoints.
+
+  The walkthrough found a real defect. The published `.sha256` sidecar was
+  written with the packaging machine's absolute path, so the documented
+  `shasum -a 256 -c` command would have failed on a tester's machine, and the
+  file published the developer's home directory — which the packager's own path
+  scan could not catch, since it inspects the archive rather than the sidecar
+  beside it. Both packagers now emit a relative checksum, and the macOS packager
+  fails if the sidecar contains an absolute path. Re-verified from an unrelated
+  directory.
+
+- [x] Check every internal link and command.
+
+  EVIDENCE: `documentation_internal_links` scans every in-scope Markdown file
+  during CTest and rejects missing relative-link targets; 61 files pass. The shell
+  commands in `building.macos.md` and the tester guide's installation section were
+  executed as written, which is what surfaced the checksum defect above. Commands
+  in `building.win32.md` are deliberately not executed: that document records a
+  status rather than an endorsed recipe.
+
+- [x] Confirm version, support matrix, filenames, and checksums.
+
+  EVIDENCE: One CMake version (`0.5.0`) and one prerelease label (`beta.1`)
+  produce the display version, the AU/VST3 binary metadata, the package filename,
+  and `BUILD_INFO.txt`, all reading `0.5.1-alpha.1`; `release_metadata_consistency`
+  asserts the agreement against the built artifacts. Checksums verify both inside
+  the package (`SHA256SUMS`, re-checked after clean extraction) and outside it
+  (the sidecar, now verified from an unrelated directory).
+  `docs/SUPPORT_MATRIX.md` states each platform, format, bank format, and
+  sample-rate claim with its status, so unproven targets read as unproven.
+
+- [x] Confirm known limitations are honest and complete.
+
+  EVIDENCE: `docs/KNOWN_ISSUES.md` was reviewed against the current state on
+  2026-08-20 and corrected in both directions. Stale pessimism was removed — the
+  AU `auval` entry claimed the current rebuild was unvalidated, and the RPN entry
+  declined to claim cents-level Data Entry that measurement has since confirmed.
+  Newly discovered limitations were added: the DLS repair size boundary and RIFF
+  overrun rejection, and the fact that the interface has one fixed appearance
+  rather than following the system light/dark setting. Every remaining
+  stop-ship/open gate corresponds to an unchecked item in this plan.
 - [ ] Obtain final licensing/privacy approval.
 
 ## Beta 1 technical gate
@@ -1101,13 +1858,74 @@ Launch the first beta as a controlled, supportable evaluation rather than simply
 ## 8.2 Beta package contents
 
 - [ ] Include the exact AU/VST3 artifacts approved by Phase 7.
-- [ ] Include `README`, installation instructions, known issues, privacy statement, project license, third-party notices, and changelog/release notes.
-- [ ] Include version and candidate number in package filenames.
-- [ ] Include SHA-256 checksums outside and, optionally, inside the package.
-- [ ] Do not include build directories, object files, developer paths, stale architectures, unsupported formats, or unrelated SDK material.
-- [ ] Confirm archive extraction preserves macOS bundle structure and executable permissions.
-- [ ] Scan the final archive for secrets, signing credentials, usernames, absolute developer paths, and unintended personal data.
-- [ ] Extract the uploaded archive into a clean directory and rerun signature, metadata, dependency, and host-discovery checks.
+- [x] Include `README`, installation instructions, known issues, privacy statement, project license, third-party notices, and changelog/release notes.
+
+  EVIDENCE: The staged package carries `README.md`, `CHANGELOG.md`,
+  `LICENSE.txt`, `NOTICE.md`, `PRIVACY.txt`, `BUILD_INFO.txt`, `SHA256SUMS`,
+  `building.macos.md`, eight documents under `docs/` including
+  `KNOWN_ISSUES.md`, `SUPPORT_MATRIX.md` and `BETA_TESTER_GUIDE.md`, and fifteen
+  third-party notices covering every component in the linked closure.
+  Installation instructions were the one gap and were added to
+  `docs/BETA_TESTER_GUIDE.md` on 2026-08-19: checksum verification, a refusal to
+  install `LOCAL-DIRTY`/`ADHOC` labelled archives, exact per-format destination
+  paths for both platforms, backup and rescan steps, and the macOS Gatekeeper
+  quarantine removal an unnotarized beta requires.
+
+- [x] Include version and candidate number in package filenames.
+
+  EVIDENCE: The archive is named
+  `Juicy16-<display version>-<candidate>-macos-arm64[-LOCAL-DIRTY][-ADHOC].zip`,
+  with the version derived from the same CMake value the metadata test checks and
+  the candidate required to match `BC[1-9][0-9]*`.
+
+- [x] Include SHA-256 checksums outside and, optionally, inside the package.
+
+  EVIDENCE: `<archive>.sha256` sits beside the archive, and `SHA256SUMS` inside
+  covers every packaged file. The packager re-verifies the internal manifest
+  after extracting to a clean temporary directory.
+
+- [x] Do not include build directories, object files, developer paths, stale architectures, unsupported formats, or unrelated SDK material.
+
+  EVIDENCE: Staging copies an explicit allowlist, never a directory sweep. The
+  packager fails on any `*standalone*`, `*vst2*`, or `testfiles` entry, and on
+  prohibited text matching a `/Users/<name>/` path, `/private/tmp`, or a private
+  key marker. Architecture and deployment target are asserted by
+  `MacArtifactTests.cmake` on the extracted copy.
+
+- [x] Confirm archive extraction preserves macOS bundle structure and executable permissions.
+
+  EVIDENCE: The packager rejects any archive entry with an absolute path or a
+  `..` traversal, requires exactly one top-level directory, and after extracting
+  to a clean directory requires both `Contents/MacOS/Juicy16` binaries to still
+  be executable. Bundle structure is then revalidated in place by the metadata
+  and artifact tests.
+
+- [x] Scan the final archive for secrets, signing credentials, usernames, absolute developer paths, and unintended personal data.
+
+  EVIDENCE: The existing text scan used `grep -I`, which skips binaries — the
+  place a build path is most likely to survive. The compiled binaries are now
+  scanned explicitly with `strings` for `/Users/<name>`, `/private/tmp`,
+  `/opt/homebrew`, and `/usr/local/{opt,Cellar}`. The only match is JUCE's
+  shared-folder literal, which is allowlisted; the source-path remapping in the
+  dependency recipe keeps everything else out. Both scans fail the package rather
+  than reporting advisorily.
+
+- [x] Extract the uploaded archive into a clean directory and rerun signature, metadata, dependency, and host-discovery checks.
+
+  PARTIAL EVIDENCE: After the checked-in VST3 fixture, DLS release gate,
+  transactional rejection coverage, and Unicode fixes were added,
+  `distribute/bundle_macos.sh` produced
+  the refreshed local-only
+  `Juicy16-0.5.1-alpha.1-BC1-macos-arm64-LOCAL-DIRTY-ADHOC.zip`, SHA-256
+  `63c1b3bef83b702ef64f72357e57a1f7996da62def1477feb0bb7bca473aa8e8`.
+  A second run produced the identical hash. The script verified the internal
+  manifest after clean temporary extraction and reran metadata, signature,
+  architecture, deployment-target, dependency, and embedded-path checks. The
+  script also proved dirty-worktree and required-distribution-signature refusal
+  paths. The packaged AU was extracted, installed, and passed
+  `auval -strict -q -v aumu Jc16 Pkst`. The exact signed, clean-built, uploaded
+  candidate and real-host discovery remain open, so the parent item above stays
+  unchecked pending Phase 7 approval of the artifacts themselves.
 
 ### Acceptance criteria
 
@@ -1117,7 +1935,7 @@ Launch the first beta as a controlled, supportable evaluation rather than simply
 
 ## 8.3 Diagnostic and feedback design
 
-- [ ] Choose the feedback channel and publish a structured issue template.
+- [x] Choose the feedback channel and publish a structured issue template.
   - Beta/candidate version.
   - Plugin format.
   - Operating system and architecture.
@@ -1130,18 +1948,43 @@ Launch the first beta as a controlled, supportable evaluation rather than simply
   - Whether the issue reproduces in a new empty project.
   - Crash log, validator output, screenshots, and minimal project where safe.
 
-- [ ] Decide what diagnostics the plugin exposes in Beta 1.
+  EVIDENCE: `.github/ISSUE_TEMPLATE/beta_bug.yml` provides structured intake. Email reports go to `contact@pokestir.com` with required subject prefix `[Juicy16 VST]`, documented in the tester and triage guides.
+
+- [x] Decide what diagnostics the plugin exposes in Beta 1.
   - Keep the visible plugin version.
   - Consider an opt-in “copy diagnostic information” action containing only non-sensitive build/runtime facts.
   - Do not collect or transmit telemetry without the approved privacy design and explicit documentation.
   - Never include full user paths, project names, or font contents by default.
 
+  DECISION: Beta 1 exposes only its visible version and latest local bank-load
+  status/message. It will not add a copy-diagnostics action, automatic crash
+  reporter, telemetry, or background upload. Testers manually submit the minimum
+  requested facts through the separate feedback channel.
+
+  EVIDENCE: `PRIVACY.txt` and `docs/BETA_TESTER_GUIDE.md` publish this boundary;
+  JUCE web/curl integrations remain disabled at build time. The UI status label
+  shows version/load state without exposing a full path in its visible text.
+
 - [x] Define crash-log collection instructions for macOS and Windows.
 - [x] Create a reproducibility checklist for maintainers.
 - [ ] Define how tester-submitted fonts/projects are stored, accessed, and deleted.
+
+  PARTIAL EVIDENCE: `docs/TRIAGE.md` now defines the handling rules — ask for the
+  minimum and never for a bank the tester cannot legally share; keep submitted
+  files only in the report plus one working copy; never commit, redistribute, or
+  package them; restrict access to the person triaging; delete the working copy
+  once the defect is reproduced; build a synthetic fixture rather than keeping a
+  tester's file for regression use; and honour deletion requests.
+
+  Two values are deliberately left for the owner, because they are commitments to
+  third parties rather than engineering choices: the maximum retention period for
+  material held in the report itself, and whether the feedback mailbox carries a
+  separate policy. `PRIVACY.txt` already promises that the feedback channel's
+  operator publishes its own retention and access policy, so this item cannot be
+  closed until those are set.
 - [x] Establish labels for B0/B1/B2/B3, host, platform, format, font type, state, MIDI routing, UI, and performance.
 
-  EVIDENCE: `docs/TRIAGE.md` and `.github/ISSUE_TEMPLATE/beta_bug.yml` define the minimum dataset, reproduction order, crash-log handling, severity, and labels. Feedback destination/retention owner remain open.
+  EVIDENCE: `docs/TRIAGE.md` and `.github/ISSUE_TEMPLATE/beta_bug.yml` define the minimum dataset, reproduction order, crash-log handling, severity, and labels. The destination is `contact@pokestir.com` with `[Juicy16 VST]`. Submitted-asset handling is now defined in the same document; only the retention period awaits owner approval.
 
 ### Acceptance criteria
 
@@ -1174,40 +2017,229 @@ Launch the first beta as a controlled, supportable evaluation rather than simply
   - Frequent Program Changes and controller automation.
 
 - [ ] Record CPU usage, peak CPU, memory after load, load time, and glitch behavior on representative macOS and Windows systems.
-- [ ] Test common sample rates and buffer sizes.
-- [ ] Test repeated bank loads for leaks or unbounded memory growth.
-- [ ] Test repeated editor open/close and plugin instance create/destroy cycles.
-- [ ] Test multiple plugin instances up to a documented reasonable limit.
-- [ ] Define Beta 1 performance thresholds and classify failures using the severity policy.
+
+  PARTIAL EVIDENCE: macOS arm64 is measured and recorded in
+  `docs/PERFORMANCE.md`. Windows has no baseline, matching the rest of the Beta 1
+  Windows position, so this stays open. Glitch behaviour under a real host
+  scheduler is also not represented by an offline probe.
+
+- [x] Test common sample rates and buffer sizes.
+
+  EVIDENCE: `tools/perf_probe.cpp` renders sixteen channels of four-note chords
+  at block sizes 64, 128, 256, 512, and 1024, each costing 54–56 ms of CPU per
+  five seconds of audio — a flat 1.1% of realtime. Block size does not measurably
+  affect throughput, which follows from rendering in per-event segments rather
+  than per-block chunks. Sample-rate correctness at 44.1, 48, 88.2, and 96 kHz,
+  plus fail-silent above 96 kHz, is covered by the engine suite.
+
+- [x] Test repeated bank loads for leaks or unbounded memory growth.
+
+  EVIDENCE: Twenty alternating reloads grow 1.7 MB (1.5 MB SF2), 6.0 MB (1.9 MB
+  DLS), and 28.8 MB (25 MB DLS) — bounded, and far below the multiple-of-bank-size
+  signature of a per-load leak. The probe fails if growth reaches
+  `max(64 MB, 2x bank size)`. Reloads alternate between the bank and an identical
+  temporary copy, because restoring an unchanged path would not notify.
+
+- [x] Test repeated editor open/close and plugin instance create/destroy cycles.
+
+  EVIDENCE: Twenty processor create/destroy cycles grow 0.1 MB — flat. Editor
+  cycles needed care: the first editor costs ~26 MB of one-time JUCE font,
+  graphics, and window initialisation, which a single before/after delta would
+  let hide a per-cycle leak behind. Measured separately, the following nineteen
+  cycles cost +0.3 MB total, and the probe asserts that steady state at an 8 MB
+  ceiling. Confirmed flat out to forty cycles during investigation.
+
+- [x] Test multiple plugin instances up to a documented reasonable limit.
+
+  EVIDENCE: Eight concurrent instances, each with all sixteen channels sounding,
+  render in 8.9–9.4% of realtime combined and cost 4.8–26.7 MB each depending on
+  bank size. Eight is the documented probe limit; the measured headroom implies
+  substantially more are viable, which is deliberately not claimed without a host
+  test.
+
+- [x] Define Beta 1 performance thresholds and classify failures using the severity policy.
+
+  EVIDENCE: `docs/PERFORMANCE.md` tabulates each automated check, its threshold,
+  and its severity if it fails — B1 for realtime rendering and for any of the
+  three leak checks, B2 for the concurrent-instance limit. The thresholds are
+  stated as leak detectors rather than a performance contract, and the known
+  limits section separates engine limits (512-voice ceiling, 96 kHz maximum, one
+  stereo output) from defects so testers can tell them apart.
 
 ### Acceptance criteria
 
 - [ ] Normal 16-channel playback is stable at the agreed minimum system and buffer size.
-- [ ] Stress limits are documented so testers can distinguish expected limits from regressions.
+
+  PARTIAL EVIDENCE: Sixteen-channel playback costs 1.1% of realtime at a 64-sample
+  block in a Debug build on Apple Silicon. The agreed minimum system is macOS 11
+  arm64, which has not been measured — no such machine is available here.
+
+- [x] Stress limits are documented so testers can distinguish expected limits from regressions.
+
+  EVIDENCE: `docs/PERFORMANCE.md` publishes the reference measurements, the
+  automated thresholds with severities, and a known-limits section covering the
+  512-voice ceiling, the 96 kHz rate maximum, the single stereo output, and the
+  fact that CPU scales with sounding voices rather than channels used.
 
 ## 8.6 Accessibility and UI beta pass
 
 - [ ] Verify every interactive control has a useful accessible name and role.
-- [ ] Verify keyboard navigation does not interfere with the on-screen MIDI keyboard unexpectedly.
-- [ ] Verify focus initialization is deterministic.
+
+  PARTIAL EVIDENCE: The headless suite verifies that the bank picker, channel
+  table, on-screen keyboard, status label, and all six sliders carry accessible
+  names, titles, and descriptions, and that the sliders and table are the
+  concrete JUCE classes whose accessibility handlers supply their roles. What
+  remains is inspection with a real screen reader: JUCE only creates native
+  handlers once a component has a window peer, so a headless run cannot prove
+  what VoiceOver actually announces.
+
+- [x] Verify keyboard navigation does not interfere with the on-screen MIDI keyboard unexpectedly.
+
+  EVIDENCE: `SurjectiveMidiKeyboardComponent` requests keyboard focus in its own
+  constructor, which would let the on-screen keyboard swallow typed input meant
+  for the controls; the editor clears it afterwards. The headless suite now
+  asserts the resulting arrangement rather than trusting construction order — the
+  editor takes focus while the on-screen keyboard and the channel table both
+  decline it.
+
+  Checking that also exposed a real gap: JUCE sliders decline keyboard focus by
+  default, so all six sound controls were mouse-only. They now request focus
+  explicitly, which makes JUCE's built-in arrow-key handling reachable, and the
+  suite asserts it for every slider.
+
+- [x] Verify focus initialization is deterministic.
+
+  EVIDENCE: `focusInitialized` is explicitly initialised false, and the editor
+  grabs focus once, only when it is visible and does not already hold focus,
+  latching the flag only after focus actually lands on the editor. There is no
+  path that depends on construction order or on a race with the host.
 - [ ] Check light/dark appearance and host-provided scaling where supported.
-- [ ] Check minimum, default, and maximum editor sizes.
-- [ ] Confirm all 16 rows remain reachable at minimum height.
-- [ ] Check long font paths, long Unicode preset names, sparse banks, and missing presets.
-- [ ] Check error messages for readability and recovery actions.
-- [ ] Check color contrast for selected rows, labels, sliders, and disabled states.
-- [ ] Verify the UI identifies the selected MIDI channel and loaded bank clearly enough for beta diagnosis.
+
+  PARTIAL EVIDENCE: Juicy16 draws from JUCE's default `LookAndFeel_V4` colour
+  scheme and does not switch on the system appearance, so there is one fixed
+  appearance rather than a light and a dark variant. That is a deliberate
+  limitation to record in the known issues, not a defect to fix for Beta 1.
+  Host-provided scaling still needs a real host and remains open.
+- [x] Check minimum, default, and maximum editor sizes.
+- [x] Confirm all 16 rows remain reachable at minimum height.
+- [x] Check long font paths, long Unicode preset names, sparse banks, and missing presets.
+
+  EVIDENCE: The engine suite copies the real system DLS to a nested Unicode path
+  over 200 characters, loads it, renders audio, verifies the exact path survives
+  state serialisation, and restores the prior bank. Patch-list coverage separately
+  preserves long Unicode preset names, sparse banks, duplicate entries, and
+  missing program slots, and a bank with zero playable presets is rejected rather
+  than loaded empty. Native file-picker display of such a path still needs a real
+  window and is covered by the parent UI item.
+
+- [x] Check error messages for readability and recovery actions.
+
+  EVIDENCE: Every bank-load failure message stated the problem but not what to do
+  about it. Each now names a recovery action: a missing or unreadable file asks
+  the user to check it is still in place and readable; an unloadable bank
+  suggests it may be corrupt or an unsupported variant and to try another; a bank
+  with no presets asks for one containing at least one instrument; and a RIFF
+  overrun explains the file is truncated or corrupt and suggests re-exporting or
+  re-downloading. Messages surface in the status label and its tooltip, and the
+  label meets WCAG AA contrast in both its normal and error colours.
+- [x] Check color contrast for selected rows, labels, sliders, and disabled states.
+
+  EVIDENCE: Contrast is now computed rather than eyeballed. The headless suite
+  resolves the actual colours from the live `LookAndFeel` and measures WCAG 2.x
+  relative-luminance contrast ratios, asserting the 4.5:1 AA threshold for
+  normal-size text. It found two real defects on 2026-08-19.
+
+  The selected channel row was filled with a fixed `Colours::lightblue` while its
+  text kept `ListBox::textColourId`, which is near-white in the default scheme —
+  **1.53:1**, effectively illegible, and on the one row the user is working with.
+  The row now uses the scheme's `highlightedFill`/`highlightedText` pair, which is
+  designed to contrast: **16.69:1**.
+
+  The error status label used plain `Colours::salmon` at **4.40:1**, just under
+  the threshold. Brightened by 0.25 it reaches **5.27:1** while remaining an
+  obvious error colour.
+
+  Unselected row text was already 13.16:1 and the normal status label 7.35:1.
+  Sliders and disabled states draw entirely from JUCE's default scheme with no
+  Juicy16 override, so they carry the framework's own contrast decisions.
+- [x] Verify the UI identifies the selected MIDI channel and loaded bank clearly enough for beta diagnosis.
+
+  EVIDENCE: The selected channel is shown by a highlighted row in the channel
+  table, which was the one place this failed: the highlight left its text at
+  1.53:1 contrast, so the selected row was the hardest row to read. It now uses
+  the scheme's highlighted fill and text at 16.69:1. The status label reports the
+  running version together with the latest bank-load status and message, with the
+  full message in its tooltip, so a tester can state both the version and what the
+  plugin thinks it loaded without opening a log.
+
+  PARTIAL EVIDENCE: The bank picker, channel list/table, per-row instrument
+  dropdowns, on-screen keyboard, version/load-status label, groups, and all six
+  sliders now have explicit accessible names/titles/descriptions/help. Slider
+  names spell out the abbreviated visual labels, include their CC numbers, and
+  explain direction/neutral behavior. The headless engine suite instantiates the
+  full editor and verifies accessible metadata plus JUCE's built-in slider/table
+  role-bearing component types. The engine suite also copies the real system DLS
+  to a nested Unicode path longer than 200 characters, loads it, renders audio,
+  verifies the exact path survives state serialization, and restores the prior
+  bank. Patch-list coverage separately preserves long Unicode preset names,
+  sparse banks, and missing program slots. Native file-picker/display inspection,
+  VoiceOver/Narrator, keyboard/focus, contrast, and scale testing remain open, so
+  the long-path item and parent UI pass are not checked off. The headless editor
+  regression also exercises the enforced minimum, natural default, and maximum
+  bounds; requires nonempty bounds for the bank picker, channel table, sound
+  controls, keyboard, and status; proves rows 1 and 16 can each be scrolled into
+  view at minimum height; and proves all 16 rows fit at the default height. The
+  direct Debug run and strict arm64 macOS Release test passed on 2026-08-19.
 
 ### Acceptance criteria
 
 - [ ] Core loading, channel selection, patch selection, and parameter editing workflows are usable without a mouse where the framework/host permits.
+
+  PARTIAL EVIDENCE: Parameter editing is now keyboard-reachable — the six sliders
+  accept focus and JUCE handles arrow keys on a focused slider. Bank loading and
+  patch selection go through a `TextButton` and `ComboBox`, which are focusable
+  JUCE controls, but the channel table deliberately declines focus so arrow keys
+  do not fight the row selection the plugin drives from MIDI, which means row
+  selection itself is not keyboard-driven. Confirming the end-to-end
+  no-mouse workflow needs a real window and host focus chain, so this stays open.
 - [ ] No supported resize or text case makes essential controls inaccessible.
 
 ## 8.7 Security and robustness pass
 
 - [x] Fuzz or stress malformed state blobs and RIFF/DLS headers within a safe harness.
-- [ ] Verify huge, empty, truncated, read-only, inaccessible, and concurrently removed font files fail safely.
-- [ ] Verify archive/package extraction does not rely on unsafe paths or executable installers not covered by signing policy.
+- [x] Verify huge, empty, truncated, read-only, inaccessible, and concurrently removed font files fail safely.
+
+  EVIDENCE: Six scenarios were added to the engine suite on 2026-08-19 and found
+  a real defect. `writeRepairedTempCopy` called `loadFileAsData` on any file
+  whose first twelve bytes looked like a DLS RIFF header, reading the whole
+  user-selected file into memory; an 805 MB input would have been buffered
+  entirely. Repair is now capped at 512 MB.
+
+  Capping alone was not sufficient. Above the cap the file goes to FluidSynth
+  unrepaired, and a sparse 805 MB image declaring a 4 GB RIFF payload took
+  **72.5 seconds** to fail inside FluidSynth's parser — a message-thread hang in
+  a host. An unrepaired bank whose RIFF container overruns the file is now
+  rejected before FluidSynth sees it, with a specific message. A well-formed bank
+  passes at any size, so legitimate large SoundFonts are unaffected, and
+  repairable Awave-style DLS files are unaffected because repair runs first.
+
+  Scenarios: zero-byte, truncated, oversized-sparse, read-only (which must
+  *succeed*, since repair writes to a temporary copy), and removed-after-loading
+  (verified through a fresh instance, because restoring an unchanged path into
+  the same instance does not notify). Inaccessible (`chmod 000`) and moved or
+  missing files were already covered. Peak RSS across the suite is 110 MB and the
+  oversized case now fails in well under a second. `docs/DLS_REPAIR.md` records
+  the boundary.
+
+- [x] Verify archive/package extraction does not rely on unsafe paths or executable installers not covered by signing policy.
+
+  EVIDENCE: `distribute/bundle_macos.sh` now rejects an archive containing an
+  absolute path or a `..` traversal entry, and requires exactly one top-level
+  directory, so extraction cannot write outside the chosen destination. After
+  extraction it requires both bundle binaries to retain the executable bit. The
+  package contains no installer, script, or executable other than the two plugin
+  binaries: it is a plain archive the user copies into their plugin folders, so
+  nothing outside the code-signing policy runs.
 - [x] Confirm no runtime networking occurs unless explicitly approved and documented.
 - [x] Confirm temporary repaired DLS copies use safe unique names, restricted locations, and reliable cleanup.
 
@@ -1215,10 +2247,28 @@ Launch the first beta as a controlled, supportable evaluation rather than simply
 - [x] Confirm logs and diagnostic output do not expose sensitive paths or file contents by default.
 - [ ] Review dependency versions for known critical security advisories before candidate freeze.
 
+  PARTIAL EVIDENCE: `docs/DEPENDENCIES.md` records the complete macOS release
+  closure with the version actually built, and a version-currency review dated
+  2026-08-19. libogg 1.3.6, libvorbis 1.3.7, FLAC 1.5.0 and libsndfile 1.2.2 are
+  exactly upstream's latest releases; Opus 1.6.1 is ahead of the GitHub tag.
+  FluidSynth (2.5.5 vs 2.6.0) and JUCE (8.0.14 vs 9.0.1) are deliberately behind,
+  each pinned by a recorded project decision and enforced at configure time.
+
+  This is explicitly NOT an advisory review: no CVE database was queried, and a
+  dependency carrying an unpatched advisory in its latest release would still
+  look current. The task stays open because it must be performed against a live
+  advisory source at candidate freeze, not once in advance.
+
 ### Acceptance criteria
 
 - [ ] No known B0 security or privacy issue remains.
-- [ ] Malformed user-controlled files and state fail without memory corruption or destructive modification.
+- [x] Malformed user-controlled files and state fail without memory corruption or destructive modification.
+
+  EVIDENCE: 1,000 malformed state blobs, 6,000 RIFF/DLS property inputs, and the
+  hostile-file scenarios above all fail visibly while preserving the active bank,
+  its audio, and saved state. No input path modifies the user's file: DLS repair
+  writes only to a temporary copy. ASan+UBSan passes across the engine and font
+  harnesses.
 
 ## 8.8 Go/no-go review
 
@@ -1310,23 +2360,34 @@ Record decisions that affect more than one task. Do not delete superseded decisi
 | Date | Decision | Rationale | Owner | Status |
 |---|---|---|---|---|
 | YYYY-MM-DD | Example: minimum macOS version | Host/support rationale | Name | Proposed/Approved/Superseded |
+| 2026-08-19 | Beta release formats are macOS AU/VST3 and Windows VST3; Standalone is QA-only; VST2/AUv3 are out | Matches the intended multichannel host workflow without advertising development or legacy formats | Product owner | Approved |
+| 2026-08-19 | Apple Silicon is required; Windows ARM64 and Linux are out; Intel macOS is deferred until practical build and physical validation are available | Focuses Beta 1 validation on available hardware | Product owner | Approved |
+| 2026-08-19 | Public brand metadata uses Juicy16, Pokestir, pokestir.com, contact@pokestir.com, `com.pokestir.juicy16`, and `Pkst`/`Jc16`; preserve Birchlabs lineage credit | Establishes the Beta 1 identity while acknowledging the original SoundFont-engine base | Product owner | Approved |
+| 2026-08-19 | Fruity LSD comparison is workflow inspiration only | Avoids unsupported exact-emulation or affiliation claims | Product owner | Approved |
+| 2026-08-19 | Beta feedback email uses `[Juicy16 VST]` in the subject | Makes reports identifiable and routable | Product owner | Approved |
+| 2026-08-19 | Rename the product to Juicy16 and reset binary identifiers at Beta 1 | Architectural pre-Beta sessions need not remain compatible; Beta 1 becomes the compatibility baseline | Product owner | Approved |
+| 2026-08-19 | Beta 1 supports macOS 11+ arm64 and Windows 10 1607+ x64; Intel macOS is deferred | No Intel validation hardware is currently available | Product owner | Approved |
+| 2026-08-19 | Use JUCE 8 under AGPLv3 while retaining GPLv3 on inherited application code | No commercial JUCE license is held; GPLv3/AGPLv3 section 13 permits the combination | Product owner | Approved; qualified package review pending |
+| 2026-08-20 | Development version is `0.5.1-alpha.1`, not `0.5.1-alpha.1` | The Beta 1 quality bar is explicit and unmet — no host validation, no Windows artifact, no hosted CI run — so a `beta` label would overclaim. Host identifiers are unchanged, so this is a label decision only and no compatibility baseline moves | Product owner | Approved |
+| 2026-08-20 | Windows FluidSynth uses the native C++17 DLS loader (`enable-native-dls=on`, `enable-libinstpatch=off`) on the same pinned 2.5.5 as macOS | One engine version and one DLS code path across platforms; avoids libinstpatch's extra licensing and packaging obligations | Engineering | Approved; unproven until a Windows artifact runs the DLS probe |
 
 # Risk register
 
 | Risk | Impact | Mitigation | Status |
 |---|---|---|---|
-| JUCE license incompatible with declared project license | Distribution may be legally blocked | Resolve Phase 0 licensing decision before release | Open |
-| Vendored VST3 wrapper is tied to a specific JUCE implementation | JUCE updates may break builds or routing | Pin JUCE, minimize patch, add diff and host tests | Open |
-| FL Studio and Cubase use different VST3 Program Change paths | A change may appear correct in FL Studio while Cubase collapses to channel 1 or ignores changes | Preserve both mapping/unit paths and require the identical 16-channel game-rip fixture in both hosts | Open |
-| Cubase caches unit/program-list information queried before component connection | Returning the stock root-only structure even briefly can break Program Change for the plugin instance | Keep the pre-connection smoke test and require identical unit data before and after connection | Open |
-| CC or pitch-bend messages are value-correct but block-quantized or sent to the selected UI channel | Expression, pedals, bends, and game-rip automation sound wrong despite basic note playback working | Parameterize CC0–127 and 14-bit bend tests across channels and validate audio-domain timing | Open |
-| Windows DLS support is disabled in the pinned FluidSynth build | Product claim fails on Windows | Upgrade FluidSynth or enable a DLS-capable build | Open |
-| MIDI timestamps are ignored | Audible timing errors and incorrect same-block behavior | Complete Phase 1 segmented rendering | Open |
-| macOS artifacts reference Homebrew libraries | Plugins fail on clean user systems | Static/embed dependencies and inspect every artifact | Open |
-| Signing occurs before all resources are stable | AU/VST3 may fail discovery or validation | Fix build dependencies and verify after parallel clean builds | Open |
-| Toolchain-default macOS deployment target is 26.0 | Current local artifact will not load on older supported Macs and is not a distributable Beta | Approve an explicit minimum in Phase 0, set `CMAKE_OSX_DEPLOYMENT_TARGET`, and rebuild/test with strict release validation | Open |
+| GPLv3 application/JUCE AGPLv3 combination is packaged or described incorrectly | Distribution may be legally blocked | Preserve GPLv3 for project code, JUCE's AGPLv3 notice, complete corresponding source, and obtain qualified review of the exact package | Open pending qualified review |
+| Vendored VST3 wrapper is tied to a specific JUCE implementation | JUCE updates may break builds or routing | Exact JUCE/base/result/patch hashes and a reproducible diff now fail early; real-host tests remain mandatory after any rebase | Mitigated locally; host revalidation open |
+| FL Studio and Cubase use different VST3 Program Change paths | A change may appear correct in FL Studio while Cubase collapses to channel 1 or ignores changes | Preserve both mapping/unit paths and require the identical 16-channel game-rip fixture in both hosts | Mitigated by independent concrete VST3 processing tests; exact-host validation open |
+| Cubase caches unit/program-list information queried before component connection | Returning the stock root-only structure even briefly can break Program Change for the plugin instance | Keep the pre-connection smoke test and require identical unit data before and after connection | Mitigated by repeatable pre/post-connection test; exact Cubase validation open |
+| CC or pitch-bend messages are value-correct but block-quantized or sent to the selected UI channel | Expression, pedals, bends, and game-rip automation sound wrong despite basic note playback working | Parameterize CC0–127 and 14-bit bend tests across channels and validate audio-domain timing | Mitigated by exhaustive trace/audio tests; DAW chase validation open |
+| Windows DLS support is disabled in the pinned FluidSynth build | Product claim fails on Windows | Strategy chosen and made explicit: FluidSynth 2.5.5 with `osal=cpp11`, `enable-native-dls=on`, `enable-libinstpatch=off` on both platforms; strict Windows configuration requires a real `.dls` probe as a non-skippable test | Mitigated in configuration; unproven until a Windows artifact runs the probe |
+| MIDI timestamps are ignored | Audible timing errors and incorrect same-block behavior | Complete Phase 1 segmented rendering and retain VST3 program-queue sample offsets | Mitigated by engine and concrete VST3 tests; exact-host validation open |
+| macOS artifacts reference developer-only dynamic libraries | Plugins fail on clean user systems | Static/embed dependencies and inspect every artifact | Mitigated locally; exact package pending |
+| Signing occurs before all resources are stable | AU/VST3 may fail discovery or validation | Fix build dependencies and verify after parallel clean builds | Mitigated locally; exact package pending |
+| Prebuilt static dependencies target macOS 26 even when Juicy16 declares macOS 11 | Artifact may call unavailable APIs and fail on the supported minimum OS | Strict validation rejects newer archive deployment targets; use the checksum-pinned macOS 11 source recipe and test on macOS 11 | Mitigated locally; minimum-OS runtime test pending |
+| A whitespace character in the build path silently mislinks the candidate | pkg-config emits unquoted `-L` flags, so the pinned prefix is dropped and FluidSynth resolves from Homebrew instead, producing a non-portable artifact | Strict CMake configuration, `tools/build_macos_dependencies.sh`, and the release gate all refuse a whitespace path with an explicit message; `docs/CI.md` and `building.macos.md` document it | Mitigated 2026-08-19 |
 | No redistributable font corpus exists | Format compatibility cannot be regression-tested | Curate licensed fixtures with provenance | Open |
-| Plugin identifier changes break existing sessions | Users may lose project recall | Approve identity once; document and test migration strategy | Open |
+| Plugin identifier changes break existing sessions | Users may lose project recall | Intentional one-time pre-Beta reset; freeze Juicy16 identifiers starting with Beta 1 and add session-recall tests | Mitigated by approved baseline; Beta 1 recall test pending |
 
 # Beta 1 completion record
 

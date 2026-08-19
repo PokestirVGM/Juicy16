@@ -324,25 +324,25 @@
  #define JucePlugin_Enable_IAA             0
 #endif
 #ifndef  JucePlugin_Name
- #define JucePlugin_Name                   "JuicySF Rack"
+ #define JucePlugin_Name                   "Juicy16"
 #endif
 #ifndef  JucePlugin_Desc
  #define JucePlugin_Desc                   "16-channel multitimbral DLS/SoundFont player"
 #endif
 #ifndef  JucePlugin_Manufacturer
- #define JucePlugin_Manufacturer           "Birchlabs"
+ #define JucePlugin_Manufacturer           "Pokestir"
 #endif
 #ifndef  JucePlugin_ManufacturerWebsite
- #define JucePlugin_ManufacturerWebsite    "https://birchlabs.co.uk"
+ #define JucePlugin_ManufacturerWebsite    "https://pokestir.com"
 #endif
 #ifndef  JucePlugin_ManufacturerEmail
- #define JucePlugin_ManufacturerEmail      ""
+ #define JucePlugin_ManufacturerEmail      "contact@pokestir.com"
 #endif
 #ifndef  JucePlugin_ManufacturerCode
- #define JucePlugin_ManufacturerCode       0x426c6273 // 'Blbs'
+ #define JucePlugin_ManufacturerCode       0x506b7374 // 'Pkst'
 #endif
 #ifndef  JucePlugin_PluginCode
- #define JucePlugin_PluginCode             0x4a737066 // 'Jspf'
+ #define JucePlugin_PluginCode             0x4a633136 // 'Jc16'
 #endif
 #ifndef  JucePlugin_IsSynth
  #define JucePlugin_IsSynth                1
@@ -360,13 +360,13 @@
  #define JucePlugin_EditorRequiresKeyboardFocus  1
 #endif
 #ifndef  JucePlugin_Version
- #define JucePlugin_Version                0.5.0
+ #define JucePlugin_Version                0.5.1
 #endif
 #ifndef  JucePlugin_VersionCode
- #define JucePlugin_VersionCode            0x500
+ #define JucePlugin_VersionCode            0x501
 #endif
 #ifndef  JucePlugin_VersionString
- #define JucePlugin_VersionString          "0.5.0"
+ #define JucePlugin_VersionString          "0.5.1"
 #endif
 #ifndef  JucePlugin_VSTUniqueID
  #define JucePlugin_VSTUniqueID            JucePlugin_PluginCode
@@ -384,16 +384,16 @@
  #define JucePlugin_AUSubType              JucePlugin_PluginCode
 #endif
 #ifndef  JucePlugin_AUExportPrefix
- #define JucePlugin_AUExportPrefix         juicysfpluginAU
+ #define JucePlugin_AUExportPrefix         juicy16AU
 #endif
 #ifndef  JucePlugin_AUExportPrefixQuoted
- #define JucePlugin_AUExportPrefixQuoted   "juicysfpluginAU"
+ #define JucePlugin_AUExportPrefixQuoted   "juicy16AU"
 #endif
 #ifndef  JucePlugin_AUManufacturerCode
  #define JucePlugin_AUManufacturerCode     JucePlugin_ManufacturerCode
 #endif
 #ifndef  JucePlugin_CFBundleIdentifier
- #define JucePlugin_CFBundleIdentifier     uk.co.birchlabs.juicysfplugin
+ #define JucePlugin_CFBundleIdentifier     com.pokestir.juicy16
 #endif
 #ifndef  JucePlugin_RTASCategory
  #define JucePlugin_RTASCategory           2048
@@ -411,7 +411,7 @@
  #define JucePlugin_RTASDisableMultiMono   0
 #endif
 #ifndef  JucePlugin_AAXIdentifier
- #define JucePlugin_AAXIdentifier          com.Birchlabs.juicysfplugin
+ #define JucePlugin_AAXIdentifier          com.pokestir.juicy16
 #endif
 #ifndef  JucePlugin_AAXManufacturerCode
  #define JucePlugin_AAXManufacturerCode    JucePlugin_ManufacturerCode
@@ -435,7 +435,7 @@
  #define JucePlugin_IAASubType             JucePlugin_PluginCode
 #endif
 #ifndef  JucePlugin_IAAName
- #define JucePlugin_IAAName                "birchlabs: Juicy SF"
+ #define JucePlugin_IAAName                "Pokestir: Juicy16"
 #endif
 #ifndef  JucePlugin_VSTNumMidiInputs
  #define JucePlugin_VSTNumMidiInputs       16

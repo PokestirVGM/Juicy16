@@ -5,7 +5,7 @@
 - Confirm the format matches the DAW: AU or VST3 on macOS, VST3 on Windows. Cubase does not load AU.
 - Put the complete bundle in the user or system plugin directory; do not copy only its inner executable.
 - Rescan plugins and check the host's rejected/blacklisted list.
-- On macOS, run `codesign --verify --deep --strict --verbose=2` on the installed bundle. For AU, run `auval -v aumu Jsfr Blbs`.
+- On macOS, run `codesign --verify --deep --strict --verbose=2` on the installed bundle. For AU, run `auval -v aumu Jc16 Pkst`.
 - Confirm the binary architecture matches the DAW with `file`. The currently verified local build is arm64 only.
 
 ## Only MIDI channel 1 plays or Program Changes do not follow the song
@@ -28,6 +28,7 @@
 ## Controllers, pedals, or pitch bend sound wrong
 
 - Confirm the DAW is not filtering, remapping, normalizing, or chasing the controller.
+- Compare the expected engine semantics with [CONTROLLER_SUPPORT.md](CONTROLLER_SUPPORT.md); exact delivery does not make every controller audible in every bank.
 - Pitch bend is 14-bit with center 8192. Bend range is normally selected using RPN 0,0 (CC101/100 followed by Data Entry CC6/38) and is independent per channel.
 - The audible effect of pressure and many CCs depends on modulators in the loaded bank even though the MIDI is forwarded.
 - The six UI sound controls use CC71, 72, 73, 74, 75, and 79. Value 64 is neutral; they are per channel.
@@ -39,11 +40,17 @@
 - Confirm the file exists, is readable, and contains at least one preset.
 - A failed replacement leaves the last working bank active. Hover the file control for the load-result message.
 - On macOS, reselect a moved file so the saved path/security bookmark can be renewed.
-- DLS repair handles only known RIFF-size inconsistencies and uses a temporary copy; it cannot repair arbitrary corrupt sample or instrument data.
+- DLS repair handles only the RIFF-size cases defined in [DLS_REPAIR.md](DLS_REPAIR.md) and uses a temporary copy; it cannot repair arbitrary corrupt sample or instrument data.
+
+## The plugin loads but produces no audio
+
+- Confirm the host sample rate is 96 kHz or lower. FluidSynth 2.5.5 cannot render above 96 kHz, so Juicy16 intentionally mutes at higher rates rather than producing incorrectly pitched audio. The unsupported rate is written to the host/plugin log.
+- Confirm the bank loaded successfully, the MIDI reaches the intended channel, and the channel has a valid program in that bank.
+- Try a note at 44.1 or 48 kHz in a fresh instance before investigating host-specific routing.
 
 ## What to include in a Beta report
 
-- JuicySF Rack version and candidate number.
+- Juicy16 version and candidate number.
 - OS, CPU architecture, DAW name/version, plugin format, sample rate, and block size.
 - Bank format and whether it can legally be shared; MIDI file or minimal event list.
 - Expected and actual bank/program per affected MIDI channel.

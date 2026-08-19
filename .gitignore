@@ -1,8 +1,11 @@
 .vscode
 /build/
+/build-*/
+/distribute/out/
+# stray FluidSynth file-renderer output, never a build product
+fluidsynth.wav
+/testfiles/
 .DS_Store
-/VST2_SDK/*
-!/VST2_SDK/README.md
 /llvm-mingw-*/
 /llvm-mingw-*.tar.xz
 /AGENTS.md

@@ -1,5 +1,5 @@
 //
-// Font-loading QA harness for JuicySF Rack.
+// Font-loading QA harness for Juicy16.
 //
 // 1) Unit-tests Source/DlsRepair.h (the exact repair code the plugin ships).
 // 2) Stress-loads every SF2/SF3/DLS in the given directories through the same

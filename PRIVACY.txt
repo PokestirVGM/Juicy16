@@ -1,13 +1,15 @@
-JuicySF Rack Privacy Statement — Beta 1 Candidate
+Juicy16 Privacy Statement — Beta 1 Candidate
 
-JuicySF Rack does not intentionally collect telemetry, analytics, account information, or usage data. The plugin does not intentionally make network requests; its JUCE web-browser and curl integrations are disabled at build time.
+Juicy16 does not intentionally collect telemetry, analytics, account information, or usage data. The plugin does not intentionally make network requests; its JUCE web-browser and curl integrations are disabled at build time.
 
 The plugin reads a DLS, SF2, or SF3 file only after the user selects it or restores a project that references it. On macOS it may store a security-scoped bookmark in the host's plugin state so the selected file can be reopened. That state can contain the file path and bookmark data and is controlled by the DAW/project storage location.
 
-When repairing a supported malformed DLS header, JuicySF Rack writes a uniquely named corrected copy in the operating system's temporary-file area. The original is not modified. The temporary copy is removed when it is no longer the active bank or when the plugin instance is destroyed; abnormal host termination may leave normal operating-system temporary data until system cleanup.
+When repairing a supported malformed DLS header, Juicy16 writes a uniquely named corrected copy in the operating system's temporary-file area. The original is not modified. The temporary copy is removed when it is no longer the active bank or when the plugin instance is destroyed; abnormal host termination may leave normal operating-system temporary data until system cleanup.
 
-JuicySF Rack does not upload bank files, MIDI, project state, file paths, or diagnostic data. A tester may choose to submit those items through the separately published feedback channel; that channel's operator must state its own retention and access policy before Beta distribution.
+Juicy16 does not upload bank files, MIDI, project state, file paths, or diagnostic data. A tester may choose to submit those items through the separately published feedback channel; that channel's operator must state its own retention and access policy before Beta distribution.
 
-DAWs, operating systems, download hosts, code-signing/notarization services, and third-party distribution sites may process data under their own policies. This statement covers JuicySF Rack's own runtime behavior only.
+Beta 1 exposes only the visible plugin version and the latest local bank-load status/message in its interface. It has no “copy diagnostics,” automatic crash reporter, telemetry, or background diagnostic upload. Reports and attachments are sent only when the tester deliberately uses the separate feedback channel.
+
+DAWs, operating systems, download hosts, code-signing/notarization services, and third-party distribution sites may process data under their own policies. This statement covers Juicy16's own runtime behavior only.
 
 This statement must be reviewed again if networking, crash reporting, analytics, automatic updates, or remote support diagnostics are added.

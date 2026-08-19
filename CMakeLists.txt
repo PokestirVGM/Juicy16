@@ -15,8 +15,8 @@ cmake_minimum_required(VERSION 3.15)
 # `project()` command. `project()` sets up some helpful variables that describe source/binary
 # directories, and the current project version. This is a standard CMake command.
 
-project(JUICY_SF_RACK VERSION 0.5.0)
-set(JUICYSF_PRERELEASE_LABEL "beta.1" CACHE STRING
+project(JUICY16 VERSION 0.5.1)
+set(JUICYSF_PRERELEASE_LABEL "alpha.1" CACHE STRING
     "Optional prerelease label appended to the user-facing version")
 if (JUICYSF_PRERELEASE_LABEL)
   set(JUICYSF_DISPLAY_VERSION "${PROJECT_VERSION}-${JUICYSF_PRERELEASE_LABEL}")
@@ -44,35 +44,192 @@ option(JUICYSF_COPY_PLUGIN_AFTER_BUILD
        "Install built plugins into the current user's plugin directories" off)
 option(JUICYSF_RELEASE_VALIDATION
        "Reject configuration that lacks approved portable-release inputs" off)
+set(JUICYSF_FONT_CORPUS "" CACHE PATH
+    "Optional private/local SF2/SF3/DLS corpus path registered with CTest; never packaged")
+set(JUICYSF_SF3_FIXTURE "" CACHE FILEPATH
+    "Licensed local SF3 file required by strict release validation; never packaged")
 set(JUICYSF_CODE_SIGN_IDENTITY "-" CACHE STRING
     "macOS code-sign identity used after bundle resources and VST3 metadata are finalized; empty disables signing")
-set(VST2_SDK_PATH "" CACHE STRING "VST2 SDK path")
-option(JUICYSF_ENABLE_LEGACY_VST2 "Build unsupported legacy VST2 when an SDK is supplied" off)
+set(JUICYSF_MACOS_SYSTEM_DLS
+    "/System/Library/Components/CoreAudio.component/Contents/Resources/gs_instruments.dls")
+include(CTest)
+
+option(JUICYSF_WARNINGS_AS_ERRORS
+       "Fail the build on a warning in first-party sources (CI quality gate)" off)
+
+# JUCE modules and the bundled Steinberg VST3 SDK compile into our own targets,
+# so the policy is applied per source file rather than per target.
+function(juicysf_treat_warnings_as_errors)
+  if (NOT JUICYSF_WARNINGS_AS_ERRORS)
+    return()
+  endif ()
+  if (MSVC)
+    set(_flag /WX)
+  else ()
+    set(_flag -Werror)
+  endif ()
+  foreach (_source IN LISTS ARGN)
+    set_property(SOURCE "${_source}" APPEND PROPERTY COMPILE_OPTIONS "${_flag}")
+  endforeach ()
+endfunction()
 
 if (JUICYSF_RELEASE_VALIDATION)
+  if (NOT BUILD_TESTING)
+    message(FATAL_ERROR
+      "Beta 1 release validation requires BUILD_TESTING=ON so DLS and artifact capability gates cannot be skipped")
+  endif ()
+  if (BUILD_SHARED_LIBS)
+    message(FATAL_ERROR "Release validation requires BUILD_SHARED_LIBS=OFF")
+  endif ()
   if (NOT FLUIDSYNTH_LINK_STATIC)
     message(FATAL_ERROR "Release validation requires FLUIDSYNTH_LINK_STATIC=ON")
   endif ()
-  if (APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
-    message(FATAL_ERROR "Release validation requires an explicit CMAKE_OSX_DEPLOYMENT_TARGET")
-  endif ()
-  if (APPLE AND NOT CMAKE_OSX_ARCHITECTURES)
-    message(FATAL_ERROR "Release validation requires explicit CMAKE_OSX_ARCHITECTURES")
+  if (APPLE)
+    if (NOT CMAKE_OSX_DEPLOYMENT_TARGET VERSION_EQUAL "11.0")
+      message(FATAL_ERROR
+        "Beta 1 release validation requires CMAKE_OSX_DEPLOYMENT_TARGET=11.0")
+    endif ()
+    if (NOT CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
+      message(FATAL_ERROR
+        "Beta 1 release validation supports only CMAKE_OSX_ARCHITECTURES=arm64")
+    endif ()
+    if (NOT EXISTS "${JUICYSF_MACOS_SYSTEM_DLS}")
+      message(FATAL_ERROR
+        "Beta 1 macOS release validation requires a real DLS input for the runtime capability gate: ${JUICYSF_MACOS_SYSTEM_DLS}")
+    endif ()
+  elseif (WIN32)
+    if (NOT MSVC)
+      message(FATAL_ERROR "Beta 1 Windows release validation requires MSVC")
+    endif ()
+    if (NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+      message(FATAL_ERROR "Beta 1 Windows release validation supports only x86_64")
+    endif ()
+    if (NOT JUICYSF_FONT_CORPUS OR NOT EXISTS "${JUICYSF_FONT_CORPUS}")
+      message(FATAL_ERROR
+        "Beta 1 Windows release validation requires JUICYSF_FONT_CORPUS to contain a private/local DLS test file")
+    endif ()
+    file(GLOB_RECURSE JUICYSF_RELEASE_DLS_FILES LIST_DIRECTORIES FALSE
+      "${JUICYSF_FONT_CORPUS}/*.dls" "${JUICYSF_FONT_CORPUS}/*.DLS")
+    if (NOT JUICYSF_RELEASE_DLS_FILES)
+      message(FATAL_ERROR
+        "Beta 1 Windows release validation found no .dls file under JUICYSF_FONT_CORPUS=${JUICYSF_FONT_CORPUS}")
+    endif ()
+    list(GET JUICYSF_RELEASE_DLS_FILES 0 JUICYSF_RELEASE_DLS_PROBE)
+  else ()
+    message(FATAL_ERROR
+      "Beta 1 release validation supports only macOS arm64 and Windows x86_64")
   endif ()
 endif ()
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/Modules/")
 find_package(PkgConfig REQUIRED)
 
-if (BUILD_SHARED_LIBS)
-  set(TARGET_STATIC_QUALIFIER "")
-else (BUILD_SHARED_LIBS)
-  set(TARGET_STATIC_QUALIFIER "-static")
-  set(PACKAGE_STATIC_QUALIFIER "_STATIC")
-endif (BUILD_SHARED_LIBS)
-
 set(PKG_CONFIG_USE_CMAKE_PREFIX_PATH off)
+
+# pkg-config emits unquoted -L/-I flags. A space in the source or build path is
+# split into two arguments, after which the pinned dependency prefix is dropped
+# and FluidSynth silently resolves from somewhere else (typically Homebrew).
+if (JUICYSF_RELEASE_VALIDATION)
+  foreach (_path IN ITEMS "${CMAKE_SOURCE_DIR}" "${CMAKE_BINARY_DIR}")
+    if (_path MATCHES "[ \t]")
+      message(FATAL_ERROR
+        "Release validation requires a path without whitespace, but found: ${_path}\n"
+        "pkg-config cannot quote such a path, so the pinned dependency prefix "
+        "would be silently discarded. Build the candidate from a space-free location.")
+    endif ()
+  endforeach ()
+endif ()
+
 pkg_search_module(FLUIDSYNTH REQUIRED IMPORTED_TARGET fluidsynth>=2)
+if (JUICYSF_RELEASE_VALIDATION AND NOT FLUIDSYNTH_VERSION VERSION_EQUAL "2.5.5")
+  message(FATAL_ERROR
+    "Beta 1 release validation requires FluidSynth 2.5.5 exactly; found ${FLUIDSYNTH_VERSION}. "
+    "Use the pinned dependency recipe for a reviewed ABI and feature set.")
+endif ()
+if (JUICYSF_RELEASE_VALIDATION)
+  if (NOT JUICYSF_SF3_FIXTURE AND FLUIDSYNTH_PREFIX)
+    set(_juicysf_installed_sf3
+        "${FLUIDSYNTH_PREFIX}/share/juicy16-test-fixtures/VintageDreamsWaves-v2.sf3")
+    if (EXISTS "${_juicysf_installed_sf3}")
+      set(JUICYSF_SF3_FIXTURE "${_juicysf_installed_sf3}")
+    endif ()
+  endif ()
+  if (NOT JUICYSF_SF3_FIXTURE OR NOT EXISTS "${JUICYSF_SF3_FIXTURE}")
+    message(FATAL_ERROR
+      "Beta 1 release validation requires JUICYSF_SF3_FIXTURE to name a licensed local .sf3 file")
+  endif ()
+  # Signing input: an identity other than ad-hoc must actually resolve, or the
+  # build silently produces an unsigned or differently signed artifact.
+  if (APPLE AND JUICYSF_CODE_SIGN_IDENTITY AND
+      NOT JUICYSF_CODE_SIGN_IDENTITY STREQUAL "-")
+    execute_process(
+      COMMAND /usr/bin/security find-identity -v -p codesigning
+      OUTPUT_VARIABLE _juicysf_identities
+      ERROR_QUIET)
+    if (NOT _juicysf_identities MATCHES "${JUICYSF_CODE_SIGN_IDENTITY}")
+      message(FATAL_ERROR
+        "JUICYSF_CODE_SIGN_IDENTITY='${JUICYSF_CODE_SIGN_IDENTITY}' matches no "
+        "codesigning identity in the keychain. Use '-' for an ad-hoc local "
+        "build, or install the approved Developer ID identity.")
+    endif ()
+  endif ()
+
+  get_filename_component(_juicysf_sf3_extension "${JUICYSF_SF3_FIXTURE}" EXT)
+  string(TOLOWER "${_juicysf_sf3_extension}" _juicysf_sf3_extension)
+  if (NOT _juicysf_sf3_extension STREQUAL ".sf3")
+    message(FATAL_ERROR
+      "JUICYSF_SF3_FIXTURE must have an .sf3 extension: ${JUICYSF_SF3_FIXTURE}")
+  endif ()
+endif ()
+
+# CMAKE_OSX_DEPLOYMENT_TARGET controls objects compiled in this build, but it
+# cannot make prebuilt static archives compatible with an older OS. Homebrew
+# bottles, for example, may have been built for the developer's current macOS.
+# Refuse those archives in strict validation instead of producing a binary that
+# merely advertises an older LC_BUILD_VERSION.
+if (JUICYSF_RELEASE_VALIDATION AND APPLE AND FLUIDSYNTH_LINK_STATIC)
+  foreach (_dependency IN LISTS FLUIDSYNTH_STATIC_LINK_LIBRARIES)
+    if (IS_ABSOLUTE "${_dependency}" AND _dependency MATCHES "\\.a$")
+      execute_process(
+        COMMAND /usr/bin/lipo -archs "${_dependency}"
+        RESULT_VARIABLE _lipo_result
+        OUTPUT_VARIABLE _dependency_architectures
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+      if (NOT _lipo_result EQUAL 0
+          OR NOT _dependency_architectures MATCHES "(^| )arm64( |$)")
+        message(FATAL_ERROR
+          "Beta 1 dependency lacks arm64 support: ${_dependency}")
+      endif ()
+
+      execute_process(
+        COMMAND /usr/bin/otool -l "${_dependency}"
+        RESULT_VARIABLE _otool_result
+        OUTPUT_VARIABLE _dependency_load_commands
+        ERROR_QUIET)
+      if (NOT _otool_result EQUAL 0)
+        message(FATAL_ERROR
+          "Could not inspect the deployment target of ${_dependency}")
+      endif ()
+      string(REGEX MATCHALL "minos[ \t]+[0-9]+(\\.[0-9]+)*"
+             _dependency_minos_lines "${_dependency_load_commands}")
+      if (NOT _dependency_minos_lines)
+        message(FATAL_ERROR
+          "Dependency has no inspectable macOS deployment target: ${_dependency}")
+      endif ()
+      foreach (_minos_line IN LISTS _dependency_minos_lines)
+        string(REGEX REPLACE "minos[ \t]+" "" _dependency_minos "${_minos_line}")
+        if (_dependency_minos VERSION_GREATER CMAKE_OSX_DEPLOYMENT_TARGET)
+          message(FATAL_ERROR
+            "Dependency ${_dependency} targets macOS ${_dependency_minos}, "
+            "newer than the Beta 1 target ${CMAKE_OSX_DEPLOYMENT_TARGET}. "
+            "Rebuild the dependency for macOS ${CMAKE_OSX_DEPLOYMENT_TARGET} or earlier.")
+        endif ()
+      endforeach ()
+    endif ()
+  endforeach ()
+endif ()
+
 if (FLUIDSYNTH_LINK_STATIC)
   # FindPkgConfig creates only PkgConfig::FLUIDSYNTH; its `--static` closure is
   # exposed through FLUIDSYNTH_STATIC_* variables. Wrap those in a real target so
@@ -85,6 +242,17 @@ if (FLUIDSYNTH_LINK_STATIC)
   set(FLUIDSYNTH_TARGET JuicySFFluidSynthStatic)
 else ()
   set(FLUIDSYNTH_TARGET PkgConfig::FLUIDSYNTH)
+endif ()
+
+# Scaffolding for a second macOS architecture, kept for a possible later
+# universal build. Intel macOS is outside Beta 1 scope, so a release candidate
+# must not be built through it: the result would be a fat binary while the
+# configuration claims arm64.
+if (EXTRA_ARCH_PKG_CONFIG_PATH AND JUICYSF_RELEASE_VALIDATION)
+  message(FATAL_ERROR
+    "EXTRA_ARCH_PKG_CONFIG_PATH builds a second architecture, which is outside "
+    "the approved Beta 1 matrix (macOS arm64 only). Unset it for a release "
+    "candidate, or revise the support matrix first.")
 endif ()
 
 if (EXTRA_ARCH_PKG_CONFIG_PATH)
@@ -102,35 +270,12 @@ if (EXTRA_ARCH_PKG_CONFIG_PATH)
   endif ()
 endif (EXTRA_ARCH_PKG_CONFIG_PATH)
 
-set(VST_COPY_DIR "${JUCE_VST_COPY_DIR}" CACHE STRING "VST2 installation dir")
 set(VST3_COPY_DIR "${JUCE_VST3_COPY_DIR}" CACHE STRING "VST3 installation dir")
 set(AU_COPY_DIR "${JUCE_AU_COPY_DIR}" CACHE STRING "AU installation dir")
-
-# If you are building a VST2 or AAX plugin, CMake needs to be told where to find these SDKs on your
-# system. This setup should be done before calling `juce_add_plugin`.
-
-# Legacy VST2 is excluded by default. When explicitly enabled, an in-repo SDK may
-# be used, but VST2 remains outside the Beta 1 release contract.
-if (JUICYSF_ENABLE_LEGACY_VST2 AND NOT VST2_SDK_PATH
-    AND EXISTS "${CMAKE_SOURCE_DIR}/VST2_SDK/pluginterfaces/vst2.x/aeffect.h")
-  set(VST2_SDK_PATH "${CMAKE_SOURCE_DIR}/VST2_SDK")
-  message(STATUS "Found in-repo VST2 SDK at ${VST2_SDK_PATH}; building VST2 (.vst)")
-endif ()
-
-if (JUICYSF_ENABLE_LEGACY_VST2 AND VST2_SDK_PATH)
-  set(HAS_VST2_SDK_PATH 1)
-  set(VST2_FORMAT "VST")
-  juce_set_vst2_sdk_path(${VST2_SDK_PATH})
-else ()
-  set(HAS_VST2_SDK_PATH 0)
-endif ()
 
 set(JUICYSF_PLUGIN_FORMATS VST3 Standalone)
 if (APPLE)
   list(PREPEND JUICYSF_PLUGIN_FORMATS AU)
-endif ()
-if (VST2_FORMAT)
-  list(APPEND JUICYSF_PLUGIN_FORMATS ${VST2_FORMAT})
 endif ()
 
 if (VST3_SDK_PATH)
@@ -145,18 +290,16 @@ endif (VST3_SDK_PATH)
 # the formats specified by the FORMATS arguments. This function accepts many optional arguments.
 # Check the readme at `docs/CMake API.md` in the JUCE repo for the full list.
 
-# building of AUv3 requires -DCMAKE_GENERATOR=Xcode or -GXcode
-# and your "XCode > Preferences > Locations > Command Line Tools" set to "XCode"
-# otherwise you'll get error:
-# Run Build Command(s):/usr/bin/xcodebuild -project CMAKE_TRY_COMPILE.xcodeproj build -target cmTC_33f26 -parallelizeTargets -configuration Debug -hideShellScriptEnvironment && xcode-select: error: tool 'xcodebuild' requires Xcode, but active developer directory '/Library/Developer/CommandLineTools' is a command line tools instance
-
 # https://github.com/juce-framework/JUCE/blob/master/docs/CMake%20API.md
 juce_add_plugin(JuicySFPlugin
     # VERSION ...                               # Set this if the plugin version is different to the project version
     ICON_BIG resources/Logo512.png                              # ICON_* arguments specify a path to an image file to use as an icon for the Standalone
     # ICON_SMALL ...
-    COMPANY_NAME Birchlabs                          # Specify the name of the plugin's author
-    COMPANY_WEBSITE "https://birchlabs.co.uk"
+    COMPANY_NAME Pokestir                           # Public project/brand name
+    COMPANY_WEBSITE "https://pokestir.com"
+    COMPANY_EMAIL "contact@pokestir.com"
+    COMPANY_COPYRIGHT "Copyright (c) 2026 Pokestir"
+    BUNDLE_ID "com.pokestir.juicy16"
     DESCRIPTION "16-channel multitimbral DLS/SoundFont player"
     IS_SYNTH TRUE                       # Is this a synth or an effect?
     NEEDS_MIDI_INPUT TRUE               # Does the plugin need midi input?
@@ -167,26 +310,23 @@ juce_add_plugin(JuicySFPlugin
     APP_SANDBOX_ENABLED TRUE
     APP_SANDBOX_OPTIONS com.apple.security.files.user-selected.read-only
     HARDENED_RUNTIME_ENABLED TRUE
-    VST2_CATEGORY kPlugCategSynth
     VST3_CATEGORIES Instrument Synth
     AU_MAIN_TYPE kAudioUnitType_MusicDevice
     AU_SANDBOX_SAFE TRUE
-    PLUGIN_MANUFACTURER_CODE Blbs               # A four-character manufacturer id with at least one upper-case character
-    PLUGIN_CODE Jsfr                            # A unique four-character plugin id with exactly one upper-case character
+    PLUGIN_MANUFACTURER_CODE Pkst               # Frozen starting with Beta 1
+    PLUGIN_CODE Jc16                            # Frozen starting with Beta 1
                                                 # GarageBand 10.3 requires the first letter to be upper-case, and the remaining letters to be lower-case
     # AU is the primary macOS format (delivers per-channel MIDI program change
     # natively). VST3 is built for Cubase and Windows: JUCE converts host-delivered
     # VST3 program-change events (kCtrlProgramChange legacy events) to per-channel
     # MIDI in processBlock, and per-channel program PARAMETERS (progCh1..16, grouped
     # into chUnit1..16) provide instrument selection in hosts that don't deliver PC
-    # events; a custom IUnitInfo (VST3ClientExtensions) maps MIDI channels to units
-    # HALion-style. VST2 (.vst) only builds when VST2_SDK_PATH is set (see top of
-    # file); otherwise ${VST2_FORMAT} is empty.
+    # events; the pinned wrapper's IUnitInfo maps MIDI channels to units
+    # HALion-style. VST2 is intentionally not configurable in the Beta 1 build.
     FORMATS ${JUICYSF_PLUGIN_FORMATS}
-    VST_COPY_DIR "${VST_COPY_DIR}"
     VST3_COPY_DIR "${VST3_COPY_DIR}"
     AU_COPY_DIR "${AU_COPY_DIR}"
-    PRODUCT_NAME "JuicySF Rack")        # The name of the final executable, which can differ from the target name
+    PRODUCT_NAME "Juicy16")        # The name of the final executable, which can differ from the target name
 
 # JUCE attaches ad-hoc signing as a link POST_BUILD step, while its generated
 # AppIcon copy is an independent output of the format target. On a parallel clean
@@ -210,7 +350,7 @@ if (APPLE)
     list(GET _parts 2 _bundle_suffix)
     if (TARGET ${_format_target})
       set(_resource_directory
-          "${CMAKE_CURRENT_BINARY_DIR}/JuicySFPlugin_artefacts/$<CONFIG>/${_format_directory}/JuicySF Rack.${_bundle_suffix}/Contents/Resources")
+          "${CMAKE_CURRENT_BINARY_DIR}/JuicySFPlugin_artefacts/$<CONFIG>/${_format_directory}/Juicy16.${_bundle_suffix}/Contents/Resources")
       add_dependencies(${_format_target} JuicySFPlugin_AppIconReady)
       add_custom_command(TARGET ${_format_target} PRE_LINK
         COMMAND ${CMAKE_COMMAND} -E make_directory "${_resource_directory}"
@@ -232,8 +372,7 @@ if (APPLE)
 endif ()
 
 # https://cmake.org/cmake/help/latest/guide/tutorial/Selecting%20Static%20or%20Shared%20Libraries.html
-set_target_properties(JuicySFPlugin PROPERTIES
-                        POSITION_INDEPENDENT_CODE ${BUILD_SHARED_LIBS})
+set_target_properties(JuicySFPlugin PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # `juce_generate_juce_header` will create a JuceHeader.h for a given target, which will be generated
 # into your build tree. This should be included with `#include <JuceHeader.h>`. The include path for
@@ -250,11 +389,17 @@ set_target_properties(JuicySFPlugin PROPERTIES
 
 add_subdirectory(Source)
 
+# JUCE modules and the bundled Steinberg VST3 SDK compile into the same targets,
+# so only our own translation units are held to the stricter policy.
+juicysf_treat_warnings_as_errors(${JUICYSF_FIRST_PARTY_SOURCES})
+
 # VST3 wrapper patch: the vendored JUCE 8.0.14 wrapper supplies the early static
 # 17-unit/program-list structure Cubase queries before component connection,
 # per-channel Program Change MIDI mapping with bounds checks, and the
-# kIsProgramChange/kIsList flags on progCh1..16. Stock JUCE has no complete hook
-# for these controller-side behaviors. Only this build's VST3 format target is
+# kIsProgramChange/kIsList flags on progCh1..16. It also preserves every
+# program-parameter queue point as a timestamped channel Program Change rather
+# than collapsing the queue at block start. Stock JUCE has no complete hook for
+# these controller-side behaviors. Only this build's VST3 format target is
 # swapped; the installed JUCE package and AU/Standalone targets are untouched.
 if (TARGET juce_audio_plugin_client_VST3)
   set(_juicysf_stock_vst3_cpp
@@ -270,6 +415,25 @@ if (TARGET juce_audio_plugin_client_VST3)
     message(FATAL_ERROR
       "JUCE 8.0.14 VST3 wrapper content differs from the patch base. "
       "Rebase and revalidate vendor/juce_patched before configuring.")
+  endif ()
+  set(_juicysf_patched_vst3_cpp
+      "${CMAKE_SOURCE_DIR}/vendor/juce_patched/juce_audio_plugin_client_VST3.cpp")
+  set(_juicysf_patched_vst3_mm
+      "${CMAKE_SOURCE_DIR}/vendor/juce_patched/juce_audio_plugin_client_VST3.mm")
+  set(_juicysf_vst3_patch
+      "${CMAKE_SOURCE_DIR}/vendor/juce_patched/juce-8.0.14-vst3-multitimbral.patch")
+  file(SHA256 "${_juicysf_patched_vst3_cpp}" _juicysf_patched_vst3_cpp_sha256)
+  file(SHA256 "${_juicysf_patched_vst3_mm}" _juicysf_patched_vst3_mm_sha256)
+  file(SHA256 "${_juicysf_vst3_patch}" _juicysf_vst3_patch_sha256)
+  if (NOT _juicysf_patched_vst3_cpp_sha256 STREQUAL
+          "60cd751e32be8487e7e3d5903ce9706b015892dfddf76e4b0407ceb2d5e0543e"
+      OR NOT _juicysf_patched_vst3_mm_sha256 STREQUAL
+          "f15ba7b2eaee6dab3cc96c1e242ec782ee8503a72d4d9d0bda0c7d3261f3d7d3"
+      OR NOT _juicysf_vst3_patch_sha256 STREQUAL
+          "6b17dc0975b0f640a79545725fabc218c484a316b2dc1eac9663b7785c0de388")
+    message(FATAL_ERROR
+      "Vendored JUCE VST3 wrapper or its reproducible patch changed without updating the compatibility contract. "
+      "Recreate the diff, run vst3_multitimbral_smoke, and record the reviewed hashes.")
   endif ()
   get_target_property(_vst3_client_sources juce_audio_plugin_client_VST3 INTERFACE_SOURCES)
   # On Apple the module compiles the .mm shim (which quote-includes the .cpp next
@@ -307,7 +471,9 @@ endif ()
 if (NOT EXISTS "${JUCE_VST3_SDK_DIR}")
   message(FATAL_ERROR "Cannot find JUCE's bundled VST3 SDK under ${JUCE_MODULES_DIR}")
 endif ()
-target_include_directories(JuicySFPlugin PRIVATE "${JUCE_VST3_SDK_DIR}")
+# SYSTEM: the bundled Steinberg headers are third party, so their warnings must
+# not be attributed to (or fail) our own translation units.
+target_include_directories(JuicySFPlugin SYSTEM PRIVATE "${JUCE_VST3_SDK_DIR}")
 # Source/ on the include path so the vendored VST3 wrapper can #include "Vst3Diag.h"
 # (JUCE re-exports this target's INCLUDE_DIRECTORIES to the format wrapper targets).
 target_include_directories(JuicySFPlugin PRIVATE "${CMAKE_SOURCE_DIR}/Source")
@@ -321,19 +487,33 @@ target_include_directories(JuicySFPlugin PRIVATE "${CMAKE_SOURCE_DIR}/Source")
 
 target_compile_definitions(JuicySFPlugin
     PUBLIC
-        JUICYSF_RACK_VERSION="${JUICYSF_DISPLAY_VERSION}"
+        JUICY16_VERSION="${JUICYSF_DISPLAY_VERSION}"
         # JUCE_WEB_BROWSER and JUCE_USE_CURL would be on by default, but you might not need them.
         JUCE_WEB_BROWSER=0  # If you remove this, add `NEEDS_WEB_BROWSER TRUE` to the `juce_add_plugin` call
         JUCE_USE_CURL=0     # If you remove this, add `NEEDS_CURL TRUE` to the `juce_add_plugin` call
         # JUCE_CORE_INCLUDE_OBJC_HELPERS=1
         DONT_SET_USING_JUCE_NAMESPACE=1
-        JUCE_VST3_CAN_REPLACE_VST2=${HAS_VST2_SDK_PATH})
+        JUCE_VST3_CAN_REPLACE_VST2=0)
 
-message(STATUS "JuicySF Rack ${JUICYSF_DISPLAY_VERSION}")
+if (WIN32)
+  # Microsoft maps all Windows 10 releases to WINVER/_WIN32_WINNT 0x0A00;
+  # NTDDI_WIN10_RS1 (0x0A000002) supplies the approved 1607 feature floor.
+  target_compile_definitions(JuicySFPlugin PUBLIC
+    WINVER=0x0A00
+    _WIN32_WINNT=0x0A00
+    NTDDI_VERSION=0x0A000002)
+endif ()
+
+message(STATUS "Juicy16 ${JUICYSF_DISPLAY_VERSION}")
 message(STATUS "  Formats: ${JUICYSF_PLUGIN_FORMATS} (Standalone is development/QA only)")
 message(STATUS "  JUCE: ${JUCE_VERSION}")
 message(STATUS "  FluidSynth: ${FLUIDSYNTH_VERSION} (${FLUIDSYNTH_TARGET})")
 message(STATUS "  Copy after build: ${JUICYSF_COPY_PLUGIN_AFTER_BUILD}")
+if (JUICYSF_FONT_CORPUS)
+  message(STATUS "  Private/local font corpus: ${JUICYSF_FONT_CORPUS}")
+else ()
+  message(STATUS "  Private/local font corpus: disabled")
+endif ()
 if (APPLE)
   if (CMAKE_OSX_ARCHITECTURES)
     set(_juicysf_arch_summary "${CMAKE_OSX_ARCHITECTURES}")
@@ -347,6 +527,9 @@ if (APPLE)
   endif ()
   message(STATUS "  macOS architectures: ${_juicysf_arch_summary}")
   message(STATUS "  macOS deployment target: ${_juicysf_deployment_summary}")
+elseif (WIN32)
+  message(STATUS "  Windows architecture: x86_64")
+  message(STATUS "  Windows minimum: 10 version 1607 (RS1; NTDDI 0x0A000002)")
 endif ()
 message(STATUS "  Strict release validation: ${JUICYSF_RELEASE_VALIDATION}")
 
@@ -387,16 +570,23 @@ target_link_libraries(JuicySFPlugin
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
 
-# Apple clang doesn't support -static-libgcc flag, but seems to make a portable binary regardless
-if (NOT BUILD_SHARED_LIBS AND CMAKE_SYSTEM_NAME STREQUAL "Windows")
+# Retain static runtime flags only for the unsupported MinGW experiment. The
+# approved Windows release toolchain is MSVC and must not receive GNU flags.
+if (MINGW AND NOT BUILD_SHARED_LIBS)
   set(CMAKE_EXE_LINKER_FLAGS "-static-libgcc -static-libstdc++ ${CMAKE_EXE_LINKER_FLAGS}")
-  # the VST2 and VST3 distributions are "modules", so they don't listen to the EXE_LINKER flags
+  # VST3 is a module, so it does not use executable linker flags.
   set(CMAKE_MODULE_LINKER_FLAGS "-static-libgcc -static-libstdc++ ${CMAKE_MODULE_LINKER_FLAGS}")
-endif (NOT BUILD_SHARED_LIBS AND CMAKE_SYSTEM_NAME STREQUAL "Windows")
+endif ()
 
-include(CTest)
 if (BUILD_TESTING)
+  add_test(NAME documentation_internal_links
+    COMMAND ${CMAKE_COMMAND}
+      -DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/DocumentationLinkTests.cmake)
+  set_tests_properties(documentation_internal_links PROPERTIES LABELS "docs")
+
   add_executable(JuicySFFontQA tools/font_qa.cpp)
+  juicysf_treat_warnings_as_errors(tools/font_qa.cpp)
   target_link_libraries(JuicySFFontQA PRIVATE ${FLUIDSYNTH_TARGET})
   if (APPLE AND FLUIDSYNTH_LINK_STATIC)
     # The Homebrew static FluidSynth archive references CoreMIDI directly.
@@ -406,25 +596,54 @@ if (BUILD_TESTING)
   endif ()
   target_compile_features(JuicySFFontQA PRIVATE cxx_std_17)
   add_test(NAME font_repair_unit COMMAND JuicySFFontQA)
+  if (JUICYSF_RELEASE_VALIDATION)
+    add_test(NAME font_load_release_sf3
+             COMMAND JuicySFFontQA "${JUICYSF_SF3_FIXTURE}")
+    set_tests_properties(font_load_release_sf3 PROPERTIES
+      LABELS "font;sf3;release")
+  endif ()
+  if (JUICYSF_FONT_CORPUS)
+    if (NOT EXISTS "${JUICYSF_FONT_CORPUS}")
+      message(FATAL_ERROR
+        "JUICYSF_FONT_CORPUS does not exist: ${JUICYSF_FONT_CORPUS}")
+    endif ()
+    add_test(NAME font_load_configured_corpus
+             COMMAND JuicySFFontQA "${JUICYSF_FONT_CORPUS}")
+    set_tests_properties(font_load_configured_corpus PROPERTIES
+      LABELS "font;corpus")
+  endif ()
 
   # macOS ships a General MIDI DLS bank. Exercising it gives clean checkouts a
   # real parser/load test without adding a large copyrighted fixture to the repo.
-  set(JUICYSF_MACOS_SYSTEM_DLS
-      "/System/Library/Components/CoreAudio.component/Contents/Resources/gs_instruments.dls")
   if (APPLE AND EXISTS "${JUICYSF_MACOS_SYSTEM_DLS}")
     add_test(NAME font_load_system_dls
              COMMAND JuicySFFontQA "${JUICYSF_MACOS_SYSTEM_DLS}")
+    set_tests_properties(font_load_system_dls PROPERTIES LABELS "font;dls")
+    if (JUICYSF_RELEASE_VALIDATION)
+      set_tests_properties(font_load_system_dls PROPERTIES LABELS "font;dls;release")
+    endif ()
+  elseif (WIN32 AND JUICYSF_RELEASE_VALIDATION)
+    add_test(NAME font_load_release_dls
+             COMMAND JuicySFFontQA "${JUICYSF_RELEASE_DLS_PROBE}")
+    set_tests_properties(font_load_release_dls PROPERTIES LABELS "font;dls;release")
   endif ()
 
   if (APPLE)
     add_executable(JuicySFVST3Smoke tools/vst3_smoke.cpp)
-    target_include_directories(JuicySFVST3Smoke PRIVATE "${JUCE_VST3_SDK_DIR}")
+    juicysf_treat_warnings_as_errors(tools/vst3_smoke.cpp)
+    target_include_directories(JuicySFVST3Smoke SYSTEM PRIVATE "${JUCE_VST3_SDK_DIR}")
     target_link_libraries(JuicySFVST3Smoke PRIVATE "-framework CoreFoundation")
     target_compile_features(JuicySFVST3Smoke PRIVATE cxx_std_17)
     add_dependencies(JuicySFVST3Smoke JuicySFPlugin_VST3)
+    set(_juicysf_vst3_smoke_arguments
+        "${CMAKE_CURRENT_BINARY_DIR}/JuicySFPlugin_artefacts/$<CONFIG>/VST3/Juicy16.vst3")
+    if (EXISTS "${JUICYSF_MACOS_SYSTEM_DLS}")
+      list(APPEND _juicysf_vst3_smoke_arguments "${JUICYSF_MACOS_SYSTEM_DLS}")
+      list(APPEND _juicysf_vst3_smoke_arguments
+           "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/vst3_multichannel_programs.csv")
+    endif ()
     add_test(NAME vst3_multitimbral_smoke
-      COMMAND JuicySFVST3Smoke
-              "${CMAKE_CURRENT_BINARY_DIR}/JuicySFPlugin_artefacts/$<CONFIG>/VST3/JuicySF Rack.vst3")
+      COMMAND JuicySFVST3Smoke ${_juicysf_vst3_smoke_arguments})
     add_test(NAME release_metadata_consistency
       COMMAND ${CMAKE_COMMAND}
         -DPROJECT_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
@@ -432,9 +651,19 @@ if (BUILD_TESTING)
         -DPROJECT_VERSION=${PROJECT_VERSION}
         -DDISPLAY_VERSION=${JUICYSF_DISPLAY_VERSION}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/MetadataTests.cmake)
+    if (JUICYSF_RELEASE_VALIDATION)
+      add_test(NAME macos_artifact_portability
+        COMMAND ${CMAKE_COMMAND}
+          -DARTIFACTS_DIR=${CMAKE_CURRENT_BINARY_DIR}/JuicySFPlugin_artefacts/$<CONFIG>
+          -DEXPECTED_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/MacArtifactTests.cmake)
+      set_tests_properties(macos_artifact_portability PROPERTIES
+        LABELS "artifact;release;macos")
+    endif ()
   endif ()
 
   add_executable(JuicySFEngineMidiTests tests/EngineMidiTests.cpp)
+  juicysf_treat_warnings_as_errors(tests/EngineMidiTests.cpp)
   target_include_directories(JuicySFEngineMidiTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Source")
   target_link_libraries(JuicySFEngineMidiTests PRIVATE
     JuicySFPlugin
@@ -444,6 +673,65 @@ if (BUILD_TESTING)
   target_compile_features(JuicySFEngineMidiTests PRIVATE cxx_std_17)
   if (APPLE AND EXISTS "${JUICYSF_MACOS_SYSTEM_DLS}")
     add_test(NAME engine_midi_system_dls
-             COMMAND JuicySFEngineMidiTests "${JUICYSF_MACOS_SYSTEM_DLS}")
+             COMMAND JuicySFEngineMidiTests
+               "${JUICYSF_MACOS_SYSTEM_DLS}"
+               "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/controller_conformance.csv")
+  endif ()
+
+  # Resource and throughput baseline. Registered against the macOS system DLS so
+  # a clean clone gets a real measurement, and additionally per corpus bank.
+  add_executable(JuicySFPerfProbe tools/perf_probe.cpp)
+  juicysf_treat_warnings_as_errors(tools/perf_probe.cpp)
+  target_include_directories(JuicySFPerfProbe PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Source")
+  target_link_libraries(JuicySFPerfProbe PRIVATE
+    JuicySFPlugin
+    juce::juce_audio_utils
+    juce::juce_gui_extra
+    ${FLUIDSYNTH_TARGET})
+  target_compile_features(JuicySFPerfProbe PRIVATE cxx_std_17)
+  if (APPLE AND EXISTS "${JUICYSF_MACOS_SYSTEM_DLS}")
+    add_test(NAME performance_baseline
+             COMMAND JuicySFPerfProbe "${JUICYSF_MACOS_SYSTEM_DLS}")
+    set_tests_properties(performance_baseline PROPERTIES LABELS "performance")
+  endif ()
+
+  # Optional end-to-end proof of the non-negotiable workflow: play a real
+  # multichannel rip and require every channel to reach the instrument its own
+  # Program Change selected, with no manual patch assignment. Game rips are not
+  # redistributable, so this runs only against a configured private corpus. A
+  # bank sharing the MIDI file's basename is treated as its matching bank, and
+  # every such bank format is registered separately.
+  if (JUICYSF_FONT_CORPUS)
+    file(GLOB_RECURSE JUICYSF_CORPUS_MIDI LIST_DIRECTORIES FALSE
+      "${JUICYSF_FONT_CORPUS}/*.mid" "${JUICYSF_FONT_CORPUS}/*.MID")
+    list(REMOVE_DUPLICATES JUICYSF_CORPUS_MIDI)
+    set(_juicysf_game_rip_tests 0)
+    foreach (_midi IN LISTS JUICYSF_CORPUS_MIDI)
+      get_filename_component(_midi_dir "${_midi}" DIRECTORY)
+      get_filename_component(_midi_stem "${_midi}" NAME_WE)
+      # One test per bank format. The uppercase spelling is only consulted when
+      # the lowercase one is absent, so a case-insensitive filesystem does not
+      # register the same file twice.
+      foreach (_extension IN ITEMS dls sf2 sf3)
+        set(_bank "${_midi_dir}/${_midi_stem}.${_extension}")
+        if (NOT EXISTS "${_bank}")
+          string(TOUPPER "${_extension}" _upper_extension)
+          set(_bank "${_midi_dir}/${_midi_stem}.${_upper_extension}")
+        endif ()
+        if (EXISTS "${_bank}")
+          math(EXPR _juicysf_game_rip_tests "${_juicysf_game_rip_tests} + 1")
+          add_test(NAME engine_game_rip_${_midi_stem}_${_extension}
+                   COMMAND JuicySFEngineMidiTests --game-rip "${_bank}" "${_midi}")
+          set_tests_properties(engine_game_rip_${_midi_stem}_${_extension}
+            PROPERTIES LABELS "engine;corpus;gamerip")
+        endif ()
+      endforeach ()
+    endforeach ()
+    if (_juicysf_game_rip_tests EQUAL 0)
+      message(STATUS
+        "  Game-rip tests: none (no .mid with a same-named bank under the corpus)")
+    else ()
+      message(STATUS "  Game-rip tests: ${_juicysf_game_rip_tests}")
+    endif ()
   endif ()
 endif ()

@@ -3,6 +3,7 @@
 //
 
 #include "ChannelListComponent.h"
+#include "MyColours.h"
 
 using namespace std;
 
@@ -22,6 +23,13 @@ ChannelListComponent::PatchCell::PatchCell(ChannelListComponent& ownerRef)
 
 void ChannelListComponent::PatchCell::setRow(int newRow) {
     row = newRow;
+    const String accessibleName{
+        String{"MIDI channel "} + String(row + 1) + " instrument"};
+    combo.setName(accessibleName);
+    combo.setTitle(accessibleName);
+    combo.setDescription(String{"Bank and preset selection for "} + accessibleName);
+    combo.setHelpText(
+        "Choose the starting instrument. Incoming Bank Select and Program Change may replace it.");
 
     // (re)populate items only when the loaded font's patch list changed
     if (cellListVersion != owner.patchListVersion) {
@@ -68,8 +76,15 @@ ChannelListComponent::ChannelListComponent(
 {
     rebuildPatchList();
 
+    setName("MIDI channel instrument list");
+    setTitle("MIDI channel instrument list");
+    setDescription("Sixteen MIDI channels with independent bank and preset assignments");
+
     addAndMakeVisible(table);
     table.setModel(this);
+    table.setName("MIDI channel assignments");
+    table.setTitle("MIDI channel assignments");
+    table.setDescription("Select a row to edit that MIDI channel's sound controls");
 
     table.setColour(ListBox::outlineColourId, juce::Colours::grey);
     table.setOutlineThickness(1);
@@ -155,7 +170,11 @@ void ChannelListComponent::paintRowBackground(
     const Colour alternateColour(getLookAndFeel().findColour(ListBox::backgroundColourId)
         .interpolatedWith(getLookAndFeel().findColour(ListBox::textColourId), 0.03f));
     if (rowNumber == getSelectedChannelIndex())
-        g.fillAll(juce::Colours::lightblue);
+        // The scheme's selection fill is designed to pair with its highlighted
+        // text; a fixed pale blue left near-white row text at 1.5:1.
+        g.fillAll(MyColours::getUIColourIfAvailable(
+            LookAndFeel_V4::ColourScheme::UIColour::highlightedFill,
+            juce::Colours::steelblue));
     else if (rowNumber % 2)
         g.fillAll(alternateColour);
 }
@@ -173,7 +192,11 @@ void ChannelListComponent::paintCell(
 
     // column 2 (Instrument) is drawn by its PatchCell ComboBox
     if (columnId == 1) {
-        g.setColour(getLookAndFeel().findColour(ListBox::textColourId));
+        g.setColour(rowNumber == getSelectedChannelIndex()
+            ? MyColours::getUIColourIfAvailable(
+                LookAndFeel_V4::ColourScheme::UIColour::highlightedText,
+                juce::Colours::white)
+            : getLookAndFeel().findColour(ListBox::textColourId));
         g.setFont(font);
         // channel number, displayed 1-indexed
         g.drawText(String(rowNumber + 1), 2, 0, width - 4, height,
@@ -208,8 +231,7 @@ Component* ChannelListComponent::refreshComponentForCell(
 void ChannelListComponent::cellClicked(int rowNumber, int /*columnId*/, const juce::MouseEvent&) {
     if (rowNumber < 0 || rowNumber >= numChannels)
         return;
-    valueTreeState.state.getChildWithName("uiState")
-        .setProperty("selectedChannel", rowNumber + 1, nullptr);
+    fluidSynthModel.selectChannelForEditing(rowNumber);
 }
 
 void ChannelListComponent::valueTreePropertyChanged(

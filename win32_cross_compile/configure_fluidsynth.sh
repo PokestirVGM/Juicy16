@@ -4,22 +4,16 @@ shopt -s nullglob
 
 cd fluidsynth
 
-if test -n "$1"; then
-  declare -a ARCHS=("$1")
-else
-  declare -a ARCHS=("x64")
+ARCH="${1:-x64}"
+if [[ "$ARCH" != "x64" ]]; then
+  echo "Only Windows x64 is in the Juicy16 Beta 1 scope; requested: $ARCH" >&2
+  exit 2
 fi
+REPO=clang64
+TOOLCHAIN=x86_64
 
-declare -A TOOLCHAINS=( [x64]=x86_64 [x86]=i686 [arm64]=aarch64 )
-declare -A REPOS=( [x64]=clang64 [x86]=clang32 [arm64]=clangarm64 )
- 
-for ARCH in ${ARCHS[@]}; do
   echo "arch: $ARCH"
-
-  REPO="${REPOS[$ARCH]}"
   echo "repo: $REPO"
-
-  TOOLCHAIN="${TOOLCHAINS[$ARCH]}"
   echo "toolchain: $TOOLCHAIN"
   TOOLCHAIN_FILE="/${TOOLCHAIN}_toolchain.cmake"
   echo "toolchain file: $TOOLCHAIN_FILE"
@@ -40,6 +34,7 @@ for ARCH in ${ARCHS[@]}; do
 -Denable-jack=off \
 -Denable-ladspa=off \
 -Denable-libinstpatch=off \
+-Denable-native-dls=on \
 -Denable-libsndfile=on \
 -Denable-midishare=off \
 -Denable-opensles=off \
@@ -64,4 +59,3 @@ for ARCH in ${ARCHS[@]}; do
 -Denable-systemd=off \
 -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
 -DCMAKE_BUILD_TYPE=Release
-done

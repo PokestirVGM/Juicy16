@@ -72,6 +72,11 @@ FilePicker::FilePicker(
     // faster (rounded edges introduce transparency)
     setOpaque (true);
 
+    fileChooser.setName("Sound bank file");
+    fileChooser.setTitle("Sound bank file");
+    fileChooser.setDescription("Selected DLS, SF2, or SF3 bank file");
+    fileChooser.setHelpText("Choose a DLS, SF2, or SF3 bank for all 16 MIDI channels.");
+
     // setDisplayedFilePath(fluidSynthModel.getCurrentSoundFontAbsPath());
     setDisplayedFilePath(valueTreeState.state.getChildWithName("soundFont").getProperty("path", ""));
 

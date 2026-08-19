@@ -35,10 +35,16 @@ public:
     // (used after restoring plugin state)
     void syncToSelectedChannel();
 
+    // Select the channel shown by the editor's shared bank/program and sound-control
+    // parameters. The public method keeps selection bounds and ValueTree notification
+    // behavior in one place for the channel list and other editor surfaces.
+    void selectChannelForEditing(int channel);
+
     // assign a patch to an arbitrary channel (used by the per-row patch dropdowns).
     // applies to the synth, persists into channelPrograms, and keeps the global
-    // params consistent if `channel` happens to be the selected one.
-    void setChannelProgram(int channel, int bank, int preset);
+    // params consistent if `channel` happens to be the selected one. Returns false
+    // without publishing the requested state when validation/FluidSynth rejects it.
+    bool setChannelProgram(int channel, int bank, int preset);
 
     // Read-only engine diagnostics used by automated tests and future opt-in
     // diagnostic reporting. Inputs are zero-based FluidSynth channel numbers.
@@ -46,11 +52,49 @@ public:
     bool getPitchBend(int channel, int& value) const;
     bool getPitchWheelSensitivity(int channel, int& semitones) const;
     bool getChannelProgram(int channel, int& bank, int& preset) const;
+    unsigned int getProgramApplyFailureMask() const;
     bool getLastDispatchedController(int channel, int controller, int& value, int& sample) const;
+    bool getLastDispatchedNoteOnProgram(int channel,
+                                        int& bank,
+                                        int& preset,
+                                        int& sample) const;
     bool getLastDispatchedChannelPressure(int channel, int& value, int& sample) const;
     bool getLastDispatchedKeyPressure(int channel, int key, int& value, int& sample) const;
     String getFontLoadStatus() const;
+    bool isBookmarkStale() const;
+    String getFontLoadMessage() const;
+    String getLastAttemptedFontPath() const;
     String getLoadedFontPath() const;
+    // FluidSynth 2.5.5 accepts host rates from 8 to 96 kHz. Unsupported host
+    // rates are intentionally rendered as silence instead of running the synth
+    // at a stale rate and producing incorrectly pitched audio.
+    bool isSampleRateSupported() const;
+
+    struct VoiceStateCounts {
+        int playing{0};
+        int on{0};
+        int sustained{0};
+        int sostenuto{0};
+    };
+
+    // Offline-harness diagnostic. Call only while the caller owns/suspends audio
+    // processing; FluidSynth voice pointers are sampled and consumed internally.
+    bool getVoiceStateCounts(int channel, VoiceStateCounts& counts) const;
+
+    struct SoundControllerContract {
+        int controller{-1};
+        String parameterId;
+        int generator{-1};
+        double amount{0.0};
+        int sourceFlags{0};
+    };
+
+    // Read-only contract/health diagnostics for the six plugin-defined default
+    // modulators. These let release tests freeze their neutral point, destination,
+    // and direction without exposing the FluidSynth instance itself.
+    static bool getSoundControllerContract(int controller,
+                                           SoundControllerContract& contract);
+    bool soundControllerModulatorsReady() const;
 
     // invoked on the message thread after refreshBanks rebuilds the `banks` tree
     // (font load/unload). Used to push program names to the VST3 unit interface.
@@ -98,12 +142,34 @@ private:
     void loadSelectedChannel(int newChannel);
     void saveParamToChannel(const String& parameterID, int value);
     void dispatchMidiEvent(const MidiMessage& message, int samplePosition);
+    // Audio thread. Takes the payload between 0xF0 and 0xF7 so processBlock can
+    // dispatch from the MidiBuffer directly, without MidiMessage's heap copy.
+    void dispatchSysEx(const uint8_t* payload, int payloadBytes);
     void renderSamples(AudioBuffer<float>& buffer, int startSample, int numSamples);
-    // message thread: push every channel's saved program + sound CCs from
-    // channelPrograms back into the synth (used after a system-reset SysEx).
     // mirror a channel's current program into its progChN parameter (guarded so
     // parameterChanged doesn't re-apply it to the synth). Message thread only.
     void syncProgParam(int ch, int preset);
+
+    struct AppliedProgram {
+        int rawBank{-1};
+        int preset{-1};
+    };
+
+    // The only function that mutates a channel's FluidSynth program. Exact-bank
+    // callers pass a raw FluidSynth bank (including the loaded font's offset);
+    // MIDI and progChN callers retain the engine's current Bank Select state.
+    // Every successful route captures the actual engine result in the same
+    // atomics. Audio-thread routes additionally queue message-thread state/UI
+    // synchronization.
+    bool applyProgramToEngine(int midiCh,
+                              int rawBank,
+                              int preset,
+                              bool retainCurrentBank,
+                              bool queueStateSync,
+                              AppliedProgram* applied = nullptr);
+    void syncAppliedProgramOnMessageThread(int midiCh,
+                                           const AppliedProgram& applied);
+    void recordProgramApplyFailure(int midiCh);
 
     static constexpr int kNumChannels{16};
     static constexpr int kNumSoundCcs{6}; // CC71,72,73,74,75,79 (see ccIndexOrder)
@@ -122,6 +188,9 @@ private:
     std::atomic<int> midiBank[kNumChannels];
     std::atomic<int> midiPreset[kNumChannels];
     std::atomic<unsigned int> midiProgramDirtyMask{0}; // bit per channel
+    // Sticky diagnostic bit per channel. This records rejected/failed program
+    // applications for paths that cannot return an error (MIDI/host automation).
+    std::atomic<unsigned int> programApplyFailureMask{0};
 
     // last engine program per channel (RAW synth bank incl. offset + preset),
     // maintained at every program_select/change site; used for the immediate
@@ -137,6 +206,7 @@ private:
     // on the audio thread.
     std::atomic<int> midiCcValue[kNumChannels][kNumSoundCcs];
     std::atomic<unsigned int> midiCcDirtyMask{0}; // bit per channel
+    std::atomic<bool> soundControllerModsReady{false};
     // Last value actually sent to the synth for the six exposed sound CCs. Reset
     // SysEx restoration reads only these atomics, so it cannot race a newer MIDI
     // event by consulting stale message-thread ValueTrees.
@@ -145,6 +215,9 @@ private:
     // diagnostics only; synthesis behavior still comes from FluidSynth.
     std::atomic<int> lastCcValue[kNumChannels][128];
     std::atomic<int> lastCcSample[kNumChannels][128];
+    std::atomic<int> lastNoteOnBank[kNumChannels];
+    std::atomic<int> lastNoteOnPreset[kNumChannels];
+    std::atomic<int> lastNoteOnSample[kNumChannels];
     std::atomic<int> lastChannelPressureValue[kNumChannels];
     std::atomic<int> lastChannelPressureSample[kNumChannels];
     std::atomic<int> lastKeyPressureValue[kNumChannels][128];
@@ -175,8 +248,10 @@ private:
     unique_ptr<fluid_synth_t, decltype(&delete_fluid_synth)> synth;
 
     float currentSampleRate;
+    std::atomic<bool> sampleRateSupported{true};
 
     bool unloadAndLoadFont(const String& absPath);
+    static bool riffContainerOverrunsFile(const juce::File& src);
     void publishFontLoadResult(bool success,
                                const String& requestedPath,
                                const String& message,

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 
-if test -n "$1"; then
-  declare -a ARCHS=("$1")
-else
-  declare -a ARCHS=("x64")
+ARCH="${1:-x64}"
+if [[ "$ARCH" != "x64" ]]; then
+  echo "Only Windows x64 is in the Juicy16 Beta 1 scope; requested: $ARCH" >&2
+  exit 2
 fi
 
-declare -A TOOLCHAINS=( [x64]=x86_64 [x86]=i686 [arm64]=aarch64 )
-declare -A REPOS=( [x64]=clang64 [x86]=clang32 [arm64]=clangarm64 )
+TOOLCHAIN=x86_64
+REPO=clang64
 
 # declare UIA constants that JUCE relies on but which are missing from juce_win32_ComInterfaces.h
 declare -A UIA_CONSTS=(
@@ -38,13 +38,8 @@ do
   UIA_DEFINES="$UIA_DEFINES -D${UIA_CONST}=\"(${UIA_CONSTS[$UIA_CONST]})\""
 done
 
-for ARCH in ${ARCHS[@]}; do
   echo "arch: $ARCH"
-
-  REPO="${REPOS[$ARCH]}"
   echo "repo: $REPO"
-
-  TOOLCHAIN="${TOOLCHAINS[$ARCH]}"
   echo "toolchain: $TOOLCHAIN"
   TOOLCHAIN_FILE="/${TOOLCHAIN}_toolchain.cmake"
   echo "toolchain file: $TOOLCHAIN_FILE"
@@ -78,10 +73,8 @@ for ARCH in ${ARCHS[@]}; do
 -DCMAKE_EXE_LINKER_FLAGS="$LINKER_FLAGS" \
 -DCMAKE_MODULE_LINKER_FLAGS="$LINKER_FLAGS" \
 -DCMAKE_INSTALL_PREFIX="/$REPO" \
--DJUICYSF_ENABLE_LEGACY_VST2=OFF \
 -DFLUIDSYNTH_LINK_STATIC=ON \
 -DJUICYSF_COPY_PLUGIN_AFTER_BUILD=OFF \
 -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
 -DCMAKE_CXX_FLAGS="$CMAKE_CXX_FLAGS" \
 -DCMAKE_BUILD_TYPE=Release
-done

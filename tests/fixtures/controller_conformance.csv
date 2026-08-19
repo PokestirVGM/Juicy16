@@ -1,0 +1,51 @@
+# Juicy16 Beta 1 deterministic MIDI controller fixture.
+# sample,type,channel,controller-or-bend,value
+#
+# Events sharing sample 32 intentionally exercise stable input ordering. Data
+# Entry follows RPN 0,0 and must leave channel 3 with a 12-semitone bend range.
+16,cc,3,121,0
+32,cc,3,0,1
+32,cc,3,32,2
+32,cc,3,1,17
+32,cc,3,33,18
+32,cc,3,2,19
+32,cc,3,34,20
+32,cc,3,5,21
+32,cc,3,37,22
+32,cc,3,7,100
+32,cc,3,39,23
+32,cc,3,10,64
+32,cc,3,42,24
+32,cc,3,11,90
+32,cc,3,43,25
+32,cc,3,64,127
+32,cc,3,65,127
+32,cc,3,66,127
+32,cc,3,67,70
+32,cc,3,68,127
+32,cc,3,71,20
+32,cc,3,72,30
+32,cc,3,73,40
+32,cc,3,74,50
+32,cc,3,75,60
+32,cc,3,79,70
+32,cc,3,91,80
+32,cc,3,93,90
+32,cc,3,98,1
+32,cc,3,99,2
+32,cc,3,101,0
+32,cc,3,100,0
+32,cc,3,6,12
+32,cc,3,38,0
+32,pitchbend,3,16383,0
+48,cc,3,120,0
+49,cc,3,122,0
+50,cc,3,123,0
+51,cc,3,124,0
+52,cc,3,125,0
+53,cc,3,126,0
+54,cc,3,127,0
+64,pitchbend,1,0,0
+65,pitchbend,2,8192,0
+66,pitchbend,10,4097,0
+67,pitchbend,16,16383,0

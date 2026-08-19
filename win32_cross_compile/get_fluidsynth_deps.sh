@@ -10,12 +10,9 @@ Purple="${BC}35m"
 Cyan="${BC}36m"
 NC="${BC}0m" # No Color
 
-# deps such as libsndfile aren't available in clangarm64 repo
-# declare -a ARCHS=("x64" "x86" "arm64")
-declare -a ARCHS=("x64")
-
-declare -A REPOS=( [x64]=clang64 [x86]=clang32 [arm64]=clangarm64 )
-declare -A PKG_PREFIX_ARCHS=( [x64]=x86_64 [x86]=i686 [arm64]=aarch64 )
+ARCH=x64
+REPO=clang64
+PKG_PREFIX_ARCH=x86_64
 # https://waterlan.home.xs4all.nl/libintl.html
 # apparently libintl is part of gettext
 declare -a PKGS=("libiconv" "flac" "glib2" "libogg" "opus-1" "libvorbis" "pcre-" "libsndfile" "gettext")
@@ -51,10 +48,7 @@ _int() {
 trap '_int' SIGINT EXIT
 trap '_term' SIGTERM
  
-for ARCH in ${ARCHS[@]}; do
   echo "arch: $ARCH"
-
-  REPO="${REPOS[$ARCH]}"
   echo "repo: $REPO"
 
   REPO_URL="https://repo.msys2.org/mingw/$REPO"
@@ -71,7 +65,6 @@ for ARCH in ${ARCHS[@]}; do
 
   for PKG in ${PKGS[@]}; do
     echo "pkg: $PKG"
-    PKG_PREFIX_ARCH="${PKG_PREFIX_ARCHS[$ARCH]}"
     echo "pkg prefix arch: $PKG_PREFIX_ARCH"
     PKG_PREFIX="mingw-w64-clang-$PKG_PREFIX_ARCH-$PKG"
     echo "pkg prefix: $PKG_PREFIX"
@@ -89,7 +82,6 @@ for ARCH in ${ARCHS[@]}; do
       exit 1
     fi
   done
-done
 
 echo -e "${Cyan}Waiting for ${#pids[@]} parallel downloads to complete...${NC}"
 for pid in "${pids[@]}"; do

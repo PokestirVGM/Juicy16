@@ -415,7 +415,7 @@ public:
     //==============================================================================
     Steinberg::int32 PLUGIN_API getUnitCount() override
     {
-        return parameterGroups.size() + 1;
+        return 1 + juicysf::vst3units::kNumMidiChannels;
     }
 
     tresult PLUGIN_API getUnitInfo (Steinberg::int32 unitIndex, Vst::UnitInfo& info) override
@@ -424,98 +424,91 @@ public:
         {
             info.id             = Vst::kRootUnitId;
             info.parentUnitId   = Vst::kNoParentUnitId;
-            info.programListId  = getProgramListCount() > 0
-                                ? static_cast<Vst::ProgramListID> (programParamID)
-                                : Vst::kNoProgramListId;
+            info.programListId  = Vst::kNoProgramListId;
 
             toString128 (info.name, TRANS ("Root Unit"));
 
             return kResultTrue;
         }
 
-        if (auto* group = parameterGroups[unitIndex - 1])
-        {
-            info.id             = JuceAudioProcessor::getUnitID (group);
-            info.parentUnitId   = JuceAudioProcessor::getUnitID (group->getParent());
-            info.programListId  = Vst::kNoProgramListId;
+        const auto ch = (int) unitIndex - 1;
 
-            toString128 (info.name, group->getName());
+        if (ch >= 0 && ch < juicysf::vst3units::kNumMidiChannels)
+        {
+            info.id             = (Vst::UnitID) juicysf::vst3units::unitIdForChannel (ch);
+            info.parentUnitId   = Vst::kRootUnitId;
+            info.programListId  = (Vst::ProgramListID) juicysf::vst3units::kProgramListId;
+
+            toString128 (info.name, "Ch " + juce::String (ch + 1));
 
             return kResultTrue;
         }
 
+        zerostruct (info);
         return kResultFalse;
     }
 
     Steinberg::int32 PLUGIN_API getProgramListCount() override
     {
-        if (audioProcessor->getNumPrograms() > 0)
-            return 1;
-
-        return 0;
+        return 1;
     }
 
     tresult PLUGIN_API getProgramListInfo (Steinberg::int32 listIndex, Vst::ProgramListInfo& info) override
     {
-        if (listIndex == 0)
+        if (listIndex != 0)
         {
-            info.id = static_cast<Vst::ProgramListID> (programParamID);
-            info.programCount = static_cast<Steinberg::int32> (audioProcessor->getNumPrograms());
-
-            toString128 (info.name, TRANS ("Factory Presets"));
-
-            return kResultTrue;
+            zerostruct (info);
+            return kResultFalse;
         }
 
-        jassertfalse;
-        zerostruct (info);
-        return kResultFalse;
+        info.id = (Vst::ProgramListID) juicysf::vst3units::kProgramListId;
+        info.programCount = juicysf::vst3units::kNumPrograms;
+        toString128 (info.name, "Programs");
+        return kResultTrue;
     }
 
     tresult PLUGIN_API getProgramName (Vst::ProgramListID listId, Steinberg::int32 programIndex, Vst::String128 name) override
     {
-        if (listId == static_cast<Vst::ProgramListID> (programParamID)
-            && isPositiveAndBelow ((int) programIndex, audioProcessor->getNumPrograms()))
+        if (listId == (Vst::ProgramListID) juicysf::vst3units::kProgramListId
+            && isPositiveAndBelow ((int) programIndex, juicysf::vst3units::kNumPrograms))
         {
-            toString128 (name, audioProcessor->getProgramName ((int) programIndex));
+            toString128 (name, juicysf::vst3units::programNameForIndex ((int) programIndex));
             return kResultTrue;
         }
 
-        jassertfalse;
         toString128 (name, juce::String());
         return kResultFalse;
     }
 
     tresult PLUGIN_API hasProgramPitchNames (Vst::ProgramListID, Steinberg::int32) override
     {
-        for (int i = 0; i <= 127; ++i)
-            if (audioProcessor->getNameForMidiNoteNumber (i, 1))
-                return kResultTrue;
-
         return kResultFalse;
     }
 
-    tresult PLUGIN_API getProgramPitchName (Vst::ProgramListID, Steinberg::int32, Steinberg::int16 midiNote, Vst::String128 nameOut) override
+    tresult PLUGIN_API getProgramPitchName (Vst::ProgramListID, Steinberg::int32, Steinberg::int16, Vst::String128) override
     {
-        if (auto name = audioProcessor->getNameForMidiNoteNumber (midiNote, 1))
+        return kResultFalse;
+    }
+
+    tresult PLUGIN_API getProgramInfo (Vst::ProgramListID, Steinberg::int32, Vst::CString, Vst::String128) override             { return kResultFalse; }
+    tresult PLUGIN_API selectUnit (Vst::UnitID unitId) override                                                                 { juicySelectedUnit = unitId; return kResultTrue; }
+    tresult PLUGIN_API setUnitProgramData (Steinberg::int32, Steinberg::int32, IBStream*) override                              { return kNotImplemented; }
+    Vst::UnitID PLUGIN_API getSelectedUnit() override                                                                           { return juicySelectedUnit; }
+
+    tresult PLUGIN_API getUnitByBus (Vst::MediaType type, Vst::BusDirection dir, Steinberg::int32 busIndex,
+                                     Steinberg::int32 channel, Vst::UnitID& unitId) override
+    {
+        if (type == Vst::MediaTypes::kEvent && dir == Vst::BusDirections::kInput
+            && busIndex == 0 && channel >= 0 && channel < juicysf::vst3units::kNumMidiChannels)
         {
-            toString128 (nameOut, *name);
+            unitId = (Vst::UnitID) juicysf::vst3units::unitIdForChannel ((int) channel);
             return kResultTrue;
         }
 
         return kResultFalse;
     }
 
-    tresult PLUGIN_API getProgramInfo (Vst::ProgramListID, Steinberg::int32, Vst::CString, Vst::String128) override             { return kNotImplemented; }
-    tresult PLUGIN_API selectUnit (Vst::UnitID) override                                                                        { return kNotImplemented; }
-    tresult PLUGIN_API setUnitProgramData (Steinberg::int32, Steinberg::int32, IBStream*) override                              { return kNotImplemented; }
-    Vst::UnitID PLUGIN_API getSelectedUnit() override                                                                           { return Vst::kRootUnitId; }
-
-    tresult PLUGIN_API getUnitByBus (Vst::MediaType, Vst::BusDirection, Steinberg::int32, Steinberg::int32, Vst::UnitID& unitId) override
-    {
-        unitId = Vst::kRootUnitId;
-        return kResultOk;
-    }
+    Vst::UnitID juicySelectedUnit = Vst::kRootUnitId;
 
     //==============================================================================
     inline Vst::ParamID getVSTParamIDForIndex (int paramIndex) const noexcept
@@ -921,11 +914,11 @@ public:
             if (isBypassParameter)
                 info.flags |= Vst::ParameterInfo::kIsBypass;
 
-            // JUICYSF RACK PATCH (the ONLY change in this vendored copy): per-channel
+            // JUICYSF RACK PATCH: per-channel
             // program parameters ("progCh1".."progCh16") must carry kIsProgramChange so
             // hosts (Cubase et al.) route MIDI Program Change on channel N to the
             // program parameter of unit N (units + program list are provided by the
-            // plugin's custom IUnitInfo -- see Source/VST3Multitimbral.cpp). Stock JUCE
+            // patched wrapper's IUnitInfo). Stock JUCE
             // only sets this flag on its single global program parameter.
             if (auto* withID = dynamic_cast<const AudioProcessorParameterWithID*> (&param))
                 if (withID->paramID.startsWith ("progCh"))
@@ -3536,8 +3529,35 @@ public:
                 const auto vstParamID = paramQueue->getParameterId();
                 const auto numPoints  = paramQueue->getPointCount();
 
+                // JUICYSF RACK: progCh1..progCh16 are both normal JUCE
+                // parameters and the per-unit Program Change selectors exposed
+                // through IMidiMapping/IUnitInfo. Stock JUCE keeps only the last
+                // point from a normal parameter queue and applies it before the
+                // block, which quantises every host-delivered Program Change to
+                // block start. Reconstitute all points as channelized MIDI here
+                // so the processor receives their original sample offsets and
+                // can update engine/UI/state through its one Program Change path.
+                const auto programChannel =
+                    juicysf::vst3units::programChannelForParamId (vstParamID);
+                if (programChannel >= 0)
+                {
+                    for (Steinberg::int32 point = 0; point < numPoints; ++point)
+                    {
+                        if (const auto change = getPointFromQueue (paramQueue, point))
+                        {
+                            const auto program = jlimit (
+                                0, juicysf::vst3units::kNumPrograms - 1,
+                                roundToIntAccurate (change->value
+                                                    * (juicysf::vst3units::kNumPrograms - 1)));
+                            midiBuffer.addEvent (
+                                MidiMessage::programChange (programChannel + 1, program),
+                                change->offsetSamples);
+                        }
+                    }
+                }
+
                #if JUCE_VST3_EMULATE_MIDI_CC_WITH_PARAMETERS
-                if (juceVST3EditController != nullptr && juceVST3EditController->isMidiControllerParamID (vstParamID))
+                else if (juceVST3EditController != nullptr && juceVST3EditController->isMidiControllerParamID (vstParamID))
                 {
                     for (Steinberg::int32 point = 0; point < numPoints; ++point)
                     {
@@ -3547,10 +3567,13 @@ public:
                 }
                 else
                #endif
-                if (const auto change = getPointFromQueue (paramQueue, numPoints - 1))
+                if (programChannel < 0)
                 {
-                    if (auto* param = comPluginInstance->getParamForVSTParamID (vstParamID))
-                        setValueAndNotifyIfChanged (*param, (float) change->value);
+                    if (const auto change = getPointFromQueue (paramQueue, numPoints - 1))
+                    {
+                        if (auto* param = comPluginInstance->getParamForVSTParamID (vstParamID))
+                            setValueAndNotifyIfChanged (*param, (float) change->value);
+                    }
                 }
             }
         }

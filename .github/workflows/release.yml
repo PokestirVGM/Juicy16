@@ -1,0 +1,88 @@
+name: Release candidate
+
+# Builds a beta candidate from a tag. The quality gates run again here rather
+# than trusting an earlier run, so a tag can only produce artifacts from a
+# commit that passes them. Phase 5.2 of MILESTONE_PLAN.md also requires branch
+# protection on the tag pattern; see docs/CI.md.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      candidate:
+        description: Candidate number (for example BC1)
+        required: true
+        default: BC1
+
+permissions:
+  contents: read
+
+env:
+  JUCE_VERSION: 8.0.14
+
+jobs:
+  gates:
+    name: Quality gates
+    uses: ./.github/workflows/ci.yml
+
+  macos-candidate:
+    name: macOS candidate (arm64)
+    needs: gates
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: brew install cmake pkg-config
+
+      - name: Cache JUCE ${{ env.JUCE_VERSION }}
+        id: juce-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/juicydeps
+          key: juce-${{ env.JUCE_VERSION }}-macos-14-${{ runner.arch }}
+
+      - name: Build and install pinned JUCE
+        if: steps.juce-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "$JUCE_VERSION" \
+            https://github.com/juce-framework/JUCE.git "$RUNNER_TEMP/JUCE"
+          cmake -S "$RUNNER_TEMP/JUCE" -B "$RUNNER_TEMP/JUCE/build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$HOME/juicydeps"
+          cmake --build "$RUNNER_TEMP/JUCE/build" --target install --parallel 3
+
+      - name: Cache pinned dependency closure
+        uses: actions/cache@v4
+        with:
+          path: build/macos11-deps
+          key: macos11-deps-${{ hashFiles('tools/build_macos_dependencies.sh') }}-${{ runner.arch }}
+
+      - name: Strict Release gate
+        run: JUICY16_BUILD_JOBS=3 tools/ci_gates.sh release
+
+      - name: Validate the Audio Unit
+        run: |
+          mkdir -p "$HOME/Library/Audio/Plug-Ins/Components"
+          cp -R build-release/JuicySFPlugin_artefacts/Release/AU/Juicy16.component \
+            "$HOME/Library/Audio/Plug-Ins/Components/"
+          killall -9 AudioComponentRegistrar || true
+          auval -v aumu Jc16 Pkst
+
+      - name: Stage the candidate package
+        run: |
+          distribute/bundle_macos.sh \
+            build-release/JuicySFPlugin_artefacts/Release \
+            "${{ github.event.inputs.candidate || 'BC1' }}"
+
+      # Unsigned beyond an ad-hoc signature: Developer ID and notarization are
+      # still open Phase 4.2 gates, so this is a candidate, not a public release.
+      - name: Publish candidate artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Juicy16-macos-arm64-candidate
+          path: |
+            distribute/out/*.zip
+            distribute/out/*.sha256
+          if-no-files-found: error

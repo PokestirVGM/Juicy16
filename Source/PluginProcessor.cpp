@@ -110,7 +110,7 @@ AudioProcessorValueTreeState::ParameterLayout JuicySFAudioProcessor::createParam
                               int minimum, int maximum, int defaultValue,
                               const String& label) {
         return make_unique<AudioParameterInt>(
-            juce::ParameterID{id, 0}, name, minimum, maximum, defaultValue,
+            juce::ParameterID{id, 1}, name, minimum, maximum, defaultValue,
             juce::AudioParameterIntAttributes{}.withLabel(label));
     };
 
@@ -131,7 +131,7 @@ AudioProcessorValueTreeState::ParameterLayout JuicySFAudioProcessor::createParam
     // parameter group. Two purposes:
     //  - hosts can select any channel's instrument via automation in every format;
     //  - in VST3, JUCE derives each parameter's unitId from its GROUP id
-    //    (hashCode of "chUnit<n>"), which our custom IUnitInfo mirrors so hosts
+    //    (hashCode of "chUnit<n>"), which the pinned wrapper IUnitInfo mirrors so hosts
     //    like Cubase can associate MIDI channel N with unit N (HALion-style
     //    multitimbral program routing).
     for (int ch = 1; ch <= 16; ++ch) {
@@ -140,7 +140,7 @@ AudioProcessorValueTreeState::ParameterLayout JuicySFAudioProcessor::createParam
             "Ch " + String(ch),
             "|",
             make_unique<DiscreteParameterInt>(
-                juce::ParameterID{"progCh" + String(ch), 0},
+                juce::ParameterID{"progCh" + String(ch), 1},
                 "program for MIDI channel " + String(ch),
                 MidiConstants::midiMinValue, MidiConstants::midiMaxValue,
                 MidiConstants::midiMinValue,
@@ -190,7 +190,7 @@ double JuicySFAudioProcessor::getTailLengthSeconds() const
 int JuicySFAudioProcessor::getNumPrograms()
 {
     // Report exactly one program. If we advertise a program LIST (we used to expose
-    // 128), VST3/VST2/AU hosts intercept incoming MIDI Program Change messages and
+    // 128), VST3/AU hosts intercept incoming MIDI Program Change messages and
     // consume them as host program-list changes (routed to setCurrentProgram) instead
     // of delivering them as MIDI events to processBlock. That broke the core workflow:
     // per-channel GM program changes from the DAW never reached the synth, so every
@@ -388,7 +388,7 @@ void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInByt
                 fontState.setProperty("loadStatus", "error", nullptr);
                 fontState.setProperty(
                     "loadMessage",
-                    "This project uses JuicySF state version " + String(stateVersion)
+                    "This project uses Juicy16 state version " + String(stateVersion)
                         + "; this build supports up to version "
                         + String(currentStateVersion) + ". No newer state was applied.",
                     nullptr);

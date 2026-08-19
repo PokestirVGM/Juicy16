@@ -1,0 +1,208 @@
+name: CI
+
+# Quality gates for Phase 5.2 of MILESTONE_PLAN.md. Each job delegates to
+# tools/ci_gates.sh so the hosted run and a developer's local run cannot drift
+# apart. See docs/CI.md for what a passing run does and does not prove.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  # Release tags re-run these gates instead of trusting an earlier result.
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JUCE_VERSION: 8.0.14
+
+jobs:
+  docs:
+    name: Documentation links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: tools/ci_gates.sh docs
+
+  macos-debug:
+    name: macOS Debug (arm64)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: brew install pkg-config fluid-synth
+
+      - name: Cache JUCE ${{ env.JUCE_VERSION }}
+        id: juce-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/juicydeps
+          key: juce-${{ env.JUCE_VERSION }}-macos-14-${{ runner.arch }}
+
+      - name: Build and install pinned JUCE
+        if: steps.juce-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "$JUCE_VERSION" \
+            https://github.com/juce-framework/JUCE.git "$RUNNER_TEMP/JUCE"
+          cmake -S "$RUNNER_TEMP/JUCE" -B "$RUNNER_TEMP/JUCE/build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$HOME/juicydeps"
+          cmake --build "$RUNNER_TEMP/JUCE/build" --target install --parallel 3
+
+      - name: Build and test
+        run: JUICY16_BUILD_JOBS=3 tools/ci_gates.sh debug
+
+      - name: Archive test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-debug-test-logs
+          path: build-ci-debug/Testing/**
+          if-no-files-found: ignore
+
+  macos-sanitizers:
+    name: macOS ASan + UBSan (arm64)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: brew install pkg-config fluid-synth
+
+      - name: Cache JUCE ${{ env.JUCE_VERSION }}
+        id: juce-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/juicydeps
+          key: juce-${{ env.JUCE_VERSION }}-macos-14-${{ runner.arch }}
+
+      - name: Build and install pinned JUCE
+        if: steps.juce-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "$JUCE_VERSION" \
+            https://github.com/juce-framework/JUCE.git "$RUNNER_TEMP/JUCE"
+          cmake -S "$RUNNER_TEMP/JUCE" -B "$RUNNER_TEMP/JUCE/build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$HOME/juicydeps"
+          cmake --build "$RUNNER_TEMP/JUCE/build" --target install --parallel 3
+
+      # Only the offline harnesses are sanitized; an unsanitized host cannot load
+      # a sanitized plugin bundle.
+      - name: Build and run sanitized harnesses
+        run: JUICY16_BUILD_JOBS=3 tools/ci_gates.sh asan
+
+  macos-release-strict:
+    name: macOS portable Release (arm64, strict)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: brew install pkg-config
+
+      - name: Cache JUCE ${{ env.JUCE_VERSION }}
+        id: juce-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/juicydeps
+          key: juce-${{ env.JUCE_VERSION }}-macos-14-${{ runner.arch }}
+
+      - name: Build and install pinned JUCE
+        if: steps.juce-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "$JUCE_VERSION" \
+            https://github.com/juce-framework/JUCE.git "$RUNNER_TEMP/JUCE"
+          cmake -S "$RUNNER_TEMP/JUCE" -B "$RUNNER_TEMP/JUCE/build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$HOME/juicydeps"
+          cmake --build "$RUNNER_TEMP/JUCE/build" --target install --parallel 3
+
+      # Keyed on the recipe itself: every pinned version and checksum lives there,
+      # so editing it necessarily rebuilds the closure. The gate builds it when
+      # the cache misses.
+      - name: Cache pinned dependency closure
+        uses: actions/cache@v4
+        with:
+          path: build/macos11-deps
+          key: macos11-deps-${{ hashFiles('tools/build_macos_dependencies.sh') }}-${{ runner.arch }}
+
+      # Covers architecture, deployment target, signatures, linked and embedded
+      # paths, DLS and SF3 loading, VST3 unit routing, and release metadata.
+      - name: Strict Release gate
+        run: JUICY16_BUILD_JOBS=3 tools/ci_gates.sh release
+
+      - name: Validate the Audio Unit
+        run: |
+          mkdir -p "$HOME/Library/Audio/Plug-Ins/Components"
+          cp -R build-release/JuicySFPlugin_artefacts/Release/AU/Juicy16.component \
+            "$HOME/Library/Audio/Plug-Ins/Components/"
+          killall -9 AudioComponentRegistrar || true
+          auval -v aumu Jc16 Pkst
+
+      - name: Stage the unsigned candidate package
+        run: |
+          distribute/bundle_macos.sh \
+            build-release/JuicySFPlugin_artefacts/Release BC1
+
+      - name: Archive candidate package
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64-candidate
+          path: |
+            distribute/out/*.zip
+            distribute/out/*.sha256
+          if-no-files-found: error
+
+  windows-vst3:
+    name: Windows VST3 (x64, unvalidated)
+    runs-on: windows-2022
+    # Phase 4.3 of MILESTONE_PLAN.md is open: no MSVC FluidSynth dependency
+    # policy has been approved, DLS capability on Windows is unproven, and no
+    # Windows artifact has been host-validated. This job reports status only and
+    # must not gate a release until that work lands and this flag is removed.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache JUCE ${{ env.JUCE_VERSION }}
+        id: juce-cache
+        uses: actions/cache@v4
+        with:
+          path: C:\juicydeps
+          key: juce-${{ env.JUCE_VERSION }}-windows-2022
+
+      - name: Build and install pinned JUCE
+        if: steps.juce-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          git clone --depth 1 --branch "$JUCE_VERSION" \
+            https://github.com/juce-framework/JUCE.git "$RUNNER_TEMP/JUCE"
+          cmake -S "$RUNNER_TEMP/JUCE" -B "$RUNNER_TEMP/JUCE/build" \
+            -DCMAKE_INSTALL_PREFIX=C:/juicydeps
+          cmake --build "$RUNNER_TEMP/JUCE/build" --config Release \
+            --target install --parallel 3
+
+      - name: Install FluidSynth via vcpkg
+        shell: bash
+        run: vcpkg install fluidsynth:x64-windows
+
+      - name: Configure
+        shell: bash
+        run: |
+          cmake -S . -B build -A x64 \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-windows \
+            -DCMAKE_PREFIX_PATH="C:/juicydeps" \
+            -DJUICYSF_COPY_PLUGIN_AFTER_BUILD=OFF \
+            -DJUICYSF_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build build --config Release --parallel 3
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure

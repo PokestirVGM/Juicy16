@@ -6,7 +6,7 @@ This note documents the host-facing structure that keeps all 16 MIDI channels wo
 
 AU and some host paths deliver channelized MIDI Program Change directly. VST3 also allows a host to represent Program Change as parameter automation associated with units and a program list. Hosts do not all choose the same path. FL Studio and Cubase therefore succeeding or failing independently is expected unless both contracts are implemented.
 
-JuicySF Rack supports both:
+Juicy16 supports both:
 
 1. `IMidiMapping` maps `kCtrlProgramChange` on event-bus channels 0–15 to `progCh1`–`progCh16`.
 2. `IUnitInfo` exposes a root unit plus one unit per MIDI channel, with each channel unit attached to a shared 128-entry program list. The corresponding `progChN` parameter is a discrete list/program-change parameter.
@@ -26,7 +26,7 @@ There is no hard-coded `if host == Cubase` or `if host == FL Studio` branch. Com
 
 Cubase may query and cache `IUnitInfo` before JUCE has connected the VST3 component and controller. The root/channel units and program list must therefore be available during early controller queries and remain identical after connection. Returning an empty list early can make only the first MIDI channel appear functional for the plugin instance.
 
-The vendored JUCE VST3 wrapper patch is wired in by CMake and pinned to JUCE 8.0.14. It supplies the missing `kIsProgramChange` flag for the per-channel program parameters. CMake fails if the expected wrapper source layout cannot be found. The patch and `Source/VST3Multitimbral.*` together are part of the compatibility contract.
+The vendored JUCE VST3 wrapper patch is wired in by CMake and pinned to JUCE 8.0.14. It is the sole `IUnitInfo` implementation for both the component and controller, supplies early controller-side unit/program-list discovery, per-channel `IMidiMapping`, bounds rejection, and the missing `kIsProgramChange`/`kIsList` flags. It also recognizes the frozen `progChN` ParamIDs while processing: every point in each program-parameter queue becomes a channelized MIDI Program Change at the queue point's sample offset. This is necessary because stock JUCE treats ordinary parameters as block-level values and keeps only the final point, which would quantize mid-block Program Changes to block start. `Source/VST3Multitimbral.*` no longer claims the same COM interface; it owns only the shared program-name store and host refresh notification. This avoids JUCE's duplicate-interface assertion while retaining component-side queries and pre-connection Cubase discovery. CMake verifies the exact upstream and vendored wrapper hashes and fails if either side drifts. The reproducible diff and instructions live in `vendor/juce_patched/`.
 
 ## Engine synchronization
 
@@ -42,7 +42,7 @@ Incoming Bank Select remains MIDI CC0/32 state in FluidSynth. `progChN` carries 
 
 ## Automated and manual validation
 
-`vst3_multitimbral_smoke` currently verifies early discovery, component/controller interfaces, all unit/channel mappings, all 16 program parameter flags/ranges, all 16 MIDI mappings, and invalid-input rejection. The offline engine test separately proves independent Program Change on all 16 channels.
+`vst3_multitimbral_smoke` verifies early discovery, identical pre/post-connection unit answers, repeatable component/controller lifecycles, component/controller interfaces, all unit/channel mappings, all 16 program parameter flags/ranges, all 16 MIDI mappings, invalid-input rejection, and program-name refresh plus host notification after loading the system DLS. It then configures `IAudioProcessor` and drives the checked-in `tests/fixtures/vst3_multichannel_programs.csv` through ParamIDs independently discovered via `IMidiMapping` and the unit/program-parameter path. The fixture covers all 16 channels, Bank Select, channel 10 percussion, simultaneous and mid-block Program Changes, same-block notes, framed GM/GS/XG reset SysEx, and a stop/restart-at-sample-zero reset scenario. Each scenario must produce audio, converge all channel parameters and serialized bank/program state, report exactly one final host edit per changed `progChN`, and suppress unchanged duplicates; the restart scenario deliberately expects zero edits while still requiring correct engine/state restoration. A direct Debug run is required so assertion text cannot be hidden by CTest's passing-output suppression. The offline engine test separately proves raw MIDI controller values, Program Change timing, reset behavior, and per-note engine checkpoints.
 
 Before Beta 1, Cubase must still prove the complete workflow with the exact packaged VST3:
 

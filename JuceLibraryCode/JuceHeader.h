@@ -88,8 +88,8 @@ using juce::XmlElement;
 #if ! JUCE_DONT_DECLARE_PROJECTINFO
 namespace ProjectInfo
 {
-    const char* const  projectName    = "JuicySF Rack";
-    const char* const  companyName    = "Birchlabs";
+    const char* const  projectName    = "Juicy16";
+    const char* const  companyName    = "Pokestir";
     const char* const  versionString  = "0.5.0";
     const int          versionNumber  =  0x500;
 }

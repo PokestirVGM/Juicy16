@@ -66,7 +66,7 @@ public:
     bool supportsDoublePrecisionProcessing() const override;
 
     // VST3 only: per-channel units + program list (see VST3Multitimbral.h).
-    // Inert in AU/Standalone/VST2 builds.
+    // Inert in AU/Standalone builds.
     juce::VST3ClientExtensions* getVST3ClientExtensions() override { return &vst3Extensions; }
 
     FluidSynthModel& getFluidSynthModel();

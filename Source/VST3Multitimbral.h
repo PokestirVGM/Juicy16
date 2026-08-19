@@ -1,12 +1,10 @@
 //
 // Per-channel VST3 multitimbral support (the HALion-style "units" mechanism).
 //
-// Stock JUCE's VST3 wrapper exposes IUnitInfo hardwired to a single root unit and
-// a single global program list, so hosts have no way to associate MIDI channels
-// with per-channel programs. This extension shadows the wrapper's IUnitInfo via
-// JUCE's official VST3ClientExtensions::queryIEditController hook (user-provided
-// interfaces are consulted BEFORE the wrapper's own — see extractResult() in
-// juce_audio_plugin_client_VST3.cpp) with:
+// Juicy16's pinned wrapper patch owns IUnitInfo on both the VST3 component and
+// controller. This extension supplies the runtime program names and forwards
+// program-list refresh notifications without claiming IUnitInfo itself. The
+// wrapper exposes:
 //   - a root unit plus 16 child units "Ch 1".."Ch 16", whose unit IDs use the
 //     wrapper's own group-hash formula over our parameter-group IDs
 //     ("chUnit1".."chUnit16"), so each channel's progChN parameter lives inside
@@ -18,8 +16,8 @@
 //     corresponding unit's program.
 //
 // This header stays free of VST3 SDK includes; all SDK types live in the .cpp.
-// The extension is only ever queried by the VST3 wrapper — it is inert (never
-// called) in the AU/Standalone/VST2 builds even though it's compiled in.
+// The extension is inert in the AU/Standalone builds even though it is compiled
+// into the shared target.
 //
 
 #pragma once
@@ -32,13 +30,6 @@ public:
     JuicyVST3Extensions();
     ~JuicyVST3Extensions() override;
 
-    int32_t queryIEditController (const Steinberg::TUID, void** obj) override;
-    // Same IUnitInfo exposed on the COMPONENT side: hosts may interrogate either
-    // object for unit structure (Cubase asks the component; FL asks neither and
-    // uses IMidiMapping). JUCE's component otherwise answers with its stock
-    // single-root/no-program-list implementation, which tells Cubase there is
-    // nothing to route Program Change to.
-    int32_t queryIAudioProcessor (const Steinberg::TUID, void** obj) override;
     void setIComponentHandler (Steinberg::FUnknown*) override;
 
     // Message thread: replace the shared program list's names (index = GM program
@@ -47,8 +38,6 @@ public:
     void setProgramNames (const juce::StringArray& names);
 
 private:
-    class UnitInfoImpl;            // the COM object; defined in the .cpp (SDK types)
-    UnitInfoImpl* unitInfo;        // we hold one COM reference for our lifetime
     Steinberg::FUnknown* unitHandler{nullptr}; // host's IUnitHandler (held with one ref)
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (JuicyVST3Extensions)

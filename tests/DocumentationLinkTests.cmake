@@ -1,0 +1,48 @@
+if (NOT DEFINED SOURCE_ROOT OR NOT IS_DIRECTORY "${SOURCE_ROOT}")
+  message(FATAL_ERROR "SOURCE_ROOT must name the Juicy16 source directory")
+endif ()
+
+file(GLOB_RECURSE _markdown_files LIST_DIRECTORIES FALSE "${SOURCE_ROOT}/*.md")
+set(_broken_links "")
+
+foreach (_document IN LISTS _markdown_files)
+  if (_document MATCHES "/(build|testfiles|distribute/out)/")
+    continue()
+  endif ()
+
+  file(READ "${_document}" _contents)
+  string(REGEX MATCHALL "\\]\\([^)]+\\)" _links "${_contents}")
+  get_filename_component(_document_dir "${_document}" DIRECTORY)
+
+  foreach (_link IN LISTS _links)
+    string(REGEX MATCH "\\]\\(([^)]+)\\)" _matched_link "${_link}")
+    set(_target "${CMAKE_MATCH_1}")
+    if (_target MATCHES "^(https?://|mailto:|#)")
+      continue()
+    endif ()
+
+    string(REGEX REPLACE "#.*$" "" _target "${_target}")
+    string(REPLACE "%20" " " _target "${_target}")
+    if (_target STREQUAL "")
+      continue()
+    endif ()
+
+    if (IS_ABSOLUTE "${_target}")
+      set(_resolved "${SOURCE_ROOT}${_target}")
+    else ()
+      get_filename_component(_resolved "${_document_dir}/${_target}" ABSOLUTE)
+    endif ()
+    if (NOT EXISTS "${_resolved}")
+      file(RELATIVE_PATH _relative_document "${SOURCE_ROOT}" "${_document}")
+      list(APPEND _broken_links "${_relative_document} -> ${_target}")
+    endif ()
+  endforeach ()
+endforeach ()
+
+if (_broken_links)
+  list(JOIN _broken_links "\n  " _broken_text)
+  message(FATAL_ERROR "Broken internal documentation links:\n  ${_broken_text}")
+endif ()
+
+list(LENGTH _markdown_files _document_count)
+message(STATUS "Checked internal links across ${_document_count} Markdown files")

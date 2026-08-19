@@ -105,6 +105,43 @@ SlidersComponent::SlidersComponent(
     const double rangeMax(127);
     const double rangeStep(1);
 
+    const auto describeSlider = [](Slider& slider,
+                                   const String& name,
+                                   const String& help) {
+        slider.setName(name);
+        slider.setTitle(name);
+        slider.setDescription(name + " for the selected MIDI channel");
+        slider.setHelpText(help + " MIDI value 64 is neutral.");
+        slider.setTooltip(help + " Value 64 is neutral.");
+        // JUCE sliders decline keyboard focus by default, which would leave
+        // parameter editing mouse-only. Focused sliders handle arrow keys.
+        slider.setWantsKeyboardFocus(true);
+    };
+
+    describeSlider(
+        attackSlider, "Attack (CC73)",
+        "Volume-envelope attack time; higher values make the attack longer.");
+    describeSlider(
+        decaySlider, "Decay (CC75)",
+        "Volume-envelope decay time; higher values make the decay longer.");
+    describeSlider(
+        sustainSlider, "Sustain level (CC79)",
+        "Volume-envelope sustain level; higher values make sustain louder.");
+    describeSlider(
+        releaseSlider, "Release (CC72)",
+        "Volume-envelope release time; higher values make the release longer.");
+    describeSlider(
+        filterCutOffSlider, "Filter cutoff (CC74)",
+        "Filter cutoff frequency; higher values make the sound brighter.");
+    describeSlider(
+        filterResonanceSlider, "Filter resonance (CC71)",
+        "Filter resonance; higher values add more resonance.");
+
+    envelopeGroup.setName("Envelope controls");
+    envelopeGroup.setTitle("Envelope controls");
+    filterGroup.setName("Filter controls");
+    filterGroup.setTitle("Filter controls");
+
     attackSlider.setSliderStyle(style);
     attackSlider.setRange(rangeMin, rangeMax, rangeStep);
     attackSlider.onDragEnd = makeSliderListener(attackSlider, static_cast<int>(SOUND_CTRL4));

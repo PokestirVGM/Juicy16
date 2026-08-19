@@ -1,5 +1,5 @@
 name: Beta bug report
-description: Report a reproducible JuicySF Rack Beta candidate problem
+description: Report a reproducible Juicy16 Beta candidate problem
 title: "[Beta] "
 labels: ["beta"]
 body:
@@ -10,7 +10,7 @@ body:
     id: candidate
     attributes:
       label: Version and candidate
-      placeholder: 0.5.0-beta.1 BC1
+      placeholder: 0.5.1-alpha.1 BC1
     validations:
       required: true
   - type: input

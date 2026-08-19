@@ -50,6 +50,11 @@ JuicySFAudioProcessorEditor::JuicySFAudioProcessorEditor(
     lastUIHeight.addListener(this);
 
     midiKeyboard.setName ("MIDI Keyboard");
+    midiKeyboard.setTitle("MIDI Keyboard");
+    midiKeyboard.setDescription(
+        "Audition keyboard for the currently selected MIDI channel");
+    midiKeyboard.setHelpText(
+        "Select a channel row, then use this keyboard to audition its instrument.");
 
     midiKeyboard.setWantsKeyboardFocus(false);
     tablesComponent.setWantsKeyboardFocus(false);
@@ -64,6 +69,8 @@ JuicySFAudioProcessorEditor::JuicySFAudioProcessorEditor(
     // status bar: build version and a visible bank-load result
     statusLabel.setFont(Font{juce::FontOptions{12.0f}});
     statusLabel.setName("Version and bank load status");
+    statusLabel.setTitle("Version and bank load status");
+    statusLabel.setDescription("Juicy16 version and latest sound-bank load result");
     statusLabel.setMinimumHorizontalScale(0.7f);
     addAndMakeVisible(statusLabel);
 
@@ -85,12 +92,16 @@ void JuicySFAudioProcessorEditor::syncStatusLabel() {
     const ValueTree fontState{valueTreeState.state.getChildWithName("soundFont")};
     const String status{fontState.getProperty("loadStatus", "idle").toString()};
     const String message{fontState.getProperty("loadMessage", "No bank loaded.").toString()};
-    const String text{"JuicySF Rack v" JUICYSF_RACK_VERSION " — " + message};
+    const String text{String::fromUTF8(
+        "Juicy16 v" JUICY16_VERSION " \xe2\x80\x94 ") + message};
     statusLabel.setText(text, dontSendNotification);
     statusLabel.setTooltip(message);
+    // Plain salmon sits at 4.4:1 on the window background, just under WCAG AA;
+    // brightening clears the threshold while staying an obvious error colour.
     statusLabel.setColour(
         Label::textColourId,
-        status == "error" ? juce::Colours::salmon : juce::Colours::lightgrey);
+        status == "error" ? juce::Colours::salmon.brighter(0.25f)
+                          : juce::Colours::lightgrey);
 }
 
 void JuicySFAudioProcessorEditor::valueTreePropertyChanged(ValueTree& tree, const Identifier& property) {
