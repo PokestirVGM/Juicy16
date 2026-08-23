@@ -1,6 +1,6 @@
 # Beta 1 known issues and unverified areas
 
-This file describes the unreleased `0.5.1-alpha.7` development state. It must be regenerated for the exact frozen candidate.
+This file describes the unreleased `0.6.0-alpha.1` development state. It must be regenerated for the exact frozen candidate.
 
 ## Debug-only: unregistered LookAndFeel colour IDs
 
@@ -28,7 +28,7 @@ Low severity, but 138 assertions is loud enough to hide a real one.
 ## Reverb
 
 - **Old projects will sound different.** Juicy16 discarded FluidSynth's effects
-  buses until 0.5.1-alpha.7, so its reverb was never audible. It is now mixed in,
+  buses until 0.6.0-alpha.1, so its reverb was never audible. It is now mixed in,
   and a project whose MIDI sends CC91 will have reverb where it previously had
   none. That is the file being played as written, but it is an audible change to
   existing work.

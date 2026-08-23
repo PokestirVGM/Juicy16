@@ -152,7 +152,7 @@ stay converged.
 
 ## Reverb
 
-Juicy16 has a reverb, and until 0.5.1-alpha.7 you could not hear it.
+Juicy16 has a reverb, and until 0.6.0-alpha.1 you could not hear it.
 
 FluidSynth's reverb was always running — `synth.reverb.active` defaults to on —
 but the plugin asked FluidSynth for audio in a way that **discarded the effects

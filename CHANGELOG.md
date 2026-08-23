@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.1-alpha.7 — unreleased
+## 0.6.0-alpha.1 — unreleased
 
 Phases 9 and 10 of the Beta 1 plan: the interface redesign the owner approved on
 2026-08-23, and the reverb control surface — which turned out to start from a

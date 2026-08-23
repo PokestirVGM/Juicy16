@@ -2,7 +2,7 @@
 
 Juicy16 is a 16-channel multitimbral DLS/SoundFont player inspired by the automatic patch-selection workflow of Fruity LSD. Load one `.dls`, `.sf2`, or `.sf3` bank, send a multichannel MIDI file to one plugin instance, and its Bank Select and Program Change events select instruments independently on MIDI channels 1–16. All channels mix to one stereo output.
 
-The current development version is `0.5.1-alpha.5`. It is an alpha: the engine, build, and automated gates are in good shape, but the Beta 1 readiness bar has not been met, so it is deliberately not labelled beta. The authoritative readiness checklist is [MILESTONE_PLAN.md](MILESTONE_PLAN.md).
+The current development version is `0.6.0-alpha.1`. It is an alpha: the engine, build, and automated gates are in good shape, but the Beta 1 readiness bar has not been met, so it is deliberately not labelled beta. The authoritative readiness checklist is [MILESTONE_PLAN.md](MILESTONE_PLAN.md).
 
 ## What is implemented
 
@@ -47,7 +47,7 @@ Host routing is not hard-coded to FL Studio or Cubase. AU hosts can deliver norm
 - Mute and solo are the plugin's own: nothing in a MIDI file changes them, and no reset clears them. A silenced channel drops new notes but still receives everything else, so unmuting mid-song needs no resync.
 - Every row control is a real host parameter, so a host's automation and controller-link menus reach all 16 channels.
 - The right-hand panel holds what is global: the master output trim in decibels, the reverb, and the loaded bank.
-- Reverb: enable, a profile (Universal or Soft), and size, damping, width and level. Bypass removes the reverb rather than turning it down. The MIDI file decides how much of each channel goes in, through CC91, and cannot change your settings — so a rip that never sends CC91 gets no reverb. Before 0.5.1-alpha.7 the reverb was computed and discarded, so old projects will sound different; see [docs/CONTROLLER_SUPPORT.md](docs/CONTROLLER_SUPPORT.md). The trim is not a MIDI controller, so nothing in a MIDI file moves it.
+- Reverb: enable, a profile (Universal or Soft), and size, damping, width and level. Bypass removes the reverb rather than turning it down. The MIDI file decides how much of each channel goes in, through CC91, and cannot change your settings — so a rip that never sends CC91 gets no reverb. Before 0.6.0-alpha.1 the reverb was computed and discarded, so old projects will sound different; see [docs/CONTROLLER_SUPPORT.md](docs/CONTROLLER_SUPPORT.md). The trim is not a MIDI controller, so nothing in a MIDI file moves it.
 - The keyboard auditions the selected channel and displays incoming note activity. Selecting a row is only about which channel it plays.
 - The status bar reports the running version and the latest bank-load result. A gear in the header opens settings: accent colour, and the build details worth quoting in a bug report.
 - Everything works without a mouse where the host passes Tab through: arrows on the rack select a channel, Return opens that row's instrument list, arrows on a focused knob change its value, and Space toggles a focused mute or solo. Screen-reader announcements are untested — see [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).

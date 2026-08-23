@@ -72,7 +72,7 @@ controller-link menus reach all 16 channels.
 
 ### The reverb, and one thing that will surprise you
 
-Juicy16 discarded FluidSynth's effects buses until 0.5.1-alpha.7, so its reverb
+Juicy16 discarded FluidSynth's effects buses until 0.6.0-alpha.1, so its reverb
 was never audible. It is now mixed in. **A project you made with an earlier build
 will sound different** if its MIDI sends CC91 — that is the file being played as
 written, but please do not report it as a defect.
