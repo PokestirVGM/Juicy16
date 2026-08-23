@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.1-alpha.6 — unreleased
+
+The two defects the owner declined to ship as documented limitations on 2026-08-23. Both were deliberate behaviour with a written rationale; both rationales were wrong about what a tester experiences.
+
+### Fixed
+
+- **A host running above 96 kHz no longer plays silence.** FluidSynth 2.5.5 renders no higher than 96 kHz, and Juicy16 muted above that — the plugin loaded, named the rate in the status bar, and produced nothing, which is what `auval` reported at 192 kHz. Muting was chosen over rendering at the wrong pitch, but the third option was never taken: the engine now renders at the largest integer fraction of the host rate it accepts (96 kHz for a 192 kHz project, 88.2 for 176.4) and each block is interpolated back up. Rendered-but-unconsumed internal samples carry to the next block, so the interpolator's fractional position costs no sample and repeats none. Verified against a synthesised 441 Hz fixture: pitch holds within 2% at 192 and 176.4 kHz across a window spanning five block boundaries, and amplitude matches the directly rendered 96 kHz control. MIDI timing quantises to one internal sample — about 10 microseconds — at those rates. Below FluidSynth's 8 kHz floor there is no equivalent trick, since that direction needs decimation with an anti-alias filter, so it still mutes; that is pinned by its own test.
+- **A drum channel's bank is now representable everywhere it is reported.** On a drum channel FluidSynth adds its 128 drum offset to the Bank Select MSB, so CC0=127 — the XG drum convention — lands on bank 255. The engine and `channelPrograms` recorded that; the visible `bank` parameter stopped at 128 and kept its previous value, and reopening the project moved the channel back to 128. The parameter now spans 0-255. Audio was never affected — the substituted kit measures 1.0000 waveform correlation — but a state and UI disagreement that survives a save is not something to hand a beta tester. Previously accepted as a B2 on the grounds that widening a frozen automation surface was worse; that premise expired when Beta 1 became `0.6.0-beta.1` and alpha.5 moved the surface anyway.
+- **Restoring a drum-range bank no longer lands on the wrong instrument.** No font defines bank 255, so the reload path's "saved program is absent, fall back to the font's first preset" rule would have put a restored drum channel on a melodic patch. A bank above the percussion bank is not a font bank at all, so it is now restored the way live MIDI produced it — Bank Select, then Program Change — which keeps the channel on its saved bank and lets FluidSynth substitute the kit.
+
+### Changed
+
+- **State schema 3 to 4.** Parameters are saved normalised, so widening `bank` changed what a stored value means: the 1.0 that meant bank 128 under 0-128 would restore as 255 under 0-255, silently moving every existing drum channel to a bank no font defines. A version 3 save's bank is rescaled through the bank number on the way in. Per-channel bank values are plain integers and need no rescaling. Pinned by a regression that writes a v3 envelope and reads it back.
+- `docs/BETA1_IDENTITY_CONTRACT.md` now records parameter *ranges* as part of the frozen surface, not just IDs and order — the omission is what let this argument run twice.
+
 ## 0.5.1-alpha.5 — unreleased
 
 Fixes the "dynamics sound wrong" report. Two independent causes, both found by measurement rather than inspection, and both confirmed with `tools/dynamics_probe.cpp` (new: it renders the plugin and a stock FluidSynth loaded with the same bank side by side, so a level or timbre difference can be attributed instead of guessed at).

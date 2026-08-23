@@ -382,7 +382,7 @@ Make the audio engine trustworthy before investing in packaging and release work
   shared above the format-specific sample decoding, but no SF3 bank with a melodic
   bank above 0 has been measured. Recorded in `docs/TEST_CORPUS.md`.
 
-- [ ] Represent the full drum-channel Bank Select range in the visible state.
+- [x] Represent the full drum-channel Bank Select range in the visible state.
   - Widen the `bank` parameter beyond 0-128 so a drum channel's 128 + MSB value
     (up to 255) is representable, or carry the drum offset outside the parameter.
   - Keep engine, UI, host parameter, and saved state in agreement after CC0=127
@@ -395,9 +395,21 @@ Make the audio engine trustworthy before investing in packaging and release work
   not shipped, alpha.5 already moved that surface (24 parameters to 21, state
   schema 2 to 3), and `0.6.0-beta.1` is the release that freezes it. The audio is
   unaffected either way; the cost of fixing it after the freeze is much higher
-  than the cost of fixing it now. Widening the range moves a ParamID surface, so
-  `docs/BETA1_IDENTITY_CONTRACT.md` and the state schema version must move with
-  it.
+  than the cost of fixing it now.
+
+  EVIDENCE (2026-08-23, `0.5.1-alpha.6`): `bank` now spans 0-255 through
+  `MidiConstants::maxChannelBank`, and the same limit governs the restore clamp,
+  the UI mirror, and `setChannelProgram`. The drum-bank scenario asserts the
+  agreement instead of the divergence it used to pin: with channel 10 selected,
+  CC0=127 reports 255 on the engine, the saved state, and the visible parameter,
+  and reopening the project restores 255 rather than falling back to 128. A third
+  defect surfaced while fixing it — no font defines bank 255, so the reload path's
+  absent-program fallback would have put a restored drum channel on the font's
+  first melodic preset. A drum-range bank is now restored through Bank Select then
+  Program Change, the route live MIDI takes, so FluidSynth substitutes the kit and
+  the channel keeps its bank. State schema 3 to 4 rescales an older save's
+  normalised bank, pinned by its own regression; `docs/BETA1_IDENTITY_CONTRACT.md`
+  now freezes parameter ranges alongside IDs. All 16 CTests pass.
 
 ### Acceptance criteria
 
@@ -432,7 +444,7 @@ Make the audio engine trustworthy before investing in packaging and release work
   - Define a safe strategy when a host exceeds the prepared maximum block size.
 - [x] Run AddressSanitizer and UndefinedBehaviorSanitizer test builds where host/plugin loading permits.
 - [x] Run ThreadSanitizer on an executable harness where practical.
-- [ ] Handle host sample rates above FluidSynth's 96 kHz ceiling without silence.
+- [x] Handle host sample rates above FluidSynth's 96 kHz ceiling without silence.
   - Current behavior: rates above 96 kHz mute deliberately, so the plugin loads,
     reports the rate in the status bar, and produces nothing. `auval` surfaced it
     on 2026-08-23 at 192 kHz.
@@ -443,8 +455,28 @@ Make the audio engine trustworthy before investing in packaging and release work
 
   OWNER DECISION (2026-08-23): not accepted as a B2. A tester at 192 kHz hears a
   dead plugin, and "change your project rate" is not an answer a beta tester
-  should have to find. The implementation choice between resampling and a loud
-  refusal is still open and needs a design call before work starts.
+  should have to find.
+
+  EVIDENCE (2026-08-23, `0.5.1-alpha.6`): the preferred fix was taken. Above the
+  ceiling the engine renders at the largest integer fraction of the host rate it
+  accepts — 96 kHz for a 192 kHz project, 88.2 for 176.4 — and each block is
+  interpolated back up, with rendered-but-unconsumed internal samples carried to
+  the next block so the interpolator's fractional position neither drops nor
+  repeats a sample. Proved against a synthesised 441 Hz fixture: pitch holds
+  within 2% at both rates over a window spanning five block boundaries, and
+  amplitude matches the directly rendered 96 kHz control, which a path that
+  dropped or repeated samples would not. Event timing quantises to one internal
+  sample (about 10 microseconds) at those rates, which is recorded in
+  `docs/KNOWN_ISSUES.md`. Rates below FluidSynth's floor still mute rather than
+  detune, pinned by its own test. The normal path is untouched: it takes the
+  same branch it always did whenever the host rate is one FluidSynth accepts.
+
+  Confirmed on the symptom that raised it: `auval -strict -q -v aumu Jc16 Pkst`
+  against the installed strict-Release AU now logs "host sample rate 192000.0 Hz
+  is above FluidSynth's 96000.0 Hz ceiling; rendering at 96000.0 Hz and
+  interpolating up" where it used to log "so audio is muted", and still reports
+  AU VALIDATION SUCCEEDED. The full strict portable Release gate passes 15/15 at
+  `0.5.1-alpha.6`.
 
 ### Acceptance criteria
 

@@ -272,6 +272,14 @@ void FluidSynthModel::prepareToPlay(double sampleRate, int samplesPerBlock) {
         outputLevelGain.load(std::memory_order_relaxed));
     // pre-allocate the mono-downmix scratch off the audio thread
     stereoScratch.setSize(2, jmax(64, samplesPerBlock), false, false, true);
+    // ...and the oversampling FIFO, which holds one block's worth of internal
+    // samples plus the interpolator's read-ahead and whatever the previous block
+    // left behind.
+    oversampleFifo.setSize(
+        2, jmax(64, samplesPerBlock / jmax(1, oversampleFactor) + 8), false, true, true);
+    oversampleFifoFill = 0;
+    for (auto& interpolator : oversampleInterpolators)
+        interpolator.reset();
 }
 
 const StringArray FluidSynthModel::programChangeParams{"bank", "preset"};
@@ -361,7 +369,7 @@ void FluidSynthModel::syncAppliedProgramOnMessageThread(
         if (auto* bankParam{
                 dynamic_cast<AudioParameterInt*>(valueTreeState.getParameter("bank"))};
             bankParam != nullptr && logicalBank >= MidiConstants::midiMinValue
-            && logicalBank <= 128)
+            && logicalBank <= MidiConstants::maxChannelBank)
             *bankParam = logicalBank;
         if (auto* presetParam{
                 dynamic_cast<AudioParameterInt*>(valueTreeState.getParameter("preset"))})
@@ -474,7 +482,7 @@ void FluidSynthModel::selectChannelForEditing(int selectedChannel) {
 
 bool FluidSynthModel::setChannelProgram(int chan, int bank, int preset) {
     if (chan < 0 || chan >= kNumChannels
-        || bank < MidiConstants::midiMinValue || bank > 128
+        || bank < MidiConstants::midiMinValue || bank > MidiConstants::maxChannelBank
         || preset < MidiConstants::midiMinValue || preset > MidiConstants::midiMaxValue) {
         recordProgramApplyFailure(chan);
         return false;
@@ -1044,7 +1052,17 @@ void FluidSynthModel::refreshBanks() {
             int rawPreset{static_cast<int>(ch.getProperty("preset", 0))};
             bool exists{banks.getChildWithProperty("num", rawBank)
                 .getChildWithProperty("num", rawPreset).isValid()};
-            if (!exists) {
+            // A bank above the percussion bank is not a font bank at all: it is
+            // FluidSynth's drum offset plus the Bank Select MSB, so no font
+            // defines it and only FluidSynth can resolve it to a kit. Restore it
+            // the way live MIDI produced it - select the bank, then change
+            // program - which keeps the channel on the bank it was saved with and
+            // lets FluidSynth substitute the sound. The generic fallback below
+            // would instead move a drum channel onto the font's first melodic
+            // preset, which is audible.
+            const bool substituteThroughBankSelect{
+                !exists && rawBank > MidiConstants::percussionBank};
+            if (!exists && !substituteThroughBankSelect) {
                 rawBank = fallbackBank;
                 rawPreset = fallbackPreset;
             }
@@ -1052,7 +1070,12 @@ void FluidSynthModel::refreshBanks() {
             // automation, and manual selection. State follows the program that
             // FluidSynth actually accepted.
             AppliedProgram applied;
-            if (!applyProgramToEngine(
+            if (substituteThroughBankSelect) {
+                if (fluid_synth_bank_select(
+                        synth.get(), chNum, bankOffset + rawBank) != FLUID_OK
+                    || !applyProgramToEngine(chNum, 0, rawPreset, true, false, &applied))
+                    continue;
+            } else if (!applyProgramToEngine(
                     chNum, bankOffset + rawBank, rawPreset, false, false, &applied))
                 continue;
             syncAppliedProgramOnMessageThread(chNum, applied);
@@ -1094,12 +1117,25 @@ void FluidSynthModel::setSampleRate(float sampleRate) {
 
     double minimumRate{0.0};
     double maximumRate{0.0};
-    const bool withinEngineRange{
-        fluid_settings_getnum_range(
-            settings.get(), "synth.sample-rate", &minimumRate, &maximumRate) == FLUID_OK
-        && sampleRate >= minimumRate
-        && sampleRate <= maximumRate};
-    if (!withinEngineRange) {
+    if (fluid_settings_getnum_range(
+            settings.get(), "synth.sample-rate", &minimumRate, &maximumRate) != FLUID_OK) {
+        sampleRateSupported.store(false, std::memory_order_release);
+        return;
+    }
+
+    // Above FluidSynth's ceiling, render at the largest integer fraction of the
+    // host rate the engine accepts and interpolate each block back up: a 192 kHz
+    // project renders at 96 kHz rather than falling silent. An integer factor
+    // keeps the ratio an exact 1/N. Below the floor there is no such trick -
+    // that direction needs decimation with an anti-alias filter, and an 8 kHz
+    // floor is not a rate any host in scope runs at - so it still mutes.
+    int factor{1};
+    double engineRate{sampleRate};
+    if (sampleRate > maximumRate) {
+        factor = static_cast<int>(std::ceil(sampleRate / maximumRate));
+        engineRate = static_cast<double>(sampleRate) / static_cast<double>(factor);
+    }
+    if (engineRate < minimumRate || engineRate > maximumRate) {
         sampleRateSupported.store(false, std::memory_order_release);
         Logger::writeToLog(
             "Juicy16: unsupported host sample rate " + String(sampleRate, 1)
@@ -1110,17 +1146,26 @@ void FluidSynthModel::setSampleRate(float sampleRate) {
 
     const bool wasSupported{
         sampleRateSupported.exchange(true, std::memory_order_acq_rel)};
-    if (wasSupported && std::abs(sampleRate - currentSampleRate) < 0.01f)
+    if (wasSupported && std::abs(sampleRate - hostSampleRate) < 0.01f)
         return;
 
-    if (fluid_settings_setnum(settings.get(), "synth.sample-rate", sampleRate) != FLUID_OK) {
+    if (fluid_settings_setnum(
+            settings.get(), "synth.sample-rate", engineRate) != FLUID_OK) {
         sampleRateSupported.store(false, std::memory_order_release);
         Logger::writeToLog(
             "Juicy16: FluidSynth rejected host sample rate "
             + String(sampleRate, 1) + " Hz, so audio is muted");
         return;
     }
-    currentSampleRate = sampleRate;
+    if (factor > 1)
+        Logger::writeToLog(
+            "Juicy16: host sample rate " + String(sampleRate, 1)
+            + " Hz is above FluidSynth's " + String(maximumRate, 1)
+            + " Hz ceiling; rendering at " + String(engineRate, 1)
+            + " Hz and interpolating up");
+    hostSampleRate = sampleRate;
+    oversampleFactor = factor;
+    currentSampleRate = static_cast<float>(engineRate);
 
     // FluidSynth 2.4+ deliberately rejects fluid_synth_set_sample_rate(). Recreate
     // the synth at the host rate before playback, then restore the bank and all
@@ -1320,6 +1365,88 @@ void FluidSynthModel::renderSamples(AudioBuffer<float>& buffer, int startSample,
     }
 }
 
+void FluidSynthModel::renderIntoFifo(int startSample, int numSamples) {
+    if (numSamples <= 0)
+        return;
+    // fluid_synth_process mixes into its output rather than overwriting it, so
+    // the region has to start clean; it still holds the previous block's audio.
+    oversampleFifo.clear(0, startSample, numSamples);
+    oversampleFifo.clear(1, startSample, numSamples);
+    float* outputs[] { oversampleFifo.getWritePointer(0, startSample),
+                       oversampleFifo.getWritePointer(1, startSample) };
+    fluid_synth_process(synth.get(), numSamples, 0, nullptr, 2, outputs);
+}
+
+void FluidSynthModel::renderThroughOversampler(
+    AudioBuffer<float>& buffer, MidiBuffer& midiMessages, int numSamples) {
+    const int outputChannels{buffer.getNumChannels()};
+    if (outputChannels < 1 || numSamples <= 0)
+        return;
+
+    // What the interpolator can consume producing numSamples outputs at ratio
+    // 1/N, plus the one sample it reads ahead of its fractional position.
+    const int required{juce::jmin(oversampleFifo.getNumSamples(),
+                                  numSamples / oversampleFactor + 2)};
+    const int toRender{juce::jmax(0, required - oversampleFifoFill)};
+    const int fifoBase{oversampleFifoFill};
+
+    // Event positions divide by the same factor, so ordering is preserved and
+    // timing quantises to one internal sample - 10 microseconds at 96 kHz, which
+    // is the price of playing at all at a rate the engine cannot render.
+    dispatchTimestampedEvents(
+        midiMessages, numSamples, toRender,
+        [this, fifoBase](int from, int count) { renderIntoFifo(fifoBase + from, count); },
+        [this](int hostPosition) { return hostPosition / oversampleFactor; });
+    oversampleFifoFill += toRender;
+
+    float* outputs[2];
+    const bool downmix{outputChannels < 2};
+    if (downmix) {
+        outputs[0] = stereoScratch.getWritePointer(0);
+        outputs[1] = stereoScratch.getWritePointer(1);
+    } else {
+        outputs[0] = buffer.getWritePointer(0);
+        outputs[1] = buffer.getWritePointer(1);
+    }
+
+    // The interpolator reads ahead of its fractional position, so it can consume
+    // one input past the arithmetic. Produce only what the FIFO actually holds:
+    // a host block larger than the prepared maximum would otherwise read past the
+    // end of the buffer. Such a block ends in silence rather than a bad read, and
+    // the scratch bound applies the same way to the mono downmix.
+    int produce{juce::jmin(numSamples,
+                           juce::jmax(0, (oversampleFifoFill - 2) * oversampleFactor))};
+    if (downmix)
+        produce = juce::jmin(produce, stereoScratch.getNumSamples());
+    if (produce < numSamples)
+        buffer.clear(produce, numSamples - produce);
+    if (produce <= 0)
+        return;
+
+    const double ratio{1.0 / oversampleFactor};
+    int consumed{0};
+    for (int ch = 0; ch < 2; ++ch)
+        consumed = oversampleInterpolators[ch].process(
+            ratio, oversampleFifo.getReadPointer(ch), outputs[ch], produce);
+
+    if (downmix) {
+        buffer.copyFrom(0, 0, stereoScratch, 0, 0, produce);
+        buffer.addFrom(0, 0, stereoScratch, 1, 0, produce);
+        buffer.applyGain(0, 0, produce, 0.5f);
+    }
+
+    // Keep whatever the interpolator did not consume: it is the head of the next
+    // block, so nothing is rendered twice and no sample is silently dropped.
+    consumed = juce::jlimit(0, oversampleFifoFill, consumed);
+    const int remaining{oversampleFifoFill - consumed};
+    if (remaining > 0 && consumed > 0)
+        for (int ch = 0; ch < 2; ++ch) {
+            float* data{oversampleFifo.getWritePointer(ch)};
+            std::memmove(data, data + consumed, sizeof(float) * static_cast<size_t>(remaining));
+        }
+    oversampleFifoFill = remaining;
+}
+
 void FluidSynthModel::processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiMessages) {
     if (!sampleRateSupported.load(std::memory_order_acquire) || synth == nullptr) {
         buffer.clear();
@@ -1327,31 +1454,18 @@ void FluidSynthModel::processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiM
     }
 
     const int numSamples{buffer.getNumSamples()};
-    int renderPosition{0};
 
     // MidiBuffer is timestamp ordered. Render the audio before each event, apply all
     // events at that timestamp in buffer order, then continue. This preserves Bank
     // Select -> Program Change -> Note ordering and avoids quantising every event to
     // the start of the host block.
-    for (const auto metadata : midiMessages) {
-        const int eventPosition{juce::jlimit(0, numSamples, metadata.samplePosition)};
-        if (eventPosition > renderPosition) {
-            renderSamples(buffer, renderPosition, eventPosition - renderPosition);
-            renderPosition = eventPosition;
-        }
-        // MidiMessage copies anything longer than four bytes to the heap, which
-        // would allocate on the audio thread for every SysEx — and game rips
-        // carry a GM/GS/XG reset at tick 0. Dispatch those straight from the
-        // buffer's own storage instead; short messages stay inline and free.
-        if (metadata.numBytes > 4 && metadata.data[0] == 0xf0) {
-            if (metadata.numBytes >= 2)
-                dispatchSysEx(metadata.data + 1, metadata.numBytes - 2);
-            continue;
-        }
-        dispatchMidiEvent(metadata.getMessage(), eventPosition);
-    }
-
-    renderSamples(buffer, renderPosition, numSamples - renderPosition);
+    if (oversampleFactor <= 1)
+        dispatchTimestampedEvents(
+            midiMessages, numSamples, numSamples,
+            [this, &buffer](int from, int count) { renderSamples(buffer, from, count); },
+            [](int hostPosition) { return hostPosition; });
+    else
+        renderThroughOversampler(buffer, midiMessages, numSamples);
 
     // Master trim, applied once over the whole block after every segment has been
     // rendered. Smoothed so host automation cannot step the gain mid-block.

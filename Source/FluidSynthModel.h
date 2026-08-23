@@ -155,6 +155,47 @@ private:
     // dispatch from the MidiBuffer directly, without MidiMessage's heap copy.
     void dispatchSysEx(const uint8_t* payload, int payloadBytes);
     void renderSamples(AudioBuffer<float>& buffer, int startSample, int numSamples);
+    // Audio thread. Renders into the oversampling FIFO instead of the host block,
+    // used only when the host rate is above FluidSynth's ceiling.
+    void renderIntoFifo(int startSample, int numSamples);
+    void renderThroughOversampler(AudioBuffer<float>& buffer,
+                                  MidiBuffer& midiMessages,
+                                  int numSamples);
+
+    // Walks the block's events in timestamp order, rendering the gap before each
+    // one through `renderSegment(from, count)` and then dispatching it.
+    // `mapPosition` converts a host sample position into the domain being
+    // rendered: the host block itself normally, or the internal FIFO when
+    // oversampling. Both callers share this so the SysEx handling below cannot
+    // drift between them.
+    template <typename RenderSegment, typename MapPosition>
+    void dispatchTimestampedEvents(MidiBuffer& midiMessages,
+                                   int numSamples,
+                                   int renderLimit,
+                                   RenderSegment&& renderSegment,
+                                   MapPosition&& mapPosition) {
+        int renderPosition{0};
+        for (const auto metadata : midiMessages) {
+            const int eventPosition{juce::jlimit(0, numSamples, metadata.samplePosition)};
+            const int target{juce::jlimit(0, renderLimit, mapPosition(eventPosition))};
+            if (target > renderPosition) {
+                renderSegment(renderPosition, target - renderPosition);
+                renderPosition = target;
+            }
+            // MidiMessage copies anything longer than four bytes to the heap, which
+            // would allocate on the audio thread for every SysEx - and game rips
+            // carry a GM/GS/XG reset at tick 0. Dispatch those straight from the
+            // buffer's own storage instead; short messages stay inline and free.
+            if (metadata.numBytes > 4 && metadata.data[0] == 0xf0) {
+                if (metadata.numBytes >= 2)
+                    dispatchSysEx(metadata.data + 1, metadata.numBytes - 2);
+                continue;
+            }
+            dispatchMidiEvent(metadata.getMessage(), eventPosition);
+        }
+        if (renderLimit > renderPosition)
+            renderSegment(renderPosition, renderLimit - renderPosition);
+    }
     // mirror a channel's current program into its progChN parameter (guarded so
     // parameterChanged doesn't re-apply it to the synth). Message thread only.
     void syncProgParam(int ch, int preset);
@@ -268,7 +309,10 @@ private:
     unique_ptr<fluid_settings_t, decltype(&delete_fluid_settings)> settings;
     unique_ptr<fluid_synth_t, decltype(&delete_fluid_synth)> synth;
 
+    // The rate FluidSynth renders at. Equal to the host rate unless the host is
+    // above FluidSynth's ceiling, when it is hostSampleRate / oversampleFactor.
     float currentSampleRate;
+    float hostSampleRate{44100.0f};
     std::atomic<bool> sampleRateSupported{true};
 
     bool unloadAndLoadFont(const String& absPath);
@@ -294,6 +338,17 @@ private:
     // stereo scratch for hosts giving us a mono output bus: FluidSynth can only
     // render stereo pairs, so we render here and downmix. Sized in prepareToPlay.
     AudioBuffer<float> stereoScratch;
+
+    // FluidSynth 2.5.5 renders no higher than 96 kHz. Above that the engine runs
+    // at an integer fraction of the host rate and each block is interpolated back
+    // up, so a 192 kHz project plays instead of falling silent. 1 means the host
+    // rate is directly supported and none of this is used.
+    int oversampleFactor{1};
+    AudioBuffer<float> oversampleFifo;
+    // Rendered-but-unconsumed internal samples, carried to the next block so the
+    // interpolator's fractional position never costs or duplicates audio.
+    int oversampleFifoFill{0};
+    juce::LagrangeInterpolator oversampleInterpolators[2];
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FluidSynthModel)
 };

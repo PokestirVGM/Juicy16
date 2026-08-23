@@ -42,7 +42,14 @@ progCh13         0x443F67C1    progCh14        0x443F67C2
 progCh15         0x443F67C3    progCh16        0x443F67C4
 ```
 
-The state root is `MYPLUGINSETTINGS`, the Beta 1 schema is version `3`, and the writer persists all 21 parameter values, 16 channel-program records, UI state, and the SoundFont path/bookmark record. See [STATE_COMPATIBILITY.md](STATE_COMPATIBILITY.md) for migration policy.
+A parameter's range is part of this contract too, because hosts store automation
+normalised: `bank` spans 0-255, `preset`, `volume`, `pan`, and every `progChN`
+span 0-127, and `outputLevel` spans -24 to +12 dB. `bank` reaches 255 rather than
+128 because a channel's runtime bank is FluidSynth's 128 drum offset plus the
+Bank Select MSB; it was widened on 2026-08-23, before the freeze, and moves no
+further.
+
+The state root is `MYPLUGINSETTINGS`, the Beta 1 schema is version `4`, and the writer persists all 21 parameter values, 16 channel-program records, UI state, and the SoundFont path/bookmark record. See [STATE_COMPATIBILITY.md](STATE_COMPATIBILITY.md) for migration policy.
 
 ## VST3 multitimbral identity
 

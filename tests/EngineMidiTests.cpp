@@ -1148,7 +1148,7 @@ int main(int argc, char** argv)
     std::printf("== drum-channel Bank Select range ==\n");
     {
         // Found by the randomised MIDI soak on 2026-08-20: channel 10 reported
-        // bank 239, outside the 0-128 the rest of the plugin assumes.
+        // bank 239, outside the 0-128 the rest of the plugin assumed.
         //
         // The cause is not a malformed font. SF2 2.04 section 7.2 does limit a
         // file's wBank to 0-127 melodic plus 128 percussion, and every fixture
@@ -1156,16 +1156,19 @@ int main(int argc, char** argv)
         // FluidSynth adds the 128 drum offset on top of the Bank Select MSB, so
         // CC0=127 - the XG drum convention - lands on 255.
         //
-        // Consequence, pinned below: channelPrograms stores 129-255 while the
-        // visible `bank` parameter refuses anything above 128 and keeps its old
-        // value, so engine, saved state, and UI disagree. Recorded as B2 in
-        // docs/KNOWN_ISSUES.md; widening the parameter range is a frozen
-        // compatibility surface and an owner decision.
+        // Shipped as a B2 until 2026-08-23, when the owner declined it: the
+        // parameter now spans 0-255, state schema 4 rescales a v3 save's
+        // normalised bank, and a drum-range bank restores through Bank Select so
+        // FluidSynth substitutes the kit instead of the font's first melodic
+        // preset. This scenario asserts the agreement rather than the divergence.
+        // The editor mirrors the *selected* channel, so this selects channel 10;
+        // with channel 1 selected the parameter is showing a different channel's
+        // bank and proves nothing either way.
         const auto drumBankFor{[&](int msb, int& savedBank, int& uiBank,
                                    int& reloadedBank, juce::AudioBuffer<float>& tone) {
             JuicySFAudioProcessor drums;
             drums.prepareToPlay(48000.0, blockSize);
-            const auto drumState{makeState(argv[1])};
+            const auto drumState{makeState(argv[1], 10)};
             drums.setStateInformation(
                 drumState.getData(), static_cast<int>(drumState.getSize()));
             juce::MidiBuffer midi;
@@ -1204,22 +1207,15 @@ int main(int argc, char** argv)
         juce::AudioBuffer<float> toneXg;
         const int engineXg{drumBankFor(127, savedXg, uiXg, reloadedXg, toneXg)};
 
-        check(engineZero == 128 && savedZero == 128 && reloadedZero == 128,
-              "CC0=0 on channel 10 stays on the percussion bank through save and reload");
+        check(engineZero == 128 && savedZero == 128 && uiZero == 128
+                  && reloadedZero == 128,
+              "CC0=0 on channel 10 holds the percussion bank across engine, state, UI, and reload");
 
-        check(engineXg == 255 && savedXg == 255,
-              "CC0=127 on channel 10 reaches engine and saved bank 255, above the documented 0-128");
+        check(engineXg == 255 && savedXg == 255 && uiXg == 255,
+              "CC0=127 on channel 10 reports bank 255 on every surface, not just the engine");
 
-        // The visible parameter cannot represent it: its range is 0-128 and the
-        // sync path refuses to write anything outside that, so the UI silently
-        // keeps a value the engine and saved state disagree with.
-        check(uiZero == 0 && uiXg == 0 && savedXg != uiXg,
-              "the bank parameter cannot represent a drum bank above 128, so UI and saved state diverge");
-
-        // Reload cannot restore 255 either: refreshBanks records the font's own
-        // bank numbers, where drums are 128, so the channel falls back.
-        check(reloadedXg == 128,
-              "reopening a project silently moves a 255 drum bank back to 128");
+        check(reloadedXg == 255,
+              "reopening a project restores the 255 drum bank instead of falling back to 128");
 
         // Severity check rather than an assumption: does any of this change what
         // the listener hears? FluidSynth substitutes the drum kit at play time,
@@ -1230,6 +1226,131 @@ int main(int argc, char** argv)
               "the substituted drum kit sounds identical, so the defect is state-only");
         std::printf("    CC0=0 vs CC0=127 on channel 10: engine banks %d and %d,"
                     " audio correlation %.4f\n", engineZero, engineXg, drumCorrelation);
+
+        // Widening the parameter changed what a stored normalised value means.
+        // Parameters are saved normalised, so the 1.0 that meant bank 128 under
+        // the old 0-128 range would restore as 255 under 0-255 - silently moving
+        // every existing drum channel to a bank no font defines. Schema 4
+        // rescales it on the way in; this pins that, because the failure is
+        // invisible until a user reopens an older project.
+        {
+            JuicySFAudioProcessor writer;
+            writer.prepareToPlay(48000.0, blockSize);
+            const auto writerState{makeState(argv[1], 10)};
+            writer.setStateInformation(
+                writerState.getData(), static_cast<int>(writerState.getSize()));
+            juce::MemoryBlock saved;
+            writer.getStateInformation(saved);
+            auto xml{juce::AudioProcessor::getXmlFromBinary(
+                saved.getData(), static_cast<int>(saved.getSize()))};
+            bool migrated{false};
+            if (xml != nullptr) {
+                xml->setAttribute("stateVersion", 3);
+                if (auto* params{xml->getChildByName("params")})
+                    params->setAttribute("bank", 1.0); // bank 128 under the v3 range
+                juce::MemoryBlock legacy;
+                juce::AudioProcessor::copyXmlToBinary(*xml, legacy);
+                JuicySFAudioProcessor reader;
+                reader.prepareToPlay(48000.0, blockSize);
+                reader.setStateInformation(
+                    legacy.getData(), static_cast<int>(legacy.getSize()));
+                auto* bankParam{findIntParameter(reader, "bank")};
+                migrated = bankParam != nullptr && bankParam->get() == 128;
+            }
+            check(migrated,
+                  "a v3 save's full-scale bank restores as 128, not as 255 under the widened range");
+        }
+    }
+
+    std::printf("== host sample rates above the engine ceiling ==\n");
+    {
+        // FluidSynth 2.5.5 renders no higher than 96 kHz. Juicy16 used to mute
+        // above that: the plugin loaded, reported the rate, and produced nothing,
+        // which auval surfaced at 192 kHz on 2026-08-23. It now renders at an
+        // integer fraction of the host rate and interpolates each block up, so
+        // what this proves is that the audio exists, that it is at the right
+        // pitch afterwards, and that the FIFO carrying the interpolator's
+        // fractional position neither drops nor repeats samples across blocks.
+        constexpr double toneFrequency{441.0};
+        const std::vector<SyntheticSf2::PresetSpec> rateSpecs{
+            {0, 0, toneFrequency, "Tone"}};
+        const auto rateFixture{juce::File::getSpecialLocation(juce::File::tempDirectory)
+            .getNonexistentChildFile("juicy16-sample-rate-fixture", ".sf2", false)};
+        const bool rateFixtureWritten{SyntheticSf2::write(rateFixture, rateSpecs)};
+
+        constexpr int rateBlock{1024};
+        constexpr int rateBlocks{8};
+        const auto renderAtRate{[&](double rateHz, juce::AudioBuffer<float>& out) {
+            JuicySFAudioProcessor rateProcessor;
+            rateProcessor.prepareToPlay(rateHz, rateBlock);
+            const auto rateState{makeState(rateFixture.getFullPathName())};
+            rateProcessor.setStateInformation(
+                rateState.getData(), static_cast<int>(rateState.getSize()));
+            const bool loaded{
+                rateProcessor.getFluidSynthModel().getFontLoadStatus() == "loaded"};
+            out.setSize(2, rateBlock * rateBlocks, false, false, true);
+            juce::AudioBuffer<float> one{2, rateBlock};
+            for (int b = 0; b < rateBlocks; ++b) {
+                juce::MidiBuffer midi;
+                if (b == 0)
+                    midi.addEvent(
+                        juce::MidiMessage::noteOn(1, 60, static_cast<juce::uint8>(100)), 0);
+                render(rateProcessor, one, midi);
+                out.copyFrom(0, b * rateBlock, one, 0, 0, rateBlock);
+                out.copyFrom(1, b * rateBlock, one, 1, 0, rateBlock);
+            }
+            return loaded;
+        }};
+
+        // 96 kHz is the control: the engine renders it directly, so anything the
+        // oversampled rates do differently is the oversampler's doing.
+        juce::AudioBuffer<float> atCeiling, at192, at176;
+        const bool rendered{rateFixtureWritten
+            && renderAtRate(96000.0, atCeiling)
+            && renderAtRate(192000.0, at192)
+            && renderAtRate(176400.0, at176)};
+        check(rendered, "the single-preset tone fixture loads at every tested rate");
+
+        // The window starts after the attack and deliberately spans several block
+        // boundaries: a FIFO that lost or duplicated samples between blocks would
+        // break the period there rather than inside any one block.
+        constexpr int rateWindowStart{rateBlock + 256};
+        constexpr int rateWindowLength{rateBlock * 5};
+        const float ceilingLevel{magnitude(atCeiling, rateWindowStart, rateWindowLength)};
+        const float level192{magnitude(at192, rateWindowStart, rateWindowLength)};
+        const float level176{magnitude(at176, rateWindowStart, rateWindowLength)};
+
+        check(level192 > audiblePresence && level176 > audiblePresence,
+              "a host rate above FluidSynth's ceiling produces audio instead of silence");
+
+        const auto pitchAt{[&](const juce::AudioBuffer<float>& waveform, double rateHz) {
+            return estimatePeriodicFrequency(
+                waveform, rateWindowStart, rateWindowLength, rateHz, toneFrequency);
+        }};
+        const double pitch96{pitchAt(atCeiling, 96000.0)};
+        const double pitch192{pitchAt(at192, 192000.0)};
+        const double pitch176{pitchAt(at176, 176400.0)};
+        const auto onPitch{[](double measured) {
+            return std::abs(measured - toneFrequency) < toneFrequency * 0.02;
+        }};
+        check(onPitch(pitch96) && onPitch(pitch192) && onPitch(pitch176),
+              "the interpolated output holds its pitch across block boundaries at 192 and 176.4 kHz");
+
+        // Level, not just presence: interpolation that dropped or repeated whole
+        // samples would still measure a period but would not hold its amplitude
+        // against the directly rendered control.
+        // magnitude() sums a fixed number of samples, so the same window is half
+        // the duration at 192 kHz. Equal sums therefore mean equal amplitude per
+        // sample, which is what interpolation must preserve: a path that dropped
+        // or repeated samples would still hold pitch but would not hold level.
+        check(ceilingLevel > audiblePresence
+                  && level192 > ceilingLevel * 0.8 && level192 < ceilingLevel * 1.2
+                  && level176 > ceilingLevel * 0.8 && level176 < ceilingLevel * 1.2,
+              "interpolated output holds the control's amplitude, not just its pitch");
+        std::printf("    96 kHz %.1f Hz, 192 kHz %.1f Hz, 176.4 kHz %.1f Hz;"
+                    " levels %.3f / %.3f / %.3f\n",
+                    pitch96, pitch192, pitch176, ceilingLevel, level192, level176);
+        rateFixture.deleteFile();
     }
 
     std::printf("== channel mode messages ==\n");
@@ -2466,14 +2587,30 @@ int main(int argc, char** argv)
                   "Data Entry LSB cents behave consistently with the documented contract");
         }
 
+        // 192 kHz used to fail silent here. It now renders at half rate and
+        // interpolates up, so the rate counts as supported and the note sounds;
+        // the pitch and cross-block continuity of that path are proved against a
+        // known-frequency fixture in the sample-rate scenario above.
         processor.prepareToPlay(192000.0, blockSize);
-        juce::MidiBuffer unsupportedRateMidi;
-        unsupportedRateMidi.addEvent(
+        juce::MidiBuffer highRateMidi;
+        highRateMidi.addEvent(
             juce::MidiMessage::noteOn(1, 69, static_cast<juce::uint8>(100)), 0);
-        render(processor, pitchAudio, unsupportedRateMidi);
+        render(processor, pitchAudio, highRateMidi);
+        check(model.isSampleRateSupported()
+                  && magnitude(pitchAudio, 0, pitchAudio.getNumSamples()) > audiblePresence,
+              "192 kHz plays through the oversampler instead of failing silent");
+
+        // Below FluidSynth's floor there is no equivalent trick - that direction
+        // needs decimation with an anti-alias filter - so it must still mute
+        // rather than render at the wrong pitch.
+        processor.prepareToPlay(4000.0, blockSize);
+        juce::MidiBuffer belowFloorMidi;
+        belowFloorMidi.addEvent(
+            juce::MidiMessage::noteOn(1, 69, static_cast<juce::uint8>(100)), 0);
+        render(processor, pitchAudio, belowFloorMidi);
         check(!model.isSampleRateSupported()
                   && magnitude(pitchAudio, 0, pitchAudio.getNumSamples()) == 0.0f,
-              "unsupported 192 kHz playback fails silent instead of rendering at the wrong pitch");
+              "a host rate below FluidSynth's floor still fails silent rather than detuning");
 
         processor.prepareToPlay(48000.0, blockSize);
         juce::MidiBuffer recoveredRateMidi;
@@ -2590,12 +2727,12 @@ int main(int argc, char** argv)
                  "progCh13", "progCh14", "progCh15", "progCh16"})
             allParams = allParams && params->hasAttribute(id);
         check(xml != nullptr && xml->hasTagName("MYPLUGINSETTINGS")
-                  && xml->getIntAttribute("stateVersion", -1) == 3
+                  && xml->getIntAttribute("stateVersion", -1) == 4
                   && allParams && channels != nullptr
                   && channels->getNumChildElements() == 16
                   && font != nullptr && font->hasAttribute("path")
                   && font->hasAttribute("bookmark"),
-              "Beta 1 state writer preserves the frozen schema-3 envelope");
+              "Beta 1 state writer preserves the frozen schema-4 envelope");
     }
     {
         model.setChannelProgram(1, 0, 4);

@@ -1,6 +1,6 @@
 # Beta 1 known issues and unverified areas
 
-This file describes the unreleased `0.5.1-alpha.5` development state. It must be regenerated for the exact frozen candidate.
+This file describes the unreleased `0.5.1-alpha.6` development state. It must be regenerated for the exact frozen candidate.
 
 ## Stop-ship/open gates
 
@@ -16,12 +16,11 @@ This file describes the unreleased `0.5.1-alpha.5` development state. It must be
 
 - **REMEDIATED — CVE-2025-52194 in libsndfile 1.2.2.** A buffer overflow in `ircam_read_header`, reachable because FluidSynth passes a SoundFont's embedded sample bytes to libsndfile's automatic format detection without pre-validating the format and only *warns* when the result is not OGG — so a crafted `.sf3`, the plugin's primary untrusted input, could route into the vulnerable reader. Upstream has no release carrying the fix, so `vendor/libsndfile_patched/` backports it and both dependency recipes bracket the edit with pre- and post-edit `src/ircam.c` hashes. As of 2026-08-23 the patched closure is **built and linked**, not merely specified: the strict portable Release gate passed 15/15 against it, including the SF3 load path that reaches libsndfile. No proof-of-concept existed before or after, so this closes a reachable code path rather than disproving a demonstrated exploit. The related MPEG advisories are not reachable, because `ENABLE_MPEG=OFF` keeps that code out of the binary.
 
-- **MUST FIX BEFORE BETA 1 (owner decision, 2026-08-23)** — A host sample rate above FluidSynth's 96 kHz ceiling produces silence. The plugin loads, reports the rate in the status bar, and renders nothing; `auval` surfaced it at 192 kHz. Muting was deliberate — it beats rendering at the wrong pitch — but a tester at 192 kHz simply hears a dead plugin, so it was rejected as a shippable limitation. Fix direction is open between rendering at a supported rate and resampling, or making the failure unmissable.
-- **MUST FIX BEFORE BETA 1 (owner decision, 2026-08-23)** — Bank Select on channel 10 produces a bank number the UI cannot show. FluidSynth adds its 128 drum offset on top of the Bank Select MSB, so CC0=127 — the XG drum convention — reports bank 255, while the visible `bank` parameter has range 0–128 and keeps its previous value; reopening the project moves the channel back to bank 128. The audio is provably unaffected (1.0000 waveform correlation against CC0=0), so this is a state and UI disagreement. Previously accepted as a B2 on the grounds that widening the range would move a frozen automation surface; that premise no longer holds, because 0.6.0-beta.1 is the release that freezes it and alpha.5 already moved it.
-
 ## Intentional limitations
 
 - One stereo output for all 16 channels.
+- FluidSynth 2.5.5 renders no higher than 96 kHz. Above that Juicy16 renders at an integer fraction of the host rate and interpolates each block up, so a 192 kHz project plays; MIDI event timing then quantises to one internal sample (about 10 microseconds at 96 kHz) instead of one host sample. Below FluidSynth's 8 kHz floor there is no equivalent path and playback is still muted rather than detuned.
+- A drum channel's bank reaches 255, because FluidSynth adds its 128 drum offset to the Bank Select MSB. That is the number the engine, the UI, the host parameter, and the saved state all report; the font itself still defines only banks 0-128, so the kit heard on such a bank is FluidSynth's substitution.
 
 - Beta 1 is **ad-hoc signed by decision**, not Developer ID signed and not notarized. Every macOS install therefore requires clearing the quarantine attribute; see [BETA_TESTER_GUIDE.md](BETA_TESTER_GUIDE.md). The `ADHOC` label in the package filename is expected for Beta 1 and is not a disqualifier. `LOCAL-DIRTY` still is.
 - Standalone is a development/QA target, not a primary Beta format.

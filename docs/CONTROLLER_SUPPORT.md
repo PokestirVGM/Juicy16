@@ -116,14 +116,18 @@ therefore reports bank **255**.
 
 SF2 2.04 section 7.2 limits a *file's* bank numbers to 0–127 melodic plus 128
 percussion, and every fixture used here obeys that; this is a runtime channel
-bank, not a malformed font. The consequence is that the engine and the saved
-channel state record 129–255 while the visible `bank` parameter, whose range is
-0–128, keeps its previous value — so the three disagree, and reopening the
-project moves the channel back to 128.
+bank, not a malformed font.
 
-The audio is unaffected: FluidSynth substitutes the same drum kit, measured at
-1.0000 waveform correlation against CC0=0. This is a state and UI inconsistency,
-recorded as B2 in [KNOWN_ISSUES.md](KNOWN_ISSUES.md), not an audible defect.
+The engine, the saved channel state, the visible `bank` parameter, and the host
+automation value all carry that number: the parameter spans 0–255 as of
+`0.5.1-alpha.6`, and a drum-range bank is restored through Bank Select rather
+than program select, so reopening a project keeps the channel on the bank it was
+saved with. Until then the parameter stopped at 128 and the three surfaces
+disagreed, which shipped as a B2 until the owner declined it on 2026-08-23.
+
+No font defines a bank above 128, so what sounds on one is FluidSynth's
+substituted drum kit — measured at 1.0000 waveform correlation against CC0=0,
+which is why this was ever a state-only problem.
 
 ## Exposed mixer controls
 

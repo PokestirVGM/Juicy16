@@ -110,8 +110,14 @@ AudioProcessorValueTreeState::ParameterLayout JuicySFAudioProcessor::createParam
 
     // global params: represent the currently-selected channel in the UI
     layout.add(
-        // SoundFont 2.4 spec section 7.2: zero through 127, or 128.
-        intParam("bank", "which bank is selected in the SoundFont", MidiConstants::midiMinValue, 128, MidiConstants::midiMinValue, "Bank"),
+        // A font's own banks are 0-127 melodic plus 128 percussion (SF2 2.04
+        // section 7.2), but a channel's runtime bank reaches 255 once FluidSynth
+        // adds its drum offset to the Bank Select MSB. The parameter carries the
+        // channel value, so it has to span the wider range or the UI cannot show
+        // what the engine and the saved state hold.
+        intParam("bank", "which bank is selected in the SoundFont",
+                 MidiConstants::midiMinValue, MidiConstants::maxChannelBank,
+                 MidiConstants::midiMinValue, "Bank"),
         // note: banks may be sparse, and lack a 0th preset. so defend against this.
         intParam("preset", "which patch (program/instrument) is selected in the SoundFont", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, MidiConstants::midiMinValue, "Preset"),
         // Per-channel mixer controls for the selected channel. Incoming CC7/CC10
@@ -312,6 +318,8 @@ void JuicySFAudioProcessor::getStateInformation (MemoryBlock& destData)
 
     // Create an outer XML element..
     XmlElement xml{"MYPLUGINSETTINGS"};
+    // v4: as v3, but the `bank` parameter spans 0-255 instead of 0-128, so its
+    // normalised value means a different bank number than it did.
     // v3: per-channel state is bank/preset plus the mixer controls volume and pan.
     // v1 and v2 stored six CC71-79 sound-controller values instead; those are read
     // as absent rather than migrated (see setStateInformation).
@@ -424,7 +432,9 @@ void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInByt
                             for (const String& p : FluidSynthModel::perChannelParams) {
                                 if (!restoreMixer && (p == "volume" || p == "pan"))
                                     continue;
-                                const int maximum{p == "bank" ? 128 : MidiConstants::midiMaxValue};
+                                const int maximum{p == "bank"
+                                    ? MidiConstants::maxChannelBank
+                                    : MidiConstants::midiMaxValue};
                                 const int restored{chElement->getIntAttribute(
                                     p, static_cast<int>(ch.getProperty(p, 0)))};
                                 ch.setProperty(
@@ -477,7 +487,20 @@ void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInByt
                     if (auto* p = dynamic_cast<AudioProcessorParameterWithID*>(param)) {
                         if (!restoreMixer && (p->paramID == "volume" || p->paramID == "pan"))
                             continue; // pre-v3 save has no mixer values; keep GM defaults
-                        p->setValueNotifyingHost(static_cast<float>(params->getDoubleAttribute(p->paramID, p->getValue())));
+                        double stored{params->getDoubleAttribute(p->paramID, p->getValue())};
+                        // v4 widened `bank` from 0-128 to 0-255. Parameters are
+                        // stored normalised, so the same 1.0 that meant bank 128
+                        // in a v3 save would restore as 255 here. Rescale through
+                        // the bank number itself rather than the ratio, so the
+                        // restored value is the bank the user actually saved.
+                        if (stateVersion < 4 && p->paramID == "bank")
+                            stored = juce::jlimit(
+                                0.0,
+                                1.0,
+                                static_cast<double>(juce::roundToInt(
+                                    stored * MidiConstants::percussionBank))
+                                    / MidiConstants::maxChannelBank);
+                        p->setValueNotifyingHost(static_cast<float>(stored));
                     }
                 }
             }

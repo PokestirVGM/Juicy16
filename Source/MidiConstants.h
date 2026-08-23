@@ -174,4 +174,12 @@ struct MidiConstants {
     // GM channel defaults, matching FluidSynth's own channel initialisation.
     inline static const int defaultChannelVolume = 100; // CC7
     inline static const int centreValue = 64;           // CC10 pan centre
+    // SF2 2.04 section 7.2 limits a file's wBank to 0-127 melodic plus 128
+    // percussion, and that is what a font's own bank numbering contains. The
+    // runtime channel bank is wider: on a drum channel FluidSynth adds its 128
+    // drum offset on top of the Bank Select MSB, so CC0=127 - the XG drum
+    // convention - lands on 255. Every surface that carries a channel's bank
+    // must therefore reach 255, not 128.
+    inline static const int percussionBank = 128;
+    inline static const int maxChannelBank = 255;
 };

@@ -1,6 +1,14 @@
 # Beta state compatibility policy
 
-Juicy16 Beta 1 writes state schema version 3. Beta 2 and the first stable release must continue to read version 3 unless a stop-ship defect makes that unsafe. The automated suite must retain the older-version migration and version 3 round-trip cases for as long as those versions are supported.
+Juicy16 Beta 1 writes state schema version 4. Beta 2 and the first stable release must continue to read version 4 unless a stop-ship defect makes that unsafe. The automated suite must retain the older-version migration and version 4 round-trip cases for as long as those versions are supported.
+
+Version 4 widened the `bank` parameter from 0-128 to 0-255, so that a drum
+channel's runtime bank — FluidSynth's 128 drum offset plus the Bank Select MSB,
+up to 255 — is representable on every surface instead of only in the engine.
+Parameters are stored normalised, so the same stored value means a different bank
+number under the new range: a version 3 save's `bank` is rescaled through the
+bank number on the way in, and a channel saved on bank 128 restores on bank 128.
+Per-channel bank values are stored as plain integers and need no rescaling.
 
 Version 3 replaced the six per-channel CC71-79 sound-controller values with the mixer controls `volume` (CC7) and `pan` (CC10), and added the global `outputLevel` trim. A version 1 or 2 save has no volume/pan attributes, so those channels keep the GM defaults (volume 100, pan centre); the retired attributes are ignored rather than migrated, because an envelope control has no meaningful mapping onto a mixer control. Bank and preset assignments still restore from those older saves.
 

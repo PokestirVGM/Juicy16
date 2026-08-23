@@ -40,7 +40,9 @@ invariants cover them. See [CONTROLLER_SUPPORT.md](CONTROLLER_SUPPORT.md).
    storm, a runaway filter, or an uninitialised voice shows up here first.
 2. Every channel reports a program: bank within 0–255, preset within 0–127.
    The ceiling is 255 rather than 128 because a drum channel adds FluidSynth's
-   128 drum offset on top of the Bank Select MSB — a known B2, pinned separately.
+   128 drum offset on top of the Bank Select MSB. That was a known B2 when this
+   invariant was written; since `0.5.1-alpha.6` every surface carries the same
+   0–255 range, so the invariant and the parameter finally agree.
 3. Every channel's pitch bend stays within 0–16383.
 4. Total sounding voices never exceed the 512-voice ceiling.
 5. Saved state stays serialisable, with every channel's bank and preset in the
@@ -79,7 +81,8 @@ engine suite and recorded in [KNOWN_ISSUES.md](KNOWN_ISSUES.md):
   forwards the controller and then restores its 16-channel layout.
 - **Drum-channel Bank Select exceeds the documented bank range.** CC0 on
   channel 10 reports 128 + MSB, so the XG drum convention CC0=127 reaches 255,
-  which the 0–128 `bank` parameter cannot represent.
+  which the then 0–128 `bank` parameter could not represent. **Fixed** in
+  `0.5.1-alpha.6`: the parameter spans 0–255 and reload preserves it.
 
 ## Coverage to date
 
