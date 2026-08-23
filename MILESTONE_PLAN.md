@@ -133,6 +133,8 @@ This is the high-level candidate dashboard. Check a phase here only after every 
 - [ ] Phase 6: documentation, metadata, privacy, licensing, and notices consistent.
 - [ ] Phase 7: exact Beta 1 candidate passes the technical validation matrix.
 - [ ] Phase 8: tester program, package, diagnostics, triage, rollback, and launch readiness complete.
+- [ ] Phase 9: interface redesign approved, implemented, and re-evidenced for accessibility.
+- [ ] Phase 10: reverb control surface shipped, defaults chosen deliberately, parameter surface frozen.
 - [ ] Zero open B0 issues.
 - [ ] Zero open B1 issues.
 - [ ] Every open B2 issue approved and published as a known limitation.
@@ -2165,7 +2167,8 @@ fixture's.
 
 ## Beta 1 technical gate
 
-- [ ] All earlier phase exit criteria are complete.
+- [ ] All earlier phase exit criteria are complete, including Phases 9 and 10,
+      which are Beta 1 scope despite appearing after this section in the document.
 - [ ] No open B0 or B1 defect remains.
 - [ ] Every supported artifact passes automated and host validation.
 - [ ] Clean-system installation succeeds.
@@ -2898,6 +2901,307 @@ Launch the first beta as a controlled, supportable evaluation rather than simply
 
 ---
 
+---
+
+# Phase 9 — Interface redesign
+
+## Goal
+
+Make the 16-channel mixer visible and consistent. Added to Beta 1 scope on
+2026-08-23. Phases 9 and 10 are appended rather than renumbered so that the
+cross-references throughout this plan stay valid; both gate the Beta 1
+technical gate exactly as Phases 0-8 do.
+
+Both of these new phases move surfaces that Beta 1 freezes — parameter ranges,
+parameter count, and the state schema — so both must land **before** the
+candidate freeze, not after. That is a sequencing constraint, not a preference.
+
+## What is actually wrong
+
+Established by reading the code on 2026-08-23, so the work starts from causes
+rather than impressions:
+
+- **The empty area to the right of the instrument names is not a column.** There
+  are two columns: `Ch` at a fixed 32px and `Instrument`, declared with a maximum
+  width of 600px in `ChannelListComponent`. `resized()` asks for
+  `getWidth() - 36`; past 600 the request is clamped and the remainder is bare
+  `TableListBox` background. It is unallocated space, and it is where per-channel
+  controls belong.
+- **Volume and pan edit only the selected channel.** `SlidersComponent` is the
+  inherited Birchlabs sound-control strip, reduced to Vol/Pan/Out in alpha.5 with
+  its frame left standing. The shape is a symptom; the defect is that 15 of 16
+  channels' volume and pan are invisible at any moment, in a plugin whose entire
+  purpose is 16 channels at once.
+- **The master group's title and value readout clip.** The group box is 50px
+  wide — a 34px slider plus 2×8 padding — so "Master" renders as "M..." and the
+  output value as `0.0...`. Not a font problem; a width problem.
+- **There is no palette.** The editor uses stock `LookAndFeel_V4` dark plus
+  one-off colours: `Colours::grey` for the table outline, `salmon` and
+  `lightgrey` for status text. Nothing shares a source, which is the origin of
+  the general inconsistency rather than any single control being wrong.
+
+## 9.1 Owner design review
+
+- [ ] Produce layout options before implementation, and have the owner choose.
+
+  OWNER DECISION (2026-08-23): the direction is a channel-rack row redesign with
+  a single grey theme, **with latitude to redesign further** if the incremental
+  version would look tacky — and the owner wants to be in that loop rather than
+  presented with a result. So mockups come first and code second.
+
+  - Show at least two layouts, including one that only reworks the row and one
+    that rebuilds the window, so the "would this be tacky" judgement is made
+    against something visible rather than described.
+  - Cover the states the plugin actually reaches: no bank loaded, a bank loaded
+    with all 16 channels assigned, an error in the status bar, the minimum window
+    size, and the maximum.
+  - Record the chosen direction in the Decision log before implementation starts.
+
+## 9.2 Channel rack row
+
+- [ ] Reclaim the unallocated table width.
+  - Raise or remove the `Instrument` column's 600px maximum, or replace the
+    two-column table with a layout that owns the full width deliberately.
+  - No visible region may exist that belongs to no control.
+
+- [ ] Put volume and pan on every channel row.
+  - Both controls appear per row, for all 16 channels, without selecting a row.
+  - They remain CC7 and CC10 on that row's channel, and an incoming CC7/CC10 must
+    move the row's control at the event's timestamp, exactly as it moves the
+    slider today.
+  - Editing a row's control must not change which channel is selected, and must
+    not fight MIDI-driven updates — the existing re-entrancy guard in
+    `uiState.selectedChannel` is the model to follow.
+
+- [ ] Retire the channel half of `SlidersComponent` once the row owns it.
+  - Do not leave a strip whose only remaining purpose is holding the master.
+  - Give the master output level a home where its label and value fit, and
+    where it reads as global rather than as a fourth channel control.
+
+- [ ] Keep the minimum window honest.
+  - `GuiConstants::minWidth` and `defaultHeight` are derived, not guessed; they
+    must still be derived after the redesign.
+  - At minimum width every row control must remain usable, or the minimum moves.
+
+## 9.3 One visual system
+
+- [ ] Define a single palette and use it everywhere.
+  - Grey theming, as decided by the owner on 2026-08-23.
+  - Every colour comes from named tokens; no `Colours::` literal may remain in a
+    component. `MyColours` and `GuiConstants` are the two places allowed to name
+    a colour or a metric.
+  - The status bar's error and normal states are tokens, not `salmon` and
+    `lightgrey`.
+
+- [ ] Apply a custom `LookAndFeel` rather than styling controls individually.
+  - Knobs, combo boxes, the table header, the file picker, and the on-screen
+    keyboard must all take their appearance from it.
+  - A control added later must inherit the theme by default; that is the test of
+    whether this was done properly.
+
+- [ ] Sweep the inconsistencies the redesign exposes.
+  - Spacing and padding come from `GuiConstants`, not from local literals.
+  - Capitalisation, label style, and value formatting agree across the window.
+  - The file picker row, status bar, and keyboard sit in a deliberate hierarchy
+    rather than at whatever size they inherited.
+
+## 9.4 Do not regress what is already proven
+
+The accessibility and keyboard work in 8.6 is complete and evidenced. A redesign
+is exactly the change that silently undoes it.
+
+- [ ] Every new control carries an accessible name, title, description, and role.
+- [ ] Keyboard operation still reaches every control, and the on-screen keyboard
+      still declines focus so it cannot swallow typed input.
+- [ ] Arrow-key channel selection and Return-to-open-instrument still work, on
+      all 16 rows including rows scrolled out of view at minimum height.
+- [ ] The headless editor suite is extended to the new controls in the same
+      change, not afterwards.
+- [ ] Host-provided scaling still measures correctly through `IPlugView`.
+
+### Acceptance criteria
+
+- [ ] All 16 channels' instrument, volume, and pan are readable without
+      selecting a row or resizing the window.
+- [ ] No clipped label or value at any supported window size.
+- [ ] No component draws a colour that did not come from the palette.
+- [ ] The editor suite covers the new controls, and 8.6's assertions still pass
+      unchanged in intent.
+- [ ] Saved UI state (window size, selected channel) still round-trips.
+
+## Phase 9 exit criteria
+
+- [ ] The owner has approved the implemented interface against the chosen mockup.
+- [ ] Accessibility, keyboard, and scaling evidence is regenerated, not inherited.
+- [ ] `docs/BETA_TESTER_GUIDE.md` screenshots and instructions match the shipped
+      interface.
+
+---
+
+# Phase 10 — Reverb
+
+## Goal
+
+Give the user control of the reverb Juicy16 already applies, and lay a profile
+structure that later hardware-accurate reverbs can slot into without moving the
+Beta 1 parameter surface again.
+
+## The finding this phase starts from
+
+**A reverb is already running on every rip.** FluidSynth's `synth.reverb.active`
+defaults to on, and Juicy16 has never touched it. Measured from the pinned
+2.5.5 build on 2026-08-23:
+
+```text
+synth.reverb.active  def=True    synth.reverb.room-size  def=0.500
+synth.reverb.damp    def=0.300   synth.reverb.level      def=0.700
+synth.reverb.width   def=0.800
+```
+
+Game rips send CC91 continuously and it already reaches the engine, so those
+generic defaults are being applied to material that asked for something specific.
+This phase is therefore a correctness item as much as a feature: the current
+behaviour is an unchosen default, invisible to the user and unmentioned in the
+documentation.
+
+FluidSynth 2.5.5's reverb is jjceresa's FDN late-reverb design (8 or 12 delay
+lines), which replaced Freeverb in 2.0; 2.6.0 reintroduced Freeverb as a
+comparison baseline. 2.5.5 already exposes per-effects-group control through
+`fluid_synth_reverb_on` and `fluid_synth_set_reverb_group_*`, which is the hook a
+later per-channel design uses without any new DSP.
+
+## 10.1 Take control of the existing reverb
+
+OWNER DECISION (2026-08-23): Beta 1 ships a **control surface over FluidSynth's
+existing reverb**. No new DSP, no new dependency, no new licence obligation, and
+the already-working CC91 path is preserved rather than replaced.
+
+- [ ] Expose enable/bypass and the four engine parameters.
+  - Enable maps to `fluid_synth_reverb_on`; size, damping, width, and level map
+    to `fluid_synth_set_reverb_group_*`.
+  - Bypass must be genuinely silent, not level zero with a tail still computing.
+  - Parameter changes must not allocate on the audio thread and must not step
+    audibly under host automation; the `outputLevel` smoother is the precedent.
+
+- [ ] Choose Beta 1's defaults deliberately.
+  - The current values are FluidSynth's, chosen by nobody for this product.
+  - Whatever is chosen must be measured against real game-rip material, not
+    picked from the documentation, and the reasoning recorded here.
+
+- [ ] Treat the new parameters as a frozen compatibility surface.
+  - Parameter count moves from 21; `docs/BETA1_IDENTITY_CONTRACT.md` records the
+    IDs, order, and ranges, and the state schema moves from 4 to 5 with a
+    migration and a round-trip regression.
+  - This must land before the candidate freeze. After the freeze it is a
+    breaking change.
+
+- [ ] Keep CC91 working and say so.
+  - Per-channel reverb send from the MIDI file continues to reach the engine
+    unchanged; the new controls set the reverb those sends feed.
+  - `docs/CONTROLLER_SUPPORT.md` currently says audible depth "depends on engine
+    effects"; it must instead state what the engine does and what the user
+    controls.
+
+## 10.2 Profile structure
+
+- [ ] Define a reverb profile as a named preset over the parameter set.
+  - A profile names a set of parameter values; selecting one moves the visible
+    controls, so nothing is hidden from the user or from host automation.
+  - The structure must admit a later profile backed by a *different algorithm*
+    without changing the parameter IDs Beta 1 freezes. That is the whole reason
+    to design it now rather than after the freeze.
+
+- [ ] Ship a small, honest set for Beta 1.
+  - A universal default suitable for most material, and a soft short-tail
+    profile that adds width without a long tail, per the owner's brief.
+  - Naming rule, binding on every future profile: **a profile may not be named
+    after hardware it does not emulate.** The soft profile is designed, not
+    modelled, and its name and documentation must not imply otherwise.
+
+  OPEN: the soft profile's name. "SNS" was proposed. If it means SNES, the name
+  should be held back for the S-DSP echo profile in 10.3, which would be a real
+  emulation; if it is a product name, it needs a definition that does not read as
+  a console abbreviation. Owner decision required before any user-visible string
+  ships.
+
+## 10.3 Hardware-accurate profiles — designed for, not shipped in Beta 1
+
+Recorded now because 10.2's structure has to accommodate them, and because the
+research that identifies them is done.
+
+- **PlayStation SPU reverb.** The algorithm and its ten stock presets — Room,
+  Studio Small/Medium/Large, Hall, Space Echo, Echo, Delay, Half Echo — are
+  documented in the psx-spx reference, with a working GPL implementation in
+  `ipatix/lv2-psx-reverb` whose known deviation is that it does not downsample
+  the reverb path to 22050 Hz. Implementing from the specification rather than
+  porting the code keeps the licence position simple and is the more faithful
+  route. This is the highest-value profile for this project's own corpus: a
+  VGMTrans SEQ/DLS bank is PlayStation material, written for this reverb.
+- **SNES S-DSP echo.** Real, documented hardware: an echo buffer in audio RAM
+  addressed by ESA/EDL, feedback, and an 8-tap FIR. A legitimate emulation, and
+  the honest home for a SNES-derived name.
+- **Nintendo DS.** There is no DS reverb to emulate. The DS has no dedicated
+  sound chip; mixing runs in software on the ARM7 and reverb was per-game and
+  frequently absent. A "DS" profile can only be a designed ambience for dry
+  material, which is what 10.2's naming rule exists to keep honest.
+- **Per-channel reverb.** FluidSynth's effects groups already allow different
+  reverb settings per group, so a later release can give a dry percussion
+  channel and a wet lead channel different spaces without new DSP.
+
+If a future profile does need a new algorithm, the licence position constrains
+the choice: the project is GPLv3, so MVerb (GPL3, Dattorro figure-of-eight) and
+Dragonfly (GPL3, Moorer early reflections with a Progenitor/Zita-style FDN) are
+compatible, while zita-rev1 is published as GPL2 and would need its exact terms
+checked for an "or later" clause before any code is taken.
+
+## 10.4 Scope decisions
+
+- [-] Honour GS/XG reverb macro SysEx.
+
+  DESCOPED by owner decision, 2026-08-23. Rips request reverb by GS macro
+  (Room 1-3, Hall 1-2, Plate, Delay, Panning Delay) and Juicy16 already parses
+  GM/GS/XG SysEx, so this was available. The owner chose manual control only:
+  the reverb is a plugin setting the MIDI cannot reprogram.
+
+  Consequence, recorded rather than glossed: a rip that asks for a hall gets
+  whatever profile the user has selected, so the automatic-playback principle
+  that governs Bank Select and Program Change does not extend to reverb. This
+  does **not** affect the non-negotiable controller contract — CC91 per-channel
+  sends still reach the engine at their timestamps, and only the macro SysEx is
+  ignored. Revisit if testers report rips sounding wrong in a way the manual
+  controls cannot fix.
+
+- [-] Per-channel reverb send in the Beta 1 interface.
+
+  DESCOPED by owner decision, 2026-08-23: global for Beta 1, per-channel later.
+  CC91 from the file still drives each channel's send; the user simply cannot
+  edit sends by hand yet. Keeps the redesigned row to instrument, volume, and pan.
+
+### Acceptance criteria
+
+- [ ] Enabling, disabling, and every parameter produce the expected audible
+      change, measured rather than described — the dynamics probe and the
+      offline render harness are the precedent.
+- [ ] Bypass produces output identical to a build with the reverb compiled out,
+      within measurement tolerance.
+- [ ] Automation of every reverb parameter is click-free at the smallest
+      supported block size.
+- [ ] No audio-thread allocation is introduced; the ASan/UBSan and TSan harnesses
+      still pass.
+- [ ] The performance baseline is re-measured with reverb enabled and stays
+      inside the agreed envelope from 8.5.
+- [ ] Reverb settings round-trip through save/reload and through host automation,
+      with the schema migration covered by a regression.
+- [ ] CC91 per-channel sends still reach the engine at their event timestamps.
+
+## Phase 10 exit criteria
+
+- [ ] Beta 1's reverb defaults are a recorded decision, not an inherited default.
+- [ ] The parameter surface is frozen in the identity contract before the
+      candidate freeze.
+- [ ] `docs/CONTROLLER_SUPPORT.md` and `docs/KNOWN_ISSUES.md` describe what the
+      reverb does, what the user controls, and what the MIDI file cannot change.
+
 # Recommended workstream split
 
 These workstreams may run in parallel after Phase 0, but their integration order should follow the phase gates above.
@@ -2976,6 +3280,12 @@ Record decisions that affect more than one task. Do not delete superseded decisi
 | 2026-08-23 | The fixed single appearance and the unhonoured mono mode ship as documented B2s | Both are deliberate consequences of decisions already recorded, neither is audible in normal use, and both are published in `docs/KNOWN_ISSUES.md` | Product owner | Approved |
 | 2026-08-23 | The drum-channel bank 255 mismatch and the silent-above-96 kHz behavior are **not** accepted as B2s and must be fixed before Beta 1 | Supersedes the 2026-08-20 drum-bank acceptance, whose premise no longer holds: it argued against moving a frozen automation surface, but Beta 1 has not shipped, alpha.5 already moved that surface, and `0.6.0-beta.1` is the release that freezes it. Fixing both now is cheaper than freezing them in | Product owner | Approved |
 | 2026-08-23 | No target date for Beta 1; it ships when the gates pass | Single developer, no external commitment. A date would only pressure the host matrix, which is the part that catches B1s | Product owner | Approved |
+| 2026-08-23 | Interface redesign and reverb are added to Beta 1 scope as Phases 9 and 10, appended rather than renumbered | Both move surfaces Beta 1 freezes — parameter ranges, parameter count, state schema — so both must land before the candidate freeze. Appending keeps every existing cross-reference in this plan valid; the master checklist and technical gate carry the dependency instead | Product owner | Approved |
+| 2026-08-23 | The interface direction is a channel-rack row redesign with one grey palette, with latitude to rebuild further if the incremental result would look tacky | The defect is not the shape of the pan control: volume and pan edit only the selected channel, so 15 of 16 channels are invisible in a plugin that exists to show 16 at once. The owner reviews mockups and chooses the direction before implementation | Product owner | Approved |
+| 2026-08-23 | Beta 1's reverb is a control surface over FluidSynth's existing reverb, not a new engine | The reverb is already running — `synth.reverb.active` defaults on and CC91 already reaches it — so generic defaults are being applied to every rip invisibly. Taking control fixes that with no new DSP, dependency, or licence obligation, and keeps the working CC91 path | Product owner | Approved |
+| 2026-08-23 | Reverb is global in Beta 1; per-channel sends and per-channel profiles come later | CC91 from the file still drives each channel's send, so the capability is not lost — only manual per-channel editing is deferred. Keeps the redesigned row to instrument, volume, and pan | Product owner | Approved |
+| 2026-08-23 | GS/XG reverb macro SysEx is ignored; the reverb is manual only | Owner's choice for predictability: a user who wants a particular space should not be overridden by the file on every replay. The consequence is that the automatic-playback principle governing Bank Select and Program Change does not extend to reverb. CC91 sends are unaffected | Product owner | Approved |
+| 2026-08-23 | A reverb profile may not be named after hardware it does not emulate | The Nintendo DS has no reverb hardware to model, so a "DS" profile would be a designed ambience wearing a hardware name. Names that imply emulation are reserved for profiles that emulate — the documented PlayStation SPU and SNES S-DSP algorithms | Product owner | Approved |
 
 # Risk register
 
@@ -2996,6 +3306,10 @@ Record decisions that affect more than one task. Do not delete superseded decisi
 | Plugin identifier changes break existing sessions | Users may lose project recall | Intentional one-time pre-Beta reset; freeze Juicy16 identifiers starting with Beta 1 and add session-recall tests | Mitigated by approved baseline; Beta 1 recall test pending |
 | The Windows CI job silently built a different engine than the approved policy | `vcpkg install fluidsynth:x64-windows` pinned no version and enabled no native DLS loader, so a Windows plugin could have shipped that builds and runs but refuses every DLS bank — the product's headline format | Replaced with `tools/build_windows_dependencies.ps1`, the same pinned closure as macOS; the recipe fails if FluidSynth built without the DLS loader, and `font_load_system_dls` proves DLS at runtime against `C:\Windows\System32\drivers\gm.dls` | Found and replaced 2026-08-20; recipe unexecuted |
 | A statically linked Windows VST3 still needs the Visual C++ redistributable | Testers hit a missing-DLL failure the developer never sees, on a machine that has the redistributable already | Static MSVC C runtime for both the closure and the plugin, derived from `FLUIDSYNTH_LINK_STATIC` so the two cannot disagree; the CI job runs `dumpbin /dependents` and archives the result | Mitigated in configuration; unproven until a Windows artifact exists |
+| Beta 1 freezes a parameter surface that Phases 9 and 10 are still moving | Reverb parameters and any control the redesign adds become uneditable compatibility surfaces at Beta 1 | Both phases land before the candidate freeze, and `docs/BETA1_IDENTITY_CONTRACT.md` records IDs, order, and ranges — ranges were added to that contract on 2026-08-23 after a range change slipped past it once | Open; sequencing enforced by the technical gate |
+| The interface redesign silently undoes the accessibility and keyboard work already evidenced in 8.6 | A beta that was keyboard- and screen-reader-operable regresses without any test failing | Phase 9.4 requires accessible names/roles on every new control, keyboard reachability, and the headless editor suite extended in the same change; 8.6's evidence must be regenerated rather than inherited | Open |
+| Juicy16 has always applied FluidSynth's default reverb without saying so | Every rip has been auditioned through an unchosen reverb, and testers cannot tell the plugin's sound from the engine's default | Phase 10.1 makes it visible and controllable and requires Beta 1's defaults to be a measured decision; `docs/CONTROLLER_SUPPORT.md` must state what the engine does rather than that it "depends on engine effects" | Open |
+| A future reverb profile takes GPL2-only code into a GPLv3 project | Licence incompatibility discovered late, after the algorithm is integrated | Recorded in 10.3: MVerb and Dragonfly are GPL3 and compatible; zita-rev1 is published as GPL2 and needs its exact terms checked for an "or later" clause first. The PlayStation profile is to be implemented from the psx-spx specification rather than ported | Open |
 
 # Beta 1 completion record
 
