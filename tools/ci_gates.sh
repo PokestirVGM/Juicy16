@@ -6,6 +6,7 @@
 #   tools/ci_gates.sh docs        internal Markdown links only
 #   tools/ci_gates.sh debug       Debug build, warnings-as-errors, CTest
 #   tools/ci_gates.sh asan        sanitized offline harnesses
+#   tools/ci_gates.sh leaks       macOS `leaks` run over every offline harness
 #   tools/ci_gates.sh release     strict portable Release build and CTest
 #   tools/ci_gates.sh all         every gate above, in order
 #
@@ -58,6 +59,58 @@ run_asan() {
       -R 'font_repair_unit|engine_midi_system_dls'
 }
 
+run_leaks() {
+  echo "== leaks: Core Foundation and heap leaks in the offline harnesses =="
+  # LeakSanitizer is unavailable on Darwin arm64, so the ASan gate runs with leak
+  # detection off. macOS `leaks` covers that gap, and covers Core Foundation
+  # objects the sanitizer would not attribute anyway.
+  if [[ ! -x build-ci-debug/JuicySFEngineMidiTests ]]; then
+    run_debug
+  fi
+
+  local dls="/System/Library/Components/CoreAudio.component/Contents/Resources/gs_instruments.dls"
+  local artefacts="build-ci-debug/JuicySFPlugin_artefacts/Debug"
+  local -a harnesses=(
+    "build-ci-debug/JuicySFFontQA $dls"
+    "build-ci-debug/JuicySFEngineMidiTests $dls tests/fixtures/controller_conformance.csv"
+    "build-ci-debug/JuicySFVST3Smoke $artefacts/VST3/Juicy16.vst3 $dls tests/fixtures/vst3_multichannel_programs.csv"
+    "build-ci-debug/JuicySFAUSmoke $artefacts/AU/Juicy16.component $dls"
+  )
+
+  local failed=0
+  local harness name log summary
+  for harness in "${harnesses[@]}"; do
+    name=${harness%% *}
+    name=${name##*/}
+    log="build-ci-debug/Testing/leaks-$name.log"
+    mkdir -p "$(dirname "$log")"
+    echo "-- $name"
+    # `leaks` exits non-zero when it finds any, so its status cannot distinguish
+    # "leaked" from "failed to run". Read the summary line instead.
+    # shellcheck disable=SC2086
+    MallocStackLogging=1 leaks -atExit -- $harness > "$log" 2>&1 || true
+    summary=$(grep -E "leaks? for [0-9]+ total leaked bytes" "$log" | tail -1 || true)
+    if [[ -z "$summary" ]]; then
+      echo "   leaks produced no summary; see $log" >&2
+      failed=1
+      continue
+    fi
+    echo "   $summary"
+    if [[ "$summary" != *"0 leaks for 0 total leaked bytes"* ]]; then
+      echo "   leaked allocations remain; see $log" >&2
+      failed=1
+    fi
+    if grep -qE "^  FAIL" "$log"; then
+      echo "   the harness itself reported failures; see $log" >&2
+      failed=1
+    fi
+  done
+
+  if [[ $failed -ne 0 ]]; then
+    exit 1
+  fi
+}
+
 run_release() {
   echo "== release: strict portable macOS candidate =="
   case "$repo_dir" in
@@ -98,10 +151,11 @@ case "$gate" in
   docs) run_docs ;;
   debug) run_debug ;;
   asan) run_asan ;;
+  leaks) run_leaks ;;
   release) run_release ;;
-  all) run_docs; run_debug; run_asan; run_release ;;
+  all) run_docs; run_debug; run_asan; run_leaks; run_release ;;
   *)
-    echo "Unknown gate: $gate (expected docs, debug, asan, release, or all)" >&2
+    echo "Unknown gate: $gate (expected docs, debug, asan, leaks, release, or all)" >&2
     exit 2
     ;;
 esac

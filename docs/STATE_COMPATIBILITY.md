@@ -1,6 +1,8 @@
 # Beta state compatibility policy
 
-Juicy16 Beta 1 writes state schema version 2. Beta 2 and the first stable release must continue to read version 2 unless a stop-ship defect makes that unsafe. The automated suite must retain the version 1 migration and version 2 round-trip cases for as long as those versions are supported.
+Juicy16 Beta 1 writes state schema version 3. Beta 2 and the first stable release must continue to read version 3 unless a stop-ship defect makes that unsafe. The automated suite must retain the older-version migration and version 3 round-trip cases for as long as those versions are supported.
+
+Version 3 replaced the six per-channel CC71-79 sound-controller values with the mixer controls `volume` (CC7) and `pan` (CC10), and added the global `outputLevel` trim. A version 1 or 2 save has no volume/pan attributes, so those channels keep the GM defaults (volume 100, pan centre); the retired attributes are ignored rather than migrated, because an envelope control has no meaningful mapping onto a mixer control. Bank and preset assignments still restore from those older saves.
 
 Compatibility is forward-reading, not backward-reading: a newer build should migrate an older supported state, but an older beta is not expected to understand state written by a newer beta. The processor rejects a state whose schema number is newer than it supports, leaves its current engine state untouched, and shows a visible error. Testers must keep matching project and plugin backups when moving between candidates.
 

@@ -6,6 +6,14 @@
 using namespace std;
 using SliderAttachment = AudioProcessorValueTreeState::SliderAttachment;
 
+// Volume and pan for the selected MIDI channel, plus the plugin's master output
+// trim.
+//
+// Volume and pan are ordinary MIDI controllers (CC7/CC10), so these two sliders
+// behave exactly like the per-row instrument dropdowns: what you set here is a
+// starting point, and the next CC7/CC10 the channel receives replaces it and
+// moves the slider. Output level is not a MIDI controller and is not per
+// channel — it is the plugin's own gain staging.
 class SlidersComponent : public Component
 {
 public:
@@ -18,6 +26,8 @@ public:
 
     const int getDesiredWidth();
 
+    // Called when a mapped CC arrives for the selected channel, so the slider
+    // follows incoming MIDI without echoing it back to the engine.
     void acceptMidiControlEvent(int controller, int value);
 
 private:
@@ -25,33 +35,21 @@ private:
 
     FluidSynthModel& fluidSynthModel;
 
-    GroupComponent envelopeGroup;
+    GroupComponent channelGroup;
 
-    Slider attackSlider;
-    Label attackLabel;
-    unique_ptr<SliderAttachment> attackSliderAttachment;
+    Slider volumeSlider;
+    Label volumeLabel;
+    unique_ptr<SliderAttachment> volumeSliderAttachment;
 
-    Slider decaySlider;
-    Label decayLabel;
-    unique_ptr<SliderAttachment> decaySliderAttachment;
+    Slider panSlider;
+    Label panLabel;
+    unique_ptr<SliderAttachment> panSliderAttachment;
 
-    Slider sustainSlider;
-    Label sustainLabel;
-    unique_ptr<SliderAttachment> sustainSliderAttachment;
+    GroupComponent masterGroup;
 
-    Slider releaseSlider;
-    Label releaseLabel;
-    unique_ptr<SliderAttachment> releaseSliderAttachment;
-
-    GroupComponent filterGroup;
-
-    Slider filterCutOffSlider;
-    Label filterCutOffLabel;
-    unique_ptr<SliderAttachment> filterCutOffSliderAttachment;
-
-    Slider filterResonanceSlider;
-    Label filterResonanceLabel;
-    unique_ptr<SliderAttachment> filterResonanceSliderAttachment;
+    Slider outputLevelSlider;
+    Label outputLevelLabel;
+    unique_ptr<SliderAttachment> outputLevelSliderAttachment;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SlidersComponent)
 };

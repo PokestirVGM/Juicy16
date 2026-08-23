@@ -9,20 +9,28 @@
 #include "SlidersComponent.h"
 #include "FluidSynthModel.h"
 #include "MidiConstants.h"
+#include "GuiConstants.h"
 #include "Util.h"
 using SliderAttachment = AudioProcessorValueTreeState::SliderAttachment;
 
+namespace {
+constexpr int kChannelSliders{2};
+constexpr int kMasterSliders{1};
+constexpr int kGroupXMargin{8};
+constexpr int kGroupXPadding{8};
+constexpr int kGroupYPadding{9};
+constexpr int kSliderXMargin{3};
+constexpr int kLabelHeight{25};
+constexpr int kSliderWidth{34};
+
+int groupWidth(int sliders)
+{
+    return sliders * kSliderWidth + (sliders - 1) * kSliderXMargin + 2 * kGroupXPadding;
+}
+} // namespace
+
 std::function<void()> SlidersComponent::makeSliderListener(Slider& slider, int controller) {
     return [this, controller, &slider]{
-        // RangedAudioParameter *param{valueTreeState.getParameter("release")};
-        // jassert(dynamic_cast<AudioParameterInt*>(param) != nullptr);
-        // AudioParameterInt* castParam{dynamic_cast<AudioParameterInt*>(param)};
-        // int value{castParam->get()};
-        
-        // String s{"slider "};
-        // s << slider.getComponentID() << ", controller " << controller << ", value " << slider.getValue() << ", xmlReleaseValue " << value;
-        // DEBUG_PRINT(s);
-//        slider.setValue(slider.getValue(), NotificationType::dontSendNotification);
         fluidSynthModel.setControllerValue(controller, juce::roundToInt(slider.getValue()));
     };
 }
@@ -32,61 +40,33 @@ SlidersComponent::~SlidersComponent()
 }
 
 const int SlidersComponent::getDesiredWidth() {
-    const int envelopeSliders{4};
-    const int filterSliders{2};
-    const int groupXMargin{8};
-    const int groupXPadding{8};
-    const int sliderXMargin{3};
-    const int sliderWidth{30};
-
-    return envelopeSliders * sliderWidth + (envelopeSliders-1) * sliderXMargin + 2 * groupXPadding
-    + filterSliders * sliderWidth + (filterSliders-1) * sliderXMargin + 2 * groupXPadding + groupXMargin;
+    return groupWidth(kChannelSliders) + groupWidth(kMasterSliders) + kGroupXMargin;
 }
 
 void SlidersComponent::resized() {
-    const int envelopeSliders{4};
-    const int filterSliders{2};
-    const int groupXMargin{8};
-    const int groupXPadding{8};
-    const int groupYPadding{9};
-    const int sliderXMargin{3};
-    const int labelHeight{25};
-    const int sliderWidth{30};
     Rectangle<int> r{getLocalBounds()};
-    Rectangle<int> rEnvelope{r.removeFromLeft(envelopeSliders * sliderWidth + (envelopeSliders-1) * sliderXMargin + 2 * groupXPadding)};
-    Rectangle<int> rFilter{r.removeFromLeft(filterSliders * sliderWidth + (filterSliders-1) * sliderXMargin + 2 * groupXPadding + groupXMargin).withTrimmedLeft(groupXMargin)};
-    envelopeGroup.setBounds(rEnvelope);
-    filterGroup.setBounds(rFilter);
+    Rectangle<int> rChannel{r.removeFromLeft(groupWidth(kChannelSliders))};
+    Rectangle<int> rMaster{r.removeFromLeft(groupWidth(kMasterSliders) + kGroupXMargin)
+                               .withTrimmedLeft(kGroupXMargin)};
+    channelGroup.setBounds(rChannel);
+    masterGroup.setBounds(rMaster);
 
-    rEnvelope.reduce(groupXPadding, groupYPadding);
-    rFilter.reduce(groupXPadding, groupYPadding);
-    attackSlider.setBounds(rEnvelope.removeFromLeft(sliderWidth).withTrimmedTop(labelHeight));
-    decaySlider.setBounds(rEnvelope.removeFromLeft(sliderWidth + sliderXMargin).withTrimmedTop(labelHeight).withTrimmedLeft(sliderXMargin));
-    sustainSlider.setBounds(rEnvelope.removeFromLeft(sliderWidth + sliderXMargin).withTrimmedTop(labelHeight).withTrimmedLeft(sliderXMargin));
-    releaseSlider.setBounds(rEnvelope.removeFromLeft(sliderWidth + sliderXMargin).withTrimmedTop(labelHeight).withTrimmedLeft(sliderXMargin));
-    filterCutOffSlider.setBounds(rFilter.removeFromLeft(sliderWidth).withTrimmedTop(labelHeight));
-    filterResonanceSlider.setBounds(rFilter.removeFromLeft(sliderWidth + sliderXMargin).withTrimmedTop(labelHeight).withTrimmedLeft(sliderXMargin));
+    rChannel.reduce(kGroupXPadding, kGroupYPadding);
+    rMaster.reduce(kGroupXPadding, kGroupYPadding);
+    volumeSlider.setBounds(rChannel.removeFromLeft(kSliderWidth).withTrimmedTop(kLabelHeight));
+    panSlider.setBounds(rChannel.removeFromLeft(kSliderWidth + kSliderXMargin)
+                            .withTrimmedTop(kLabelHeight)
+                            .withTrimmedLeft(kSliderXMargin));
+    outputLevelSlider.setBounds(rMaster.removeFromLeft(kSliderWidth).withTrimmedTop(kLabelHeight));
 }
 
 void SlidersComponent::acceptMidiControlEvent(int controller, int value) {
     switch(controller) {
-        case static_cast<int>(SOUND_CTRL2): // MIDI CC 71 Timbre/Harmonic Intensity (filter resonance)
-            filterResonanceSlider.setValue(value, NotificationType::dontSendNotification);
+        case static_cast<int>(VOLUME_MSB): // MIDI CC 7 Channel Volume
+            volumeSlider.setValue(value, NotificationType::dontSendNotification);
             break;
-        case static_cast<int>(SOUND_CTRL3): // MIDI CC 72 Release time
-            releaseSlider.setValue(value, NotificationType::dontSendNotification);
-            break;
-        case static_cast<int>(SOUND_CTRL4): // MIDI CC 73 Attack time
-            attackSlider.setValue(value, NotificationType::dontSendNotification);
-            break;
-        case static_cast<int>(SOUND_CTRL5): // MIDI CC 74 Brightness (cutoff frequency, FILTERFC)
-            filterCutOffSlider.setValue(value, NotificationType::dontSendNotification);
-            break;
-        case static_cast<int>(SOUND_CTRL6): // MIDI CC 75 Decay Time
-            decaySlider.setValue(value, NotificationType::dontSendNotification);
-            break;
-        case static_cast<int>(SOUND_CTRL10): // MIDI CC 79 undefined
-            sustainSlider.setValue(value, NotificationType::dontSendNotification);
+        case static_cast<int>(PAN_MSB): // MIDI CC 10 Pan
+            panSlider.setValue(value, NotificationType::dontSendNotification);
             break;
         default:
             break;
@@ -97,125 +77,75 @@ SlidersComponent::SlidersComponent(
     AudioProcessorValueTreeState& state,
     FluidSynthModel& model)
 : fluidSynthModel{model}
-, envelopeGroup{"envelopeGroup", "Envelope"}
-, filterGroup{"filterGroup", "Filter"}
+, channelGroup{"channelGroup", "Channel"}
+, masterGroup{"masterGroup", "Master"}
 {
     const Slider::SliderStyle style{Slider::SliderStyle::LinearVertical};
-    const double rangeMin(0);
-    const double rangeMax(127);
-    const double rangeStep(1);
 
     const auto describeSlider = [](Slider& slider,
                                    const String& name,
                                    const String& help) {
         slider.setName(name);
         slider.setTitle(name);
-        slider.setDescription(name + " for the selected MIDI channel");
-        slider.setHelpText(help + " MIDI value 64 is neutral.");
-        slider.setTooltip(help + " Value 64 is neutral.");
+        slider.setDescription(name);
+        slider.setHelpText(help);
+        slider.setTooltip(help);
         // JUCE sliders decline keyboard focus by default, which would leave
         // parameter editing mouse-only. Focused sliders handle arrow keys.
         slider.setWantsKeyboardFocus(true);
     };
 
     describeSlider(
-        attackSlider, "Attack (CC73)",
-        "Volume-envelope attack time; higher values make the attack longer.");
+        volumeSlider, "Channel volume (CC7)",
+        "Volume for the selected MIDI channel. Default 100. Incoming CC7 on that "
+        "channel replaces this value.");
     describeSlider(
-        decaySlider, "Decay (CC75)",
-        "Volume-envelope decay time; higher values make the decay longer.");
+        panSlider, "Pan (CC10)",
+        "Pan for the selected MIDI channel. 64 is centre, 0 is hard left, 127 is "
+        "hard right. Incoming CC10 on that channel replaces this value.");
     describeSlider(
-        sustainSlider, "Sustain level (CC79)",
-        "Volume-envelope sustain level; higher values make sustain louder.");
-    describeSlider(
-        releaseSlider, "Release (CC72)",
-        "Volume-envelope release time; higher values make the release longer.");
-    describeSlider(
-        filterCutOffSlider, "Filter cutoff (CC74)",
-        "Filter cutoff frequency; higher values make the sound brighter.");
-    describeSlider(
-        filterResonanceSlider, "Filter resonance (CC71)",
-        "Filter resonance; higher values add more resonance.");
+        outputLevelSlider, "Output level",
+        "Master output trim for the whole plugin, in decibels. Not a MIDI "
+        "controller: nothing in a MIDI file changes it.");
 
-    envelopeGroup.setName("Envelope controls");
-    envelopeGroup.setTitle("Envelope controls");
-    filterGroup.setName("Filter controls");
-    filterGroup.setTitle("Filter controls");
+    channelGroup.setName("Selected channel mixer controls");
+    channelGroup.setTitle("Selected channel mixer controls");
+    masterGroup.setName("Master output");
+    masterGroup.setTitle("Master output");
 
-    attackSlider.setSliderStyle(style);
-    attackSlider.setRange(rangeMin, rangeMax, rangeStep);
-    attackSlider.onDragEnd = makeSliderListener(attackSlider, static_cast<int>(SOUND_CTRL4));
-    attackSlider.setTextBoxStyle(Slider::TextBoxBelow, true, attackSlider.getTextBoxWidth(), attackSlider.getTextBoxHeight());
-    attackSliderAttachment = make_unique<SliderAttachment>(state, "attack", attackSlider);
+    const auto configure = [&](Slider& slider, double minimum, double maximum,
+                               double interval) {
+        slider.setSliderStyle(style);
+        slider.setRange(minimum, maximum, interval);
+        slider.setTextBoxStyle(Slider::TextBoxBelow, true,
+                               slider.getTextBoxWidth(), slider.getTextBoxHeight());
+        addAndMakeVisible(slider);
+    };
 
-    decaySlider.setSliderStyle(style);
-    decaySlider.setRange(rangeMin, rangeMax, rangeStep);
-    decaySlider.onDragEnd = makeSliderListener(decaySlider, static_cast<int>(SOUND_CTRL6));
-    decaySlider.setTextBoxStyle(Slider::TextBoxBelow, true, decaySlider.getTextBoxWidth(), decaySlider.getTextBoxHeight());
-    decaySliderAttachment = make_unique<SliderAttachment>(state, "decay", decaySlider);
+    configure(volumeSlider, MidiConstants::midiMinValue, MidiConstants::midiMaxValue, 1);
+    volumeSlider.onDragEnd = makeSliderListener(volumeSlider, static_cast<int>(VOLUME_MSB));
+    volumeSliderAttachment = make_unique<SliderAttachment>(state, "volume", volumeSlider);
 
-    sustainSlider.setSliderStyle(style);
-    sustainSlider.setRange(rangeMin, rangeMax, rangeStep);
-    sustainSlider.onDragEnd = makeSliderListener(sustainSlider, static_cast<int>(SOUND_CTRL10));
-    sustainSlider.setTextBoxStyle(Slider::TextBoxBelow, true, sustainSlider.getTextBoxWidth(), sustainSlider.getTextBoxHeight());
-    sustainSliderAttachment = make_unique<SliderAttachment>(state, "sustain", sustainSlider);
+    configure(panSlider, MidiConstants::midiMinValue, MidiConstants::midiMaxValue, 1);
+    panSlider.onDragEnd = makeSliderListener(panSlider, static_cast<int>(PAN_MSB));
+    panSliderAttachment = make_unique<SliderAttachment>(state, "pan", panSlider);
 
-    releaseSlider.setSliderStyle(style);
-    releaseSlider.setRange(rangeMin, rangeMax, rangeStep);
-    releaseSlider.onDragEnd = makeSliderListener(releaseSlider, static_cast<int>(SOUND_CTRL3));
-    releaseSlider.setTextBoxStyle(Slider::TextBoxBelow, true, releaseSlider.getTextBoxWidth(), releaseSlider.getTextBoxHeight());
-    releaseSliderAttachment = make_unique<SliderAttachment>(state, "release", releaseSlider);
+    configure(outputLevelSlider, GuiConstants::outputLevelMinDb,
+              GuiConstants::outputLevelMaxDb, 0.1);
+    outputLevelSlider.setTextValueSuffix(" dB");
+    outputLevelSliderAttachment =
+        make_unique<SliderAttachment>(state, "outputLevel", outputLevelSlider);
 
-    filterCutOffSlider.setSliderStyle(style);
-    filterCutOffSlider.setRange(rangeMin, rangeMax, rangeStep);
-    filterCutOffSlider.onDragEnd = makeSliderListener(filterCutOffSlider, static_cast<int>(SOUND_CTRL5));
-    filterCutOffSlider.setTextBoxStyle(Slider::TextBoxBelow, true, filterCutOffSlider.getTextBoxWidth(), filterCutOffSlider.getTextBoxHeight());
-    filterCutOffSliderAttachment = make_unique<SliderAttachment>(state, "filterCutOff", filterCutOffSlider);
+    const auto attachLabel = [this](Label& label, const String& text, Slider& slider) {
+        label.setText(text, NotificationType::dontSendNotification);
+        label.setJustificationType(Justification::centredBottom);
+        label.attachToComponent(&slider, false);
+        addAndMakeVisible(label);
+    };
+    attachLabel(volumeLabel, "Vol", volumeSlider);
+    attachLabel(panLabel, "Pan", panSlider);
+    attachLabel(outputLevelLabel, "Out", outputLevelSlider);
 
-    filterResonanceSlider.setSliderStyle(style);
-    filterResonanceSlider.setRange(rangeMin, rangeMax, rangeStep);
-    filterResonanceSlider.onDragEnd = makeSliderListener(filterResonanceSlider, static_cast<int>(SOUND_CTRL2));
-    filterResonanceSlider.setTextBoxStyle(Slider::TextBoxBelow, true, filterResonanceSlider.getTextBoxWidth(), filterResonanceSlider.getTextBoxHeight());
-    filterResonanceSliderAttachment = make_unique<SliderAttachment>(state, "filterResonance", filterResonanceSlider);
-
-    addAndMakeVisible(attackSlider);
-    addAndMakeVisible(decaySlider);
-    addAndMakeVisible(sustainSlider);
-    addAndMakeVisible(releaseSlider);
-    addAndMakeVisible(filterCutOffSlider);
-    addAndMakeVisible(filterResonanceSlider);
-
-    attackLabel.setText("A", NotificationType::dontSendNotification);
-    attackLabel.setJustificationType(Justification::centredBottom);
-    attackLabel.attachToComponent(&attackSlider, false);
-
-    decayLabel.setText("D", NotificationType::dontSendNotification);
-    decayLabel.setJustificationType(Justification::centredBottom);
-    decayLabel.attachToComponent(&decaySlider, false);
-
-    sustainLabel.setText("S", NotificationType::dontSendNotification);
-    sustainLabel.setJustificationType(Justification::centredBottom);
-    sustainLabel.attachToComponent(&sustainSlider, false);
-    
-    releaseLabel.setText("R", NotificationType::dontSendNotification);
-    releaseLabel.setJustificationType(Justification::centredBottom);
-    releaseLabel.attachToComponent(&releaseSlider, false);
-
-    filterCutOffLabel.setText("Cut", NotificationType::dontSendNotification);
-    filterCutOffLabel.setJustificationType(Justification::centredBottom);
-    filterCutOffLabel.attachToComponent(&filterCutOffSlider, false);
-
-    filterResonanceLabel.setText("Res", NotificationType::dontSendNotification);
-    filterResonanceLabel.setJustificationType(Justification::centredBottom);
-    filterResonanceLabel.attachToComponent(&filterResonanceSlider, false);
-
-    addAndMakeVisible(attackLabel);
-    addAndMakeVisible(decayLabel);
-    addAndMakeVisible(sustainLabel);
-    addAndMakeVisible(releaseLabel);
-    addAndMakeVisible(filterCutOffLabel);
-    addAndMakeVisible(filterResonanceLabel);
-
-    addAndMakeVisible(envelopeGroup);
-    addAndMakeVisible(filterGroup);
+    addAndMakeVisible(channelGroup);
+    addAndMakeVisible(masterGroup);
 }

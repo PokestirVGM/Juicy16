@@ -16,8 +16,17 @@ cmake_minimum_required(VERSION 3.15)
 # directories, and the current project version. This is a standard CMake command.
 
 project(JUICY16 VERSION 0.5.1)
-set(JUICYSF_PRERELEASE_LABEL "alpha.1" CACHE STRING
-    "Optional prerelease label appended to the user-facing version")
+# Deliberately NOT a plain CACHE default. A cached default is written once and
+# then ignored, so bumping the label here left every existing build directory
+# building - and displaying - the label it was first configured with. The version
+# in the status bar is how the user tells a rebuilt plugin from a DAW's cached
+# copy, so a stale one is worse than none. Editing this line now wins everywhere;
+# -DJUICYSF_PRERELEASE_LABEL=... on the command line still overrides it, and keeps
+# overriding it for that build directory until the cache entry is removed.
+set(JUICYSF_PRERELEASE_LABEL_DEFAULT "alpha.5")
+if (NOT DEFINED JUICYSF_PRERELEASE_LABEL)
+  set(JUICYSF_PRERELEASE_LABEL "${JUICYSF_PRERELEASE_LABEL_DEFAULT}")
+endif ()
 if (JUICYSF_PRERELEASE_LABEL)
   set(JUICYSF_DISPLAY_VERSION "${PROJECT_VERSION}-${JUICYSF_PRERELEASE_LABEL}")
 else ()
@@ -52,6 +61,17 @@ set(JUICYSF_CODE_SIGN_IDENTITY "-" CACHE STRING
     "macOS code-sign identity used after bundle resources and VST3 metadata are finalized; empty disables signing")
 set(JUICYSF_MACOS_SYSTEM_DLS
     "/System/Library/Components/CoreAudio.component/Contents/Resources/gs_instruments.dls")
+# Windows ships the Microsoft GS Wavetable DLS bank in the same spirit: a real
+# DLS a clean checkout can parse without adding a copyrighted fixture to the
+# repository. It is read in place and never copied or packaged.
+set(JUICYSF_WINDOWS_SYSTEM_DLS "C:/Windows/System32/drivers/gm.dls")
+if (APPLE)
+  set(JUICYSF_SYSTEM_DLS "${JUICYSF_MACOS_SYSTEM_DLS}")
+elseif (WIN32)
+  set(JUICYSF_SYSTEM_DLS "${JUICYSF_WINDOWS_SYSTEM_DLS}")
+else ()
+  set(JUICYSF_SYSTEM_DLS "")
+endif ()
 include(CTest)
 
 option(JUICYSF_WARNINGS_AS_ERRORS
@@ -122,25 +142,64 @@ if (JUICYSF_RELEASE_VALIDATION)
 endif ()
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/Modules/")
-find_package(PkgConfig REQUIRED)
 
-set(PKG_CONFIG_USE_CMAKE_PREFIX_PATH off)
+# How FluidSynth is found. pkg-config is the macOS path and produced every
+# recorded macOS result. MSVC has no pkg-config by default, while the pinned
+# Windows closure installs FluidSynth's own CMake package config, so Windows uses
+# that instead. The option is deliberately not Windows-only: it can be switched
+# on for a macOS build so the config path is exercised on the platform where the
+# test suite actually runs, rather than shipping a code path nothing executes.
+if (MSVC)
+  set(_juicysf_fluidsynth_config_default ON)
+else ()
+  set(_juicysf_fluidsynth_config_default OFF)
+endif ()
+option(JUICYSF_FLUIDSYNTH_CMAKE_CONFIG
+  "Find FluidSynth through its installed CMake package config instead of pkg-config"
+  ${_juicysf_fluidsynth_config_default})
 
-# pkg-config emits unquoted -L/-I flags. A space in the source or build path is
-# split into two arguments, after which the pinned dependency prefix is dropped
-# and FluidSynth silently resolves from somewhere else (typically Homebrew).
-if (JUICYSF_RELEASE_VALIDATION)
-  foreach (_path IN ITEMS "${CMAKE_SOURCE_DIR}" "${CMAKE_BINARY_DIR}")
-    if (_path MATCHES "[ \t]")
-      message(FATAL_ERROR
-        "Release validation requires a path without whitespace, but found: ${_path}\n"
-        "pkg-config cannot quote such a path, so the pinned dependency prefix "
-        "would be silently discarded. Build the candidate from a space-free location.")
-    endif ()
-  endforeach ()
+# The macOS strict checks below read FLUIDSYNTH_STATIC_LINK_LIBRARIES to verify
+# every static archive's architecture and deployment target. The CMake package
+# config does not expose that list, so those checks would silently pass over an
+# empty list. Refuse the combination rather than weaken the gate.
+if (JUICYSF_RELEASE_VALIDATION AND APPLE AND JUICYSF_FLUIDSYNTH_CMAKE_CONFIG)
+  message(FATAL_ERROR
+    "macOS release validation requires the pkg-config discovery path, because "
+    "its per-archive architecture and deployment-target checks read "
+    "FLUIDSYNTH_STATIC_LINK_LIBRARIES. Configure with "
+    "-DJUICYSF_FLUIDSYNTH_CMAKE_CONFIG=OFF.")
 endif ()
 
-pkg_search_module(FLUIDSYNTH REQUIRED IMPORTED_TARGET fluidsynth>=2)
+if (JUICYSF_FLUIDSYNTH_CMAKE_CONFIG)
+  if (FLUIDSYNTH_LINK_STATIC)
+    find_package(FluidSynth CONFIG REQUIRED COMPONENTS static)
+  else ()
+    find_package(FluidSynth CONFIG REQUIRED)
+  endif ()
+  set(FLUIDSYNTH_VERSION "${FluidSynth_VERSION}")
+  # <prefix>/lib/cmake/fluidsynth -> <prefix>, matching what pkg-config reports.
+  get_filename_component(FLUIDSYNTH_PREFIX "${FluidSynth_DIR}/../../.." ABSOLUTE)
+else ()
+  find_package(PkgConfig REQUIRED)
+
+  set(PKG_CONFIG_USE_CMAKE_PREFIX_PATH off)
+
+  # pkg-config emits unquoted -L/-I flags. A space in the source or build path is
+  # split into two arguments, after which the pinned dependency prefix is dropped
+  # and FluidSynth silently resolves from somewhere else (typically Homebrew).
+  if (JUICYSF_RELEASE_VALIDATION)
+    foreach (_path IN ITEMS "${CMAKE_SOURCE_DIR}" "${CMAKE_BINARY_DIR}")
+      if (_path MATCHES "[ \t]")
+        message(FATAL_ERROR
+          "Release validation requires a path without whitespace, but found: ${_path}\n"
+          "pkg-config cannot quote such a path, so the pinned dependency prefix "
+          "would be silently discarded. Build the candidate from a space-free location.")
+      endif ()
+    endforeach ()
+  endif ()
+
+  pkg_search_module(FLUIDSYNTH REQUIRED IMPORTED_TARGET fluidsynth>=2)
+endif ()
 if (JUICYSF_RELEASE_VALIDATION AND NOT FLUIDSYNTH_VERSION VERSION_EQUAL "2.5.5")
   message(FATAL_ERROR
     "Beta 1 release validation requires FluidSynth 2.5.5 exactly; found ${FLUIDSYNTH_VERSION}. "
@@ -230,7 +289,11 @@ if (JUICYSF_RELEASE_VALIDATION AND APPLE AND FLUIDSYNTH_LINK_STATIC)
   endforeach ()
 endif ()
 
-if (FLUIDSYNTH_LINK_STATIC)
+if (JUICYSF_FLUIDSYNTH_CMAKE_CONFIG)
+  # FluidSynth's own package config already carries the transitive static
+  # closure through its imported target's INTERFACE_LINK_LIBRARIES.
+  set(FLUIDSYNTH_TARGET FluidSynth::libfluidsynth)
+elseif (FLUIDSYNTH_LINK_STATIC)
   # FindPkgConfig creates only PkgConfig::FLUIDSYNTH; its `--static` closure is
   # exposed through FLUIDSYNTH_STATIC_* variables. Wrap those in a real target so
   # Release builds include FluidSynth and every required transitive dependency.
@@ -255,6 +318,12 @@ if (EXTRA_ARCH_PKG_CONFIG_PATH AND JUICYSF_RELEASE_VALIDATION)
     "candidate, or revise the support matrix first.")
 endif ()
 
+if (EXTRA_ARCH_PKG_CONFIG_PATH AND JUICYSF_FLUIDSYNTH_CMAKE_CONFIG)
+  message(FATAL_ERROR
+    "EXTRA_ARCH_PKG_CONFIG_PATH is a pkg-config mechanism and cannot be combined "
+    "with -DJUICYSF_FLUIDSYNTH_CMAKE_CONFIG=ON.")
+endif ()
+
 if (EXTRA_ARCH_PKG_CONFIG_PATH)
   set(ENV{PKG_CONFIG_PATH} "${EXTRA_ARCH_PKG_CONFIG_PATH}")
   pkg_search_module(EXTRA_ARCH_FLUIDSYNTH REQUIRED IMPORTED_TARGET fluidsynth>=2)
@@ -269,6 +338,14 @@ if (EXTRA_ARCH_PKG_CONFIG_PATH)
     set(EXTRA_ARCH_FLUIDSYNTH_TARGET PkgConfig::EXTRA_ARCH_FLUIDSYNTH)
   endif ()
 endif (EXTRA_ARCH_PKG_CONFIG_PATH)
+
+# A statically linked Windows closure is built with the static C runtime so the
+# VST3 needs no Visual C++ redistributable on a tester's machine. The plugin must
+# use the same runtime or the link fails, so this is derived rather than a
+# separate knob. CMP0091 is NEW at this project's cmake_minimum_required.
+if (MSVC AND FLUIDSYNTH_LINK_STATIC)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif ()
 
 set(VST3_COPY_DIR "${JUCE_VST3_COPY_DIR}" CACHE STRING "VST3 installation dir")
 set(AU_COPY_DIR "${JUCE_AU_COPY_DIR}" CACHE STRING "AU installation dir")
@@ -508,6 +585,19 @@ message(STATUS "Juicy16 ${JUICYSF_DISPLAY_VERSION}")
 message(STATUS "  Formats: ${JUICYSF_PLUGIN_FORMATS} (Standalone is development/QA only)")
 message(STATUS "  JUCE: ${JUCE_VERSION}")
 message(STATUS "  FluidSynth: ${FLUIDSYNTH_VERSION} (${FLUIDSYNTH_TARGET})")
+if (EXISTS "${JUICYSF_SYSTEM_DLS}")
+  message(STATUS "  System DLS capability test: ${JUICYSF_SYSTEM_DLS}")
+else ()
+  message(STATUS "  System DLS capability test: no system DLS found; DLS is unproven here")
+endif ()
+if (JUICYSF_FLUIDSYNTH_CMAKE_CONFIG)
+  message(STATUS "  FluidSynth found via: CMake package config at ${FluidSynth_DIR}")
+else ()
+  message(STATUS "  FluidSynth found via: pkg-config")
+endif ()
+if (MSVC)
+  message(STATUS "  MSVC runtime: ${CMAKE_MSVC_RUNTIME_LIBRARY}")
+endif ()
 message(STATUS "  Copy after build: ${JUICYSF_COPY_PLUGIN_AFTER_BUILD}")
 if (JUICYSF_FONT_CORPUS)
   message(STATUS "  Private/local font corpus: ${JUICYSF_FONT_CORPUS}")
@@ -585,6 +675,14 @@ if (BUILD_TESTING)
       -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/DocumentationLinkTests.cmake)
   set_tests_properties(documentation_internal_links PROPERTIES LABELS "docs")
 
+  # The vendored libsndfile security patch is applied by the dependency recipes,
+  # which CMake never runs. This only guards them against drifting apart.
+  add_test(NAME dependency_patch_contract
+    COMMAND ${CMAKE_COMMAND}
+      -DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/DependencyPatchTests.cmake)
+  set_tests_properties(dependency_patch_contract PROPERTIES LABELS "docs;security")
+
   add_executable(JuicySFFontQA tools/font_qa.cpp)
   juicysf_treat_warnings_as_errors(tools/font_qa.cpp)
   target_link_libraries(JuicySFFontQA PRIVATE ${FLUIDSYNTH_TARGET})
@@ -613,16 +711,19 @@ if (BUILD_TESTING)
       LABELS "font;corpus")
   endif ()
 
-  # macOS ships a General MIDI DLS bank. Exercising it gives clean checkouts a
-  # real parser/load test without adding a large copyrighted fixture to the repo.
-  if (APPLE AND EXISTS "${JUICYSF_MACOS_SYSTEM_DLS}")
+  # Both platforms ship a General MIDI DLS bank. Exercising it gives clean
+  # checkouts a real parser/load test without adding a large copyrighted fixture
+  # to the repo, and on Windows it is the only DLS capability proof available to
+  # CI, where the private corpus cannot be present.
+  if (EXISTS "${JUICYSF_SYSTEM_DLS}")
     add_test(NAME font_load_system_dls
-             COMMAND JuicySFFontQA "${JUICYSF_MACOS_SYSTEM_DLS}")
+             COMMAND JuicySFFontQA "${JUICYSF_SYSTEM_DLS}")
     set_tests_properties(font_load_system_dls PROPERTIES LABELS "font;dls")
     if (JUICYSF_RELEASE_VALIDATION)
       set_tests_properties(font_load_system_dls PROPERTIES LABELS "font;dls;release")
     endif ()
-  elseif (WIN32 AND JUICYSF_RELEASE_VALIDATION)
+  endif ()
+  if (WIN32 AND JUICYSF_RELEASE_VALIDATION)
     add_test(NAME font_load_release_dls
              COMMAND JuicySFFontQA "${JUICYSF_RELEASE_DLS_PROBE}")
     set_tests_properties(font_load_release_dls PROPERTIES LABELS "font;dls;release")
@@ -644,6 +745,25 @@ if (BUILD_TESTING)
     endif ()
     add_test(NAME vst3_multitimbral_smoke
       COMMAND JuicySFVST3Smoke ${_juicysf_vst3_smoke_arguments})
+    set_tests_properties(vst3_multitimbral_smoke PROPERTIES LABELS "vst3;host")
+
+    # In-process AU host. Registers the built component from its own bundle with
+    # AudioComponentRegister, so nothing is installed and an already-installed
+    # copy can never be tested by mistake.
+    add_executable(JuicySFAUSmoke tools/au_smoke.cpp)
+    juicysf_treat_warnings_as_errors(tools/au_smoke.cpp)
+    target_link_libraries(JuicySFAUSmoke PRIVATE
+      "-framework AudioToolbox" "-framework CoreFoundation")
+    target_compile_features(JuicySFAUSmoke PRIVATE cxx_std_17)
+    add_dependencies(JuicySFAUSmoke JuicySFPlugin_AU)
+    set(_juicysf_au_smoke_arguments
+        "${CMAKE_CURRENT_BINARY_DIR}/JuicySFPlugin_artefacts/$<CONFIG>/AU/Juicy16.component")
+    if (EXISTS "${JUICYSF_MACOS_SYSTEM_DLS}")
+      list(APPEND _juicysf_au_smoke_arguments "${JUICYSF_MACOS_SYSTEM_DLS}")
+    endif ()
+    add_test(NAME au_host_smoke
+      COMMAND JuicySFAUSmoke ${_juicysf_au_smoke_arguments})
+    set_tests_properties(au_host_smoke PROPERTIES LABELS "au;host;macos")
     add_test(NAME release_metadata_consistency
       COMMAND ${CMAKE_COMMAND}
         -DPROJECT_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
@@ -671,15 +791,71 @@ if (BUILD_TESTING)
     juce::juce_gui_extra
     ${FLUIDSYNTH_TARGET})
   target_compile_features(JuicySFEngineMidiTests PRIVATE cxx_std_17)
-  if (APPLE AND EXISTS "${JUICYSF_MACOS_SYSTEM_DLS}")
+  # Registered on any platform with a system DLS, Windows included. The suite
+  # creates an editor, so it needs a desktop session; that is true of the machines
+  # this runs on. A failure on Windows is new information rather than a
+  # regression, since it has never run there.
+  if (EXISTS "${JUICYSF_SYSTEM_DLS}")
     add_test(NAME engine_midi_system_dls
              COMMAND JuicySFEngineMidiTests
-               "${JUICYSF_MACOS_SYSTEM_DLS}"
+               "${JUICYSF_SYSTEM_DLS}"
                "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/controller_conformance.csv")
+    set_tests_properties(engine_midi_system_dls PROPERTIES LABELS "engine")
+  endif ()
+
+  # Randomised MIDI soak. Fixed seed and block count so CI is deterministic and
+  # fast; the seed is an argument so a developer can sweep far wider locally.
+  # See docs/MIDI_SOAK.md.
+  if (EXISTS "${JUICYSF_SYSTEM_DLS}")
+    add_test(NAME engine_midi_soak
+             COMMAND JuicySFEngineMidiTests --midi-soak "${JUICYSF_SYSTEM_DLS}" 2000 1)
+    set_tests_properties(engine_midi_soak PROPERTIES LABELS "engine;fuzz")
+  endif ()
+
+  # The importable host-test fixtures, validated offline against the system DLS
+  # before anyone carries them into a DAW. These are the same files
+  # docs/HOST_TEST_PROTOCOL.md asks a tester to import, so a host that produces a
+  # different result is the host's problem, not the fixture's. Unlike the game-rip
+  # tests these need no private corpus, so they run on macOS and Windows alike.
+  if (EXISTS "${JUICYSF_SYSTEM_DLS}")
+    foreach (_juicysf_host_fixture IN ITEMS host_program_matrix host_controllers)
+      add_test(NAME engine_${_juicysf_host_fixture}
+               COMMAND JuicySFEngineMidiTests --game-rip
+                 "${JUICYSF_SYSTEM_DLS}"
+                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/host/${_juicysf_host_fixture}.mid")
+      set_tests_properties(engine_${_juicysf_host_fixture} PROPERTIES
+        LABELS "engine;hostfixture")
+    endforeach ()
+  endif ()
+
+  # The committed fixtures must stay byte-identical to what the generator emits,
+  # or the expected-value tables in the protocol document stop describing them.
+  find_package(Python3 COMPONENTS Interpreter QUIET)
+  if (Python3_Interpreter_FOUND)
+    add_test(NAME host_fixtures_reproducible
+      COMMAND ${CMAKE_COMMAND}
+        -DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+        -DPYTHON_EXECUTABLE=${Python3_EXECUTABLE}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/HostFixtureTests.cmake)
+    set_tests_properties(host_fixtures_reproducible PROPERTIES LABELS "hostfixture")
   endif ()
 
   # Resource and throughput baseline. Registered against the macOS system DLS so
   # a clean clone gets a real measurement, and additionally per corpus bank.
+  # Amplitude-domain diagnostic. Not a pass/fail gate: it prints velocity, CC7,
+  # CC10, and CC71-79 response curves for the plugin next to a stock FluidSynth
+  # loaded with the same bank, so a dynamics complaint can be attributed to the
+  # plugin, the engine, or the bank instead of guessed at.
+  add_executable(JuicySFDynamicsProbe tools/dynamics_probe.cpp)
+  juicysf_treat_warnings_as_errors(tools/dynamics_probe.cpp)
+  target_include_directories(JuicySFDynamicsProbe PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Source")
+  target_link_libraries(JuicySFDynamicsProbe PRIVATE
+    JuicySFPlugin
+    juce::juce_audio_utils
+    juce::juce_gui_extra
+    ${FLUIDSYNTH_TARGET})
+  target_compile_features(JuicySFDynamicsProbe PRIVATE cxx_std_17)
+
   add_executable(JuicySFPerfProbe tools/perf_probe.cpp)
   juicysf_treat_warnings_as_errors(tools/perf_probe.cpp)
   target_include_directories(JuicySFPerfProbe PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Source")
@@ -689,9 +865,13 @@ if (BUILD_TESTING)
     juce::juce_gui_extra
     ${FLUIDSYNTH_TARGET})
   target_compile_features(JuicySFPerfProbe PRIVATE cxx_std_17)
-  if (APPLE AND EXISTS "${JUICYSF_MACOS_SYSTEM_DLS}")
+  # Resident-memory measurement is macOS-only inside the probe, so on Windows this
+  # still exercises load, render throughput, and the voice ceiling while reporting
+  # 0 MB for the memory deltas. Registered anyway: the throughput and voice-ceiling
+  # assertions are the ones that would catch a bad Windows build.
+  if (EXISTS "${JUICYSF_SYSTEM_DLS}")
     add_test(NAME performance_baseline
-             COMMAND JuicySFPerfProbe "${JUICYSF_MACOS_SYSTEM_DLS}")
+             COMMAND JuicySFPerfProbe "${JUICYSF_SYSTEM_DLS}")
     set_tests_properties(performance_baseline PROPERTIES LABELS "performance")
   endif ()
 

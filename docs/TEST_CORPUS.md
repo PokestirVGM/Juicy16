@@ -28,9 +28,28 @@ The checksum-pinned FluidSynth 2.5.5 source includes `sf2/VintageDreamsWaves-v2.
 
 FluidSynth's adjacent `sf2/COPYRIGHT.txt` records Ian Wilson's permission to convert the bank to SF3 and permits redistribution subject to preserving that copyright notice. Any future copy retained or distributed by Juicy16 must remain unmodified and include the notice. Current evidence uses the file in place from the pinned dependency source only.
 
+## Synthesised multi-bank SF2
+
+No file in the corpus reaches a melodic bank above 1, so cross-bank Bank Select
+would otherwise be untested. Rather than acquire another bank and inherit another
+redistribution question, `tests/SyntheticSf2.h` writes one during the engine test
+run: a minimal but valid SF2 with presets in banks 0, 1, 8, and 128, each a looped
+sine at its own frequency with scale tuning disabled, so the rendered pitch
+identifies the preset FluidSynth actually selected. It is generated into a
+temporary file and deleted afterwards, so nothing is committed or distributed and
+its provenance is the repository itself.
+
+It covers CC0 selection into banks 1 and 8, CC32 being retained but ignored under
+the pinned GS mode, the return to bank 0, channel 10's default percussion bank,
+undefined bank/program substitution, and FluidSynth bank offsets.
+
 ## Still required
 
 - Run the required compressed-SF3 gate on Windows and every final release candidate.
 - Provenance and license/redistribution status for every retained fixture.
-- Sparse/non-zero banks, percussion banks, large banks, and unusual/Unicode preset names where the current files do not cover them.
+- An SF3 bank with a melodic bank above 0. The pinned SF3 fixture defines only
+  banks 0 and 128, so SF3 cross-bank selection is proven for percussion versus
+  melodic only.
+- Large banks and unusual/Unicode preset names where the current files do not
+  cover them.
 - The same complete corpus run against macOS and Windows release artifacts.

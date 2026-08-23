@@ -15,7 +15,13 @@ if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
 fi
 
 PROJECT_VERSION=$(sed -nE 's/^project\(JUICY16 VERSION ([0-9]+\.[0-9]+\.[0-9]+)\)$/\1/p' "$REPO_DIR/CMakeLists.txt")
-PRERELEASE=$(sed -nE 's/^set\(JUICYSF_PRERELEASE_LABEL "([^"]+)" CACHE STRING$/\1/p' "$REPO_DIR/CMakeLists.txt")
+# See the note in bundle_macos.sh: an unreadable label must fail, not default
+# to an empty string that renames the candidate after the bare version.
+if [[ $(grep -c '^set(JUICYSF_PRERELEASE_LABEL_DEFAULT ' "$REPO_DIR/CMakeLists.txt") -ne 1 ]]; then
+  echo "Cannot read JUICYSF_PRERELEASE_LABEL_DEFAULT from CMakeLists.txt" >&2
+  exit 2
+fi
+PRERELEASE=$(sed -nE 's/^set\(JUICYSF_PRERELEASE_LABEL_DEFAULT "([^"]*)"\)$/\1/p' "$REPO_DIR/CMakeLists.txt")
 CANONICAL_VERSION=$PROJECT_VERSION
 if [[ -n $PRERELEASE ]]; then
   CANONICAL_VERSION="$CANONICAL_VERSION-$PRERELEASE"

@@ -85,6 +85,8 @@ ChannelListComponent::ChannelListComponent(
     table.setName("MIDI channel assignments");
     table.setTitle("MIDI channel assignments");
     table.setDescription("Select a row to edit that MIDI channel's sound controls");
+    table.setHelpText(
+        "Up and down arrows select a MIDI channel; Return opens that channel's instrument list.");
 
     table.setColour(ListBox::outlineColourId, juce::Colours::grey);
     table.setOutlineThickness(1);
@@ -109,9 +111,18 @@ ChannelListComponent::ChannelListComponent(
         600, // max
         TableHeaderComponent::notSortable);
 
-    table.setWantsKeyboardFocus(false);
+    // Keyboard-reachable. This was previously false, justified as stopping arrow
+    // keys from fighting row selection the plugin drives from MIDI - but nothing
+    // does: selectChannelForEditing has one caller, a mouse click, and incoming
+    // MIDI changes a channel's program rather than which row is selected. So the
+    // table can take focus, and channel selection works without a mouse.
+    table.setWantsKeyboardFocus(true);
+    table.setMultipleSelectionEnabled(false);
 
     valueTreeState.state.addListener(this);
+    // Open on whichever channel the restored state was editing, so the first
+    // arrow key moves from there rather than from row 0.
+    syncTableSelectionFromState();
 }
 
 ChannelListComponent::~ChannelListComponent() {
@@ -234,6 +245,37 @@ void ChannelListComponent::cellClicked(int rowNumber, int /*columnId*/, const ju
     fluidSynthModel.selectChannelForEditing(rowNumber);
 }
 
+void ChannelListComponent::selectedRowsChanged(int lastRowSelected) {
+    if (syncingSelection || lastRowSelected < 0 || lastRowSelected >= numChannels)
+        return;
+    fluidSynthModel.selectChannelForEditing(lastRowSelected);
+}
+
+juce::ComboBox* ChannelListComponent::patchComboForRow(int row) {
+    if (row < 0 || row >= numChannels)
+        return nullptr;
+    // A row that is scrolled out of view has no cell component yet.
+    table.scrollToEnsureRowIsOnscreen(row);
+    auto* cell{dynamic_cast<PatchCell*>(table.getCellComponent(2, row))};
+    return cell == nullptr ? nullptr : &cell->getCombo();
+}
+
+void ChannelListComponent::returnKeyPressed(int lastRowSelected) {
+    if (auto* combo{patchComboForRow(lastRowSelected)})
+        combo->showPopup();
+}
+
+void ChannelListComponent::syncTableSelectionFromState() {
+    const int selected{getSelectedChannelIndex()};
+    if (selected < 0 || selected >= numChannels
+        || table.getSelectedRow() == selected)
+        return;
+    const juce::ScopedValueSetter<bool> guard{syncingSelection, true};
+    // Scroll it into view: at the minimum window height only part of the list is
+    // visible, so arrow-keying off-screen would otherwise lose the selection.
+    table.selectRow(selected);
+}
+
 void ChannelListComponent::valueTreePropertyChanged(
     ValueTree& treeWhosePropertyHasChanged,
     const Identifier& /*property*/) {
@@ -247,6 +289,8 @@ void ChannelListComponent::valueTreePropertyChanged(
         // a channel's program changed (manual or via MIDI), or the selection
         // moved: refresh dropdown selections + the selected-row highlight.
         table.updateContent();
+        if (type == StringRef("uiState"))
+            syncTableSelectionFromState();
     }
 }
 

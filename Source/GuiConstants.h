@@ -2,6 +2,13 @@
 
 struct GuiConstants {
     inline static const int minWidth = 500;
+
+    // Master output trim, in dB. The floor is treated as -inf so a host can
+    // automate the plugin to actual silence; the ceiling is deliberately modest
+    // because FluidSynth's own gain already sits at its documented default and
+    // the point of the control is trim, not a second volume war.
+    inline static const float outputLevelMinDb = -24.0f;
+    inline static const float outputLevelMaxDb = 12.0f;
     // maxWidth is NOT here: PluginEditor caps it dynamically at the on-screen
     // keyboard's natural full-range width (see its constructor), so the window can
     // never be resized wider than needed to show the keyboard without trailing

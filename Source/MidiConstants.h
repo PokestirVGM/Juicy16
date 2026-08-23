@@ -166,4 +166,12 @@ enum fluid_midi_control_change
 struct MidiConstants {
     inline static const int midiMinValue = 0;
     inline static const int midiMaxValue = 127;
+    // CC124-127: Omni Off, Omni On, Mono On, Poly On. FluidSynth treats these as
+    // basic-channel reconfiguration, which disables MIDI channels; Juicy16
+    // restores its 16-channel layout immediately afterwards. See
+    // FluidSynthModel::restoreSixteenChannelLayout.
+    inline static const int firstChannelModeCc = 124;
+    // GM channel defaults, matching FluidSynth's own channel initialisation.
+    inline static const int defaultChannelVolume = 100; // CC7
+    inline static const int centreValue = 64;           // CC10 pan centre
 };

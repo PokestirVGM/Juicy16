@@ -23,7 +23,14 @@ fi
 artifacts_dir=$(cd -- "$artifacts_dir" && pwd)
 
 project_version=$(sed -nE 's/^project\(JUICY16 VERSION ([0-9]+\.[0-9]+\.[0-9]+)\)$/\1/p' "$repo_dir/CMakeLists.txt")
-prerelease=$(sed -nE 's/^set\(JUICYSF_PRERELEASE_LABEL "([^"]+)" CACHE STRING$/\1/p' "$repo_dir/CMakeLists.txt")
+# The label stopped being a CACHE entry in 0.5.1-alpha.4. A parse that silently
+# yields nothing would name the package after the bare project version, so an
+# absent or unreadable line is a hard failure rather than an empty label.
+if [[ $(grep -c '^set(JUICYSF_PRERELEASE_LABEL_DEFAULT ' "$repo_dir/CMakeLists.txt") -ne 1 ]]; then
+  echo "Cannot read JUICYSF_PRERELEASE_LABEL_DEFAULT from CMakeLists.txt" >&2
+  exit 2
+fi
+prerelease=$(sed -nE 's/^set\(JUICYSF_PRERELEASE_LABEL_DEFAULT "([^"]*)"\)$/\1/p' "$repo_dir/CMakeLists.txt")
 display_version=$project_version
 if [[ -n $prerelease ]]; then
   display_version="$display_version-$prerelease"

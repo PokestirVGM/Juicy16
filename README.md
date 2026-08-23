@@ -2,7 +2,7 @@
 
 Juicy16 is a 16-channel multitimbral DLS/SoundFont player inspired by the automatic patch-selection workflow of Fruity LSD. Load one `.dls`, `.sf2`, or `.sf3` bank, send a multichannel MIDI file to one plugin instance, and its Bank Select and Program Change events select instruments independently on MIDI channels 1–16. All channels mix to one stereo output.
 
-The current development version is `0.5.1-alpha.1`. It is an alpha: the engine, build, and automated gates are in good shape, but the Beta 1 readiness bar has not been met, so it is deliberately not labelled beta. The authoritative readiness checklist is [MILESTONE_PLAN.md](MILESTONE_PLAN.md).
+The current development version is `0.5.1-alpha.5`. It is an alpha: the engine, build, and automated gates are in good shape, but the Beta 1 readiness bar has not been met, so it is deliberately not labelled beta. The authoritative readiness checklist is [MILESTONE_PLAN.md](MILESTONE_PLAN.md).
 
 ## What is implemented
 
@@ -11,7 +11,7 @@ The current development version is `0.5.1-alpha.1`. It is an alpha: the engine, 
 - General MIDI percussion default on channel 10 (FluidSynth bank 128), with melodic bank 0 on the other channels.
 - Automatic Program Change handling for game-rip MIDI playback, including later changes during a song.
 - GM, GS, and XG reset detection followed by immediate restoration of the plugin's current per-channel program and exposed controller state.
-- Full CC forwarding to FluidSynth. CC71, 72, 73, 74, 75, and 79 are also mirrored into the selected-channel controls and saved per-channel state.
+- Full CC forwarding to FluidSynth. CC7 (volume) and CC10 (pan) are also mirrored into the selected-channel controls and saved per-channel state.
 - Full unnormalized 14-bit pitch bend and MIDI RPN pitch-bend range handling through FluidSynth.
 - Transactional bank replacement: a failed replacement reports an error and leaves the previous working bank active.
 - Safe temporary repair of a narrow class of malformed DLS RIFF-size fields. The original file is never modified; the exact limits are documented in [docs/DLS_REPAIR.md](docs/DLS_REPAIR.md).
@@ -43,15 +43,18 @@ Host routing is not hard-coded to FL Studio or Cubase. AU hosts can deliver norm
 ## Interface
 
 - The 16-row channel list selects a channel for editing and offers manual bank/preset selection.
-- Attack, decay, sustain, release, cutoff, and resonance edit MIDI sound controllers for the selected channel. Value 64 is neutral.
+- Volume and pan edit the selected channel's CC7 and CC10. Incoming MIDI on that channel overrides what you set, exactly as a Program Change overrides a manually picked instrument.
+- Output level is a master trim in decibels for the whole plugin. It is not a MIDI controller, so nothing in a MIDI file moves it.
 - The keyboard auditions the selected channel and displays incoming note activity.
 - The status area reports the running version. Bank-load results are also stored in the model and exposed through the file control tooltip.
+- Everything works without a mouse where the host passes Tab through: arrows on the channel list select a channel, Return opens that row's instrument list, and arrows on a focused slider change its value. Screen-reader announcements are untested — see [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).
 
 ## Building and testing
 
 - macOS: [building.macos.md](building.macos.md)
 - Windows status and intended path: [building.win32.md](building.win32.md)
 - CI quality gates: [docs/CI.md](docs/CI.md)
+- DAW host test protocol and MIDI fixtures: [docs/HOST_TEST_PROTOCOL.md](docs/HOST_TEST_PROTOCOL.md)
 - VST3/Cubase architecture: [docs/VST3_MULTITIMBRAL_DESIGN.md](docs/VST3_MULTITIMBRAL_DESIGN.md)
 - Beta state compatibility: [docs/STATE_COMPATIBILITY.md](docs/STATE_COMPATIBILITY.md)
 

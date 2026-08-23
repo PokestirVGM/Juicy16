@@ -1,6 +1,6 @@
 # Juicy16 Beta 1 identity contract
 
-This file records the host-facing identifiers frozen when Beta 1 becomes the compatibility baseline. The current development version `0.5.1-alpha.1` already uses them, so no identifier change is pending; only the version label differs. Pre-Beta sessions are outside this contract. Beta 1 and later releases must retain these values unless an explicitly approved stop-ship migration changes the contract and adds host save/reopen coverage.
+This file records the host-facing identifiers frozen when Beta 1 becomes the compatibility baseline. The current development version `0.5.1-alpha.5` already uses them, so no identifier change is pending; only the version label differs. Pre-Beta sessions are outside this contract. Beta 1 and later releases must retain these values unless an explicitly approved stop-ship migration changes the contract and adds host save/reopen coverage.
 
 ## Product and plugin identity
 
@@ -21,7 +21,7 @@ unversioned parameters and establishes the first public ordering baseline. The
 parameter order and string IDs are:
 
 ```text
-bank, preset, attack, decay, sustain, release, filterCutOff, filterResonance,
+bank, preset, volume, pan, outputLevel,
 progCh1, progCh2, progCh3, progCh4, progCh5, progCh6, progCh7, progCh8,
 progCh9, progCh10, progCh11, progCh12, progCh13, progCh14, progCh15, progCh16
 ```
@@ -30,9 +30,8 @@ The corresponding VST3 `ParamID` values are:
 
 ```text
 bank             0x002E063C    preset          0x4594E2DF
-attack           0x2C1EEE48    decay           0x05B097BA
-sustain          0x119E6223    release         0x41012807
-filterCutOff     0x63EBB165    filterResonance 0x14ED43B6
+volume           0x4FAAE71A    pan             0x0001B09D
+outputLevel      0x4DCA0B03
 progCh1          0x6D8E6EB2    progCh2         0x6D8E6EB3
 progCh3          0x6D8E6EB4    progCh4         0x6D8E6EB5
 progCh5          0x6D8E6EB6    progCh6         0x6D8E6EB7
@@ -43,7 +42,7 @@ progCh13         0x443F67C1    progCh14        0x443F67C2
 progCh15         0x443F67C3    progCh16        0x443F67C4
 ```
 
-The state root is `MYPLUGINSETTINGS`, the Beta 1 schema is version `2`, and the writer persists all 24 parameter values, 16 channel-program records, UI state, and the SoundFont path/bookmark record. See [STATE_COMPATIBILITY.md](STATE_COMPATIBILITY.md) for migration policy.
+The state root is `MYPLUGINSETTINGS`, the Beta 1 schema is version `3`, and the writer persists all 21 parameter values, 16 channel-program records, UI state, and the SoundFont path/bookmark record. See [STATE_COMPATIBILITY.md](STATE_COMPATIBILITY.md) for migration policy.
 
 ## VST3 multitimbral identity
 

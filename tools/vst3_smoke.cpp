@@ -42,6 +42,8 @@
 #include <pluginterfaces/vst/ivstparameterchanges.h>
 #include <pluginterfaces/vst/ivstevents.h>
 #include <pluginterfaces/vst/vstspeaker.h>
+#include <pluginterfaces/gui/iplugview.h>
+#include <pluginterfaces/gui/iplugviewcontentscalesupport.h>
 
 using namespace Steinberg;
 
@@ -65,9 +67,11 @@ static constexpr Vst::ParamID expectedProgramParamIds[16]{
     0x6D8E6EBA, 0x443F67BE, 0x443F67BF, 0x443F67C0,
     0x443F67C1, 0x443F67C2, 0x443F67C3, 0x443F67C4
 };
-static constexpr Vst::ParamID expectedGlobalParamIds[8]{
-    0x002E063C, 0x4594E2DF, 0x2C1EEE48, 0x05B097BA,
-    0x119E6223, 0x41012807, 0x63EBB165, 0x14ED43B6
+// bank, preset, volume, pan, outputLevel. JUCE derives a VST3 ParamID by hashing
+// the parameter's string id, so these change whenever a global parameter is
+// renamed, added, or removed - which is exactly why they are frozen here.
+static constexpr Vst::ParamID expectedGlobalParamIds[5]{
+    0x002E063C, 0x4594E2DF, 0x4FAAE71A, 0x0001B09D, 0x4DCA0B03
 };
 static Vst::UnitID expectedUnitId (int chZero) {
     return expectedUnitIds[chZero];
@@ -481,6 +485,28 @@ static double audioMagnitude(const std::array<float, 512>& left,
     return result;
 }
 
+// Normalized cross-correlation of the same segment in two renderings. Identical
+// synth state gives ~1.0; a different instrument on the same note drops well
+// below that, because the programs differ in spectrum rather than fundamental.
+static double waveformCorrelation(const std::array<float, 512>& leftA,
+                                  const std::array<float, 512>& rightA,
+                                  const std::array<float, 512>& leftB,
+                                  const std::array<float, 512>& rightB,
+                                  int start,
+                                  int length) {
+    double dot{}, energyA{}, energyB{};
+    for (int sample = start; sample < start + length; ++sample) {
+        const auto index{static_cast<std::size_t>(sample)};
+        for (const auto& pair : {std::pair<double, double>{leftA[index], leftB[index]},
+                                 std::pair<double, double>{rightA[index], rightB[index]}}) {
+            dot += pair.first * pair.second;
+            energyA += pair.first * pair.first;
+            energyB += pair.second * pair.second;
+        }
+    }
+    return dot / std::sqrt(energyA * energyB + 1.0e-30);
+}
+
 struct ProgramFixtureEvent {
     std::string type;
     int channel{-1};
@@ -848,12 +874,12 @@ int main (int argc, char** argv) {
         int paramsInChannelUnits = 0, flaggedParams = 0, steppedParams = 0;
         bool frozenProgramIds = true;
         bool frozenGlobalIds = true;
-        bool foundGlobalIds[8]{};
+        bool foundGlobalIds[5]{};
         const auto n = controller->getParameterCount();
         for (int32 i = 0; i < n; ++i) {
             Vst::ParameterInfo pi{};
             if (controller->getParameterInfo (i, pi) != kResultOk) continue;
-            for (int global = 0; global < 8; ++global)
+            for (int global = 0; global < 5; ++global)
                 if (pi.id == expectedGlobalParamIds[global])
                     foundGlobalIds[global] = true;
             for (int ch = 0; ch < 16; ++ch)
@@ -879,7 +905,7 @@ int main (int argc, char** argv) {
         // programCount-1 (127), not 0 (continuous). Regression-guard for isDiscrete().
         CHECK (steppedParams == 16, "all 16 channel program params report stepCount 127");
         CHECK (frozenProgramIds, "all 16 Beta 1 VST3 program ParamIDs are unchanged");
-        CHECK (frozenGlobalIds, "all 8 Beta 1 global VST3 ParamIDs are present");
+        CHECK (frozenGlobalIds, "all 5 Beta 1 global VST3 ParamIDs are present");
 
         units->release();
     }
@@ -1236,6 +1262,212 @@ int main (int argc, char** argv) {
               "unit/program-parameter fixture route changes all 16 programs independently");
         CHECK(allScenariosPassed,
               "GM/GS/XG reset, Bank Select, transport restart, mid-song, and note checkpoints all pass");
+    }
+
+    // ---- in-block timbre transition ----
+    // The fixture scenarios above prove state and host edits. This proves the
+    // sample position in the audio itself: a progChN automation point must take
+    // effect exactly at its own sample, not at block start and not late. Each
+    // trial runs on a fresh component so the synth state at the note is identical
+    // and the renderings can be compared directly.
+    if (processingReady && testProgramNameRefresh) {
+        constexpr int pianoProgram{0};
+        constexpr int organProgram{19};
+        constexpr int notePosition{256};
+        constexpr int tail{512 - notePosition};
+
+        struct AutomationPoint { int sample; int program; };
+        const auto renderIsolatedBlock =
+            [&](std::initializer_list<AutomationPoint> points,
+                std::array<float, 512>& left,
+                std::array<float, 512>& right) {
+                Vst::IComponent* isolated{nullptr};
+                factory->createInstance(effectCid, Vst::IComponent_iid,
+                                        reinterpret_cast<void**>(&isolated));
+                if (isolated == nullptr)
+                    return false;
+                bool ok{isolated->initialize(nullptr) == kResultOk};
+                if (ok) {
+                    auto* bankState = new ReadOnlyMemoryStream(makeXmlState(argv[2]));
+                    ok = isolated->setState(bankState) == kResultTrue;
+                    bankState->release();
+                }
+                Vst::IAudioProcessor* isolatedProcessor{nullptr};
+                if (ok)
+                    isolated->queryInterface(Vst::IAudioProcessor_iid,
+                                             reinterpret_cast<void**>(&isolatedProcessor));
+                ok = ok && isolatedProcessor != nullptr;
+                if (ok) {
+                    Vst::SpeakerArrangement arrangement{Vst::SpeakerArr::kStereo};
+                    Vst::ProcessSetup setup{};
+                    setup.processMode = Vst::kOffline;
+                    setup.symbolicSampleSize = Vst::kSample32;
+                    setup.maxSamplesPerBlock = 512;
+                    setup.sampleRate = 48000.0;
+                    ok = isolatedProcessor->setBusArrangements(nullptr, 0, &arrangement, 1)
+                            == kResultTrue
+                        && isolated->activateBus(Vst::kAudio, Vst::kOutput, 0, true) == kResultTrue
+                        && isolated->activateBus(Vst::kEvent, Vst::kInput, 0, true) == kResultTrue
+                        && isolatedProcessor->setupProcessing(setup) == kResultTrue
+                        && isolated->setActive(true) == kResultTrue
+                        && isolatedProcessor->setProcessing(true) == kResultTrue;
+                }
+                if (ok) {
+                    ParameterChanges changes;
+                    for (const auto& point : points)
+                        ok = ok && changes.addPoint(
+                            expectedProgramParamIds[0], point.sample,
+                            static_cast<double>(point.program) / 127.0);
+                    EventList events;
+                    events.addNoteOn(0, 60, 100, notePosition);
+
+                    left.fill(0.0f);
+                    right.fill(0.0f);
+                    float* channels[]{left.data(), right.data()};
+                    Vst::AudioBusBuffers output{};
+                    output.numChannels = 2;
+                    output.channelBuffers32 = channels;
+                    Vst::ProcessContext context{};
+                    context.state = Vst::ProcessContext::kPlaying;
+                    context.sampleRate = 48000.0;
+                    Vst::ProcessData data{};
+                    data.processMode = Vst::kOffline;
+                    data.symbolicSampleSize = Vst::kSample32;
+                    data.numSamples = 512;
+                    data.numOutputs = 1;
+                    data.outputs = &output;
+                    data.inputParameterChanges = &changes;
+                    data.inputEvents = &events;
+                    data.processContext = &context;
+                    ok = ok && isolatedProcessor->process(data) == kResultTrue;
+                    isolatedProcessor->setProcessing(false);
+                    isolated->setActive(false);
+                }
+                if (isolatedProcessor != nullptr)
+                    isolatedProcessor->release();
+                isolated->terminate();
+                isolated->release();
+                return ok;
+            };
+
+        std::array<float, 512> pianoLeft{}, pianoRight{};
+        std::array<float, 512> organLeft{}, organRight{};
+        std::array<float, 512> switchedBeforeLeft{}, switchedBeforeRight{};
+        std::array<float, 512> switchedAfterLeft{}, switchedAfterRight{};
+
+        bool rendered{renderIsolatedBlock({{0, pianoProgram}}, pianoLeft, pianoRight)};
+        rendered = rendered
+            && renderIsolatedBlock({{0, organProgram}}, organLeft, organRight);
+        // Second point one sample before the note: the note must sound the new
+        // program, which only happens if the point keeps its own timestamp.
+        rendered = rendered
+            && renderIsolatedBlock({{0, pianoProgram}, {notePosition - 1, organProgram}},
+                                   switchedBeforeLeft, switchedBeforeRight);
+        // Second point one sample after the note: the note must still sound the
+        // old program, which only happens if the point is not hoisted to block
+        // start — JUCE's ordinary parameter collapse would do exactly that.
+        rendered = rendered
+            && renderIsolatedBlock({{0, pianoProgram}, {notePosition + 1, organProgram}},
+                                   switchedAfterLeft, switchedAfterRight);
+
+        CHECK(rendered, "isolated in-block automation trials render");
+        if (rendered) {
+            const double differentPrograms{waveformCorrelation(
+                pianoLeft, pianoRight, organLeft, organRight, notePosition, tail)};
+            const double switchedIsNew{waveformCorrelation(
+                organLeft, organRight, switchedBeforeLeft, switchedBeforeRight,
+                notePosition, tail)};
+            const double switchedIsOld{waveformCorrelation(
+                pianoLeft, pianoRight, switchedAfterLeft, switchedAfterRight,
+                notePosition, tail)};
+            std::printf("  in-block automation correlations: different %.4f,"
+                        " point before note %.4f, point after note %.4f\n",
+                        differentPrograms, switchedIsNew, switchedIsOld);
+            CHECK(audioMagnitude(organLeft, organRight, notePosition, tail) > 0.001
+                      && differentPrograms < 0.9,
+                  "the two trial programs are audibly different on the same note");
+            CHECK(switchedIsNew > 0.999,
+                  "a progChN point one sample before a note sounds the new program at that sample");
+            CHECK(switchedIsOld > 0.999,
+                  "a progChN point one sample after a note leaves that note on the old program");
+        }
+    }
+
+    // ---- editor view: size contract and host-provided scaling ----
+    // No window is created, so this covers what a host can ask before attaching:
+    // that a view exists, reports a usable size, constrains a nonsense size, and
+    // accepts a content scale factor. Screen-reader and real-window behaviour
+    // stay manual.
+    {
+        IPlugView* view{controller->createView(Vst::ViewType::kEditor)};
+        CHECK(view != nullptr, "controller offers an editor view");
+        if (view != nullptr) {
+            CHECK(view->isPlatformTypeSupported(kPlatformTypeNSView) == kResultTrue,
+                  "the editor view supports the host platform type");
+
+            ViewRect defaultSize{};
+            const bool defaultSizeOk{view->getSize(&defaultSize) == kResultTrue
+                && defaultSize.getWidth() > 0 && defaultSize.getHeight() > 0};
+            CHECK(defaultSizeOk, "the editor view reports a non-empty default size");
+            std::printf("  editor default size: %d x %d\n",
+                        defaultSize.getWidth(), defaultSize.getHeight());
+
+            // A host that asks for an absurd size must be given the constrained
+            // one back, not have the request accepted verbatim.
+            ViewRect tiny{0, 0, 1, 1};
+            ViewRect huge{0, 0, 20000, 20000};
+            const bool tinyHandled{view->checkSizeConstraint(&tiny) == kResultTrue};
+            const bool hugeHandled{view->checkSizeConstraint(&huge) == kResultTrue};
+            const bool constrained{tinyHandled && hugeHandled
+                && tiny.getWidth() > 1 && tiny.getHeight() > 1
+                && huge.getWidth() < 20000 && huge.getHeight() < 20000
+                && tiny.getWidth() <= huge.getWidth()
+                && tiny.getHeight() <= huge.getHeight()};
+            CHECK(constrained,
+                  "the editor view constrains undersized and oversized host requests");
+            std::printf("  editor constrained bounds: %d x %d minimum, %d x %d maximum\n",
+                        tiny.getWidth(), tiny.getHeight(),
+                        huge.getWidth(), huge.getHeight());
+
+            IPlugViewContentScaleSupport* scaling{nullptr};
+            view->queryInterface(IPlugViewContentScaleSupport_iid,
+                                 reinterpret_cast<void**>(&scaling));
+            CHECK(scaling != nullptr,
+                  "the editor view exposes IPlugViewContentScaleSupport for host scaling");
+            if (scaling != nullptr) {
+                // JUCE answers kResultFalse on macOS on purpose: the window
+                // server applies the backing scale factor, so there is nothing
+                // for the plugin to do. Windows and Linux are where a host
+                // actually drives this. Assert the platform's own answer rather
+                // than a portable one, and require it to be consistent.
+                const tresult firstAnswer{scaling->setContentScaleFactor(1.0f)};
+                bool consistentAnswer{true};
+                for (const float factor : {1.25f, 2.0f, 1.0f})
+                    consistentAnswer = consistentAnswer
+                        && scaling->setContentScaleFactor(factor) == firstAnswer;
+               #if defined(__APPLE__)
+                const bool expectedAnswer{firstAnswer == kResultFalse};
+               #else
+                const bool expectedAnswer{firstAnswer == kResultTrue};
+               #endif
+                // The reported size is in logical units either way, so a scale
+                // change must not move it; a host that resized here would be
+                // fighting the plugin.
+                ViewRect afterScaling{};
+                const bool sizeStable{view->getSize(&afterScaling) == kResultTrue
+                    && afterScaling.getWidth() == defaultSize.getWidth()
+                    && afterScaling.getHeight() == defaultSize.getHeight()};
+                std::printf("  host content scale factor answer: %d (%s)\n",
+                            static_cast<int>(firstAnswer),
+                            firstAnswer == kResultTrue ? "applied by the plugin"
+                                                       : "declined; the OS scales");
+                CHECK(consistentAnswer && expectedAnswer && sizeStable,
+                      "host content scale factors get this platform's documented answer"
+                      " and leave the logical size unchanged");
+                scaling->release();
+            }
+            view->release();
+        }
     }
 
     if (processingMapping != nullptr)

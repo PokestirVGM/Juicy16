@@ -10,6 +10,7 @@
 #include "FluidSynthModel.h"
 #include "MidiConstants.h"
 #include "Util.h"
+#include "GuiConstants.h"
 
 #if JUCE_MAC || JUCE_IOS
   #include <CoreFoundation/CFString.h>
@@ -24,13 +25,15 @@ using namespace std;
 
 #include "DlsRepair.h"
 
+// Per-channel mixer controls. These are ordinary MIDI controllers that
+// FluidSynth's own default modulators already implement, so Juicy16 forwards
+// them and mirrors them into the UI rather than adding a modulator of its own.
+// Incoming MIDI stays authoritative exactly as it is for Bank Select and Program
+// Change: a value set in the editor is only a starting point, and the next
+// CC7/CC10 on that channel replaces it at that event's timestamp.
 const map<fluid_midi_control_change, String> FluidSynthModel::controllerToParam{
-    {SOUND_CTRL2, "filterResonance"}, // MIDI CC 71 Timbre/Harmonic Intensity (filter resonance)
-    {SOUND_CTRL3, "release"}, // MIDI CC 72 Release time
-    {SOUND_CTRL4, "attack"}, // MIDI CC 73 Attack time
-    {SOUND_CTRL5, "filterCutOff"}, // MIDI CC 74 Brightness (cutoff frequency, FILTERFC)
-    {SOUND_CTRL6, "decay"}, // MIDI CC 75 Decay Time
-    {SOUND_CTRL10, "sustain"}}; // MIDI CC 79 undefined
+    {VOLUME_MSB, "volume"}, // MIDI CC 7 Channel Volume
+    {PAN_MSB, "pan"}};      // MIDI CC 10 Pan
 
 const map<String, fluid_midi_control_change> FluidSynthModel::paramToController{[]{
     map<String, fluid_midi_control_change> map;
@@ -45,38 +48,34 @@ const map<String, fluid_midi_control_change> FluidSynthModel::paramToController{
 }()};
 
 // fixed index order for the audio-thread CC capture arrays
-const fluid_midi_control_change FluidSynthModel::ccIndexOrder[FluidSynthModel::kNumSoundCcs]{
-    SOUND_CTRL2, SOUND_CTRL3, SOUND_CTRL4, SOUND_CTRL5, SOUND_CTRL6, SOUND_CTRL10};
+const fluid_midi_control_change FluidSynthModel::ccIndexOrder[FluidSynthModel::kNumMixerCcs]{
+    VOLUME_MSB, PAN_MSB};
 thread_local bool FluidSynthModel::mirroringParameters{false};
 
-namespace {
-const std::array<FluidSynthModel::SoundControllerContract, 6> soundControllerContracts{{
-    {SOUND_CTRL2, "filterResonance", GEN_FILTERQ, FLUID_PEAK_ATTENUATION,
-     FLUID_MOD_CC | FLUID_MOD_BIPOLAR | FLUID_MOD_LINEAR | FLUID_MOD_POSITIVE},
-    {SOUND_CTRL3, "release", GEN_VOLENVRELEASE, 12000.0,
-     FLUID_MOD_CC | FLUID_MOD_BIPOLAR | FLUID_MOD_LINEAR | FLUID_MOD_POSITIVE},
-    {SOUND_CTRL4, "attack", GEN_VOLENVATTACK, 12000.0,
-     FLUID_MOD_CC | FLUID_MOD_BIPOLAR | FLUID_MOD_LINEAR | FLUID_MOD_POSITIVE},
-    {SOUND_CTRL5, "filterCutOff", GEN_FILTERFC, 2400.0,
-     FLUID_MOD_CC | FLUID_MOD_BIPOLAR | FLUID_MOD_LINEAR | FLUID_MOD_POSITIVE},
-    {SOUND_CTRL6, "decay", GEN_VOLENVDECAY, 12000.0,
-     FLUID_MOD_CC | FLUID_MOD_BIPOLAR | FLUID_MOD_LINEAR | FLUID_MOD_POSITIVE},
-    {SOUND_CTRL10, "sustain", GEN_VOLENVSUSTAIN, -1000.0,
-     FLUID_MOD_CC | FLUID_MOD_BIPOLAR | FLUID_MOD_LINEAR | FLUID_MOD_POSITIVE},
-}};
-}
 
 int FluidSynthModel::ccToIndex(int cc) {
-    for (int i = 0; i < kNumSoundCcs; ++i)
+    for (int i = 0; i < kNumMixerCcs; ++i)
         if (static_cast<int>(ccIndexOrder[i]) == cc)
             return i;
     return -1;
 }
 
+void FluidSynthModel::setOutputLevelDb(float decibels) {
+    // -inf at the bottom of the range rather than a very small gain, so a host
+    // automating the parameter to minimum actually silences the plugin.
+    const float gain{decibels <= GuiConstants::outputLevelMinDb
+        ? 0.0f
+        : juce::Decibels::decibelsToGain(decibels)};
+    outputLevelGain.store(gain, std::memory_order_relaxed);
+}
+
 int FluidSynthModel::defaultParamValue(const String& parameterID) {
-    // Sound controllers (attack/decay/sustain/release/cutoff/resonance) are neutral
-    // at 64 per the MIDI convention for CC70-79 (and FluidSynth initialises every
-    // channel's CC71-79 to 64). bank/preset default to 0.
+    // GM channel defaults, which are also FluidSynth's own channel initialisation
+    // values: volume 100, pan 64 (centre). bank/preset default to 0.
+    if (parameterID == "volume")
+        return MidiConstants::defaultChannelVolume;
+    if (parameterID == "pan")
+        return MidiConstants::centreValue;
     return programChangeParams.contains(parameterID) ? 0 : 64;
 }
 
@@ -127,13 +126,19 @@ FluidSynthModel::FluidSynthModel(
             lastKeyPressureValue[i][value].store(-1, std::memory_order_relaxed);
             lastKeyPressureSample[i][value].store(-1, std::memory_order_relaxed);
         }
-        for (int c = 0; c < kNumSoundCcs; c++) {
+        for (int c = 0; c < kNumMixerCcs; c++) {
             midiCcValue[i][c].store(-1, std::memory_order_relaxed);
-            engineCc[i][c].store(64, std::memory_order_relaxed);
+            // Seed from the same GM defaults the ValueTree and the parameters use,
+            // not a single shared constant: volume is 100 and pan is 64, and a
+            // reset SysEx re-asserts whatever is stored here.
+            engineCc[i][c].store(
+                defaultParamValue(controllerToParam.at(ccIndexOrder[c])),
+                std::memory_order_relaxed);
         }
     }
     valueTreeState.addParameterListener("bank", this);
     valueTreeState.addParameterListener("preset", this);
+    valueTreeState.addParameterListener("outputLevel", this);
     for (const auto &[param, controller]: paramToController) {
         valueTreeState.addParameterListener(param, this);
     }
@@ -154,6 +159,7 @@ FluidSynthModel::~FluidSynthModel() {
     }
     valueTreeState.removeParameterListener("bank", this);
     valueTreeState.removeParameterListener("preset", this);
+    valueTreeState.removeParameterListener("outputLevel", this);
     valueTreeState.state.removeListener(this);
 }
 
@@ -176,6 +182,17 @@ void FluidSynthModel::initialise() {
     // changes are rare but may overlap host rendering; this prevents concurrent
     // FluidSynth API calls from corrupting its internal state.
     fluid_settings_setint(settings.get(), "synth.threadsafe-api", 1);
+    // Generous polyphony so dense 16-channel multitimbral material never steals
+    // voices (voice stealing cuts note tails / harmonics).
+    //
+    // This MUST be a setting rather than a post-construction
+    // fluid_synth_set_polyphony call. new_fluid_synth sizes the rvoice event
+    // queue once, as polyphony * 64, and fluid_synth_set_polyphony grows only the
+    // voice array. Raising polyphony afterwards therefore left the queue sized for
+    // FluidSynth's default 256 while 512 voices fed it: above ~256 sounding voices
+    // it overflowed continuously, dropping rvoice events and emitting thousands of
+    // "Ringbuffer full" warnings per second. Measured with tools/perf_probe.cpp.
+    fluid_settings_setint(settings.get(), "synth.polyphony", maximumPolyphony);
     createSynth();
 }
 
@@ -187,71 +204,41 @@ void FluidSynthModel::createSynth() {
     //   which audibly rolls off the top octave; 7th-order preserves the high end for
     //   both SF2 and DLS.
     fluid_synth_set_interp_method(synth.get(), -1, FLUID_INTERP_HIGHEST);
-    // - Generous polyphony so dense 16-channel multitimbral material never steals
-    //   voices (voice stealing cuts note tails / harmonics).
-    fluid_synth_set_polyphony(synth.get(), 512);
+    // Polyphony comes from the settings above, before this synth existed.
 
-    // Output gain. FluidSynth's default is 0.2 (headroom for dense polyphony);
-    // the old value here was 2.0, which clips hard on 16-channel material —
-    // especially in the standalone, where the DAC clamps at 0 dBFS. 1.0 is still
-    // 5x FluidSynth's default and comfortably loud without guaranteed clipping.
-    fluid_synth_set_gain(synth.get(), 1.0);
-
-    // Sound-controller modulators (CC 71/72/73/74/75/79 -> filter + volume envelope).
+    // Output gain. FluidSynth's own default, and deliberately back to it.
     //
-    // MIDI (GS/XG convention) and FluidSynth itself treat sound controllers as
-    // "64 = no change": fluid_channel_init_ctrl() initialises CC70-79 to 64 on every
-    // channel. The old mods here were UNIPOLAR-from-zero, so a channel sitting at
-    // the spec-neutral 64 — or any MIDI file innocently sending CC74=64 — had its
-    // cutoff dropped ~an octave and its envelope times multiplied ~300x. Measured
-    // on a real SF2: −18.7 dB body level, −18.4 dB above 4 kHz, and notes still
-    // ringing 0.5 s after note-off. That was the plugin's "missing high end".
+    // This was 1.0 - five times the default - and that was the whole of the
+    // "dynamics sound wrong" report: measured on a real 52 s game rip, gain 1.0
+    // peaks at +7.3 dBFS with 0.39% of samples past full scale, and a four-note
+    // chord on all 16 channels reaches +20 dBFS. Once anything downstream clips,
+    // quiet notes rise relative to loud ones, CC7 automation stops doing anything
+    // above the ceiling, and hard clipping collapses the L/R difference that
+    // carries pan. At 0.2 the same rip peaks at -6.7 dBFS, which is the ordinary
+    // gain-staging target, and matches the loudness of every other FluidSynth
+    // based player. FluidSynth documents 0.2 as being low "to avoid the
+    // saturation of the output when many notes are played", and their own attempt
+    // to raise the default to 0.6 in 2.4.0 drew clipping reports.
     //
-    // These are BIPOLAR (64 = neutral, matching the MIDI convention), linear, with
-    // amounts spanning a musically useful range in each direction:
-    //   CC71 -> FILTERQ        ±960 cB   (FLUID_PEAK_ATTENUATION, full spec range)
-    //   CC72 -> VOLENVRELEASE  ±12000 tc (~÷1000..×1000; generator clamps at spec limits)
-    //   CC73 -> VOLENVATTACK   ±12000 tc
-    //   CC74 -> FILTERFC       ±2400 cents (up = brighter — the old unipolar amount
-    //                          was negative, so the "Cut" slider worked inverted)
-    //   CC75 -> VOLENVDECAY    ±12000 tc
-    //   CC79 -> VOLENVSUSTAIN  ∓1000 cB  (negative amount so slider up = louder sustain;
-    //                          the generator clamps to 0..1000 cB attenuation)
-    bool allSoundControllerModsReady{true};
-    for (const auto& contract : soundControllerContracts) {
-        unique_ptr<fluid_mod_t, decltype(&delete_fluid_mod)> mod{new_fluid_mod(), delete_fluid_mod};
-        fluid_mod_set_source1(mod.get(),
-                              contract.controller,
-                              contract.sourceFlags);
-        fluid_mod_set_source2(mod.get(), 0, 0);
-        fluid_mod_set_dest(mod.get(), contract.generator);
-        fluid_mod_set_amount(mod.get(), contract.amount);
-        const int result{
-            fluid_synth_add_default_mod(synth.get(), mod.get(), FLUID_SYNTH_ADD)};
-        allSoundControllerModsReady = allSoundControllerModsReady
-            && result == FLUID_OK;
-    }
-    soundControllerModsReady.store(allSoundControllerModsReady, std::memory_order_release);
-    // NOTE: no CC zeroing here — FluidSynth's per-channel init value of 64 is
-    // exactly our neutral point now.
+    // Users who want it louder use the outputLevel parameter, which is applied
+    // after rendering with smoothing, rather than by moving this.
+    fluid_synth_set_gain(synth.get(), 0.2f);
+
+    // No modulators are installed here any more.
+    //
+    // Juicy16 used to add its own CC71-79 -> filter/volume-envelope modulators,
+    // which no other SoundFont player applies: stock FluidSynth ignores CC71-79
+    // entirely. Measured against a real SF2, the amounts were wildly out of
+    // scale - CC73=127 stretched attack from 50 ms to 868 ms, CC75=127 raised the
+    // note tail by 43 dB, CC72=127 left a note ringing 48 dB above neutral a
+    // second after note-off, and CC71=127 attenuated the signal by 46 dB - while
+    // on DLS banks they did nothing at all, because FluidSynth's native DLS
+    // loader does not apply the default modulator list. Game rips commonly send
+    // those controllers, so the result was material that sounded flat and
+    // compressed only in this plugin. Every CC still reaches the synth; there is
+    // simply no Juicy16-specific modulator listening for it.
 }
 
-bool FluidSynthModel::getSoundControllerContract(
-    int controller,
-    SoundControllerContract& contract)
-{
-    for (const auto& candidate : soundControllerContracts) {
-        if (candidate.controller == controller) {
-            contract = candidate;
-            return true;
-        }
-    }
-    return false;
-}
-
-bool FluidSynthModel::soundControllerModulatorsReady() const {
-    return soundControllerModsReady.load(std::memory_order_acquire);
-}
 
 bool FluidSynthModel::getVoiceStateCounts(int requestedChannel,
                                           VoiceStateCounts& counts) const
@@ -278,13 +265,18 @@ bool FluidSynthModel::getVoiceStateCounts(int requestedChannel,
 
 void FluidSynthModel::prepareToPlay(double sampleRate, int samplesPerBlock) {
     setSampleRate(static_cast<float>(sampleRate));
+    // 20 ms is long enough that an automation jump is inaudible as a step and
+    // short enough that a deliberate move still feels immediate.
+    outputLevelSmoother.reset(sampleRate, 0.02);
+    outputLevelSmoother.setCurrentAndTargetValue(
+        outputLevelGain.load(std::memory_order_relaxed));
     // pre-allocate the mono-downmix scratch off the audio thread
     stereoScratch.setSize(2, jmax(64, samplesPerBlock), false, false, true);
 }
 
 const StringArray FluidSynthModel::programChangeParams{"bank", "preset"};
 const StringArray FluidSynthModel::perChannelParams{
-    "bank", "preset", "attack", "decay", "sustain", "release", "filterCutOff", "filterResonance"};
+    "bank", "preset", "volume", "pan"};
 
 void FluidSynthModel::syncProgParam(int ch, int preset) {
     juce::ScopedValueSetter<bool> guard{mirroringParameters, true};
@@ -392,6 +384,14 @@ void FluidSynthModel::parameterChanged(const String& parameterID, float /*newVal
     // re-sending it to the synth is at best redundant and at worst applies an
     // invalid intermediate program (bank set before preset), and saving it back
     // would clobber the tree we just read. Skip entirely.
+    if (parameterID == "outputLevel") {
+        // May arrive on the audio thread from host automation. Only stores an
+        // atomic; the smoothing happens in processBlock.
+        if (auto* p{dynamic_cast<juce::AudioParameterFloat*>(
+                valueTreeState.getParameter(parameterID))})
+            setOutputLevelDb(p->get());
+        return;
+    }
     if (mirroringParameters)
         return;
     if (int progCh{progParamChannel(parameterID)}; progCh >= 0) {
@@ -521,7 +521,7 @@ void FluidSynthModel::handleAsyncUpdate() {
         if ((ccMask & (1u << ch)) == 0)
             continue;
         ValueTree chNode{chPrograms.getChildWithProperty("num", ch)};
-        for (int idx = 0; idx < kNumSoundCcs; idx++) {
+        for (int idx = 0; idx < kNumMixerCcs; idx++) {
             const int value{midiCcValue[ch][idx].exchange(-1, std::memory_order_relaxed)};
             if (value < 0)
                 continue; // nothing pending for this CC
@@ -666,12 +666,23 @@ bool FluidSynthModel::getPitchWheelSensitivity(int channelToRead, int& semitones
     return fluid_synth_get_pitch_wheel_sens(synth.get(), channelToRead, &semitones) == FLUID_OK;
 }
 
+int FluidSynthModel::loadedFontBankOffset() const {
+    int offset{0};
+    return getLoadedFontBankOffset(offset) ? offset : 0;
+}
+
 bool FluidSynthModel::getChannelProgram(int channelToRead, int& bank, int& preset) const {
     if (channelToRead < 0 || channelToRead >= kNumChannels)
         return false;
     int soundFontId{-1};
-    return fluid_synth_get_program(
-        synth.get(), channelToRead, &soundFontId, &bank, &preset) == FLUID_OK;
+    int rawBank{0};
+    if (fluid_synth_get_program(
+            synth.get(), channelToRead, &soundFontId, &rawBank, &preset) != FLUID_OK)
+        return false;
+    // Reported in the font's own bank numbering, matching channelPrograms and the
+    // bank parameter. Raw engine banks stay inside applyProgramToEngine.
+    bank = rawBank - loadedFontBankOffset();
+    return true;
 }
 
 unsigned int FluidSynthModel::getProgramApplyFailureMask() const {
@@ -692,10 +703,15 @@ bool FluidSynthModel::getLastDispatchedNoteOnProgram(
     int channelToRead, int& bank, int& preset, int& sample) const {
     if (channelToRead < 0 || channelToRead >= kNumChannels)
         return false;
-    bank = lastNoteOnBank[channelToRead].load(std::memory_order_relaxed);
+    // The audio thread stores the raw engine bank; the offset conversion belongs
+    // here, where the FluidSynth API lock is safe to take.
+    const int rawBank{lastNoteOnBank[channelToRead].load(std::memory_order_relaxed)};
     preset = lastNoteOnPreset[channelToRead].load(std::memory_order_relaxed);
     sample = lastNoteOnSample[channelToRead].load(std::memory_order_relaxed);
-    return bank >= 0 && preset >= 0 && sample >= 0;
+    if (rawBank < 0 || preset < 0 || sample < 0)
+        return false;
+    bank = rawBank - loadedFontBankOffset();
+    return true;
 }
 
 bool FluidSynthModel::getLastDispatchedChannelPressure(
@@ -744,8 +760,62 @@ String FluidSynthModel::getLoadedFontPath() const {
         .getProperty("loadedPath", "").toString();
 }
 
+// Reads the voice limit back out of the settings the synth was constructed from,
+// which is the property that actually sizes FluidSynth's rvoice event queue.
+bool FluidSynthModel::getConfiguredPolyphony(int& configured, int& active) const {
+    if (settings == nullptr || synth == nullptr)
+        return false;
+    if (fluid_settings_getint(settings.get(), "synth.polyphony", &configured) != FLUID_OK)
+        return false;
+    active = fluid_synth_get_polyphony(synth.get());
+    return active > 0;
+}
+
+// CC124-127 are MIDI 1.0 channel-mode messages. FluidSynth implements them
+// faithfully, which means Omni Off and Mono On assign a group of consecutive
+// channels to a basic channel and DISABLE the rest: a single CC124 on channel 1
+// leaves only channel 1 responding, silent and unreadable everywhere else, until
+// the next reset.
+//
+// That is correct for a MIDI 1.0 sound module and wrong for Juicy16, whose
+// product contract is exactly 16 independent channels per instance. The
+// controller is still delivered to the engine above, so the "every CC0-127
+// reaches FluidSynth" contract holds; only the channel layout it would have
+// destroyed is put back.
+//
+// The restored layout is FluidSynth's own default: one basic channel at 0 in
+// OMNION_POLY whose group covers every MIDI channel. `val` 0 means "to MIDI
+// channel count minus 1". Audio thread; both calls take the FluidSynth API lock,
+// exactly like the fluid_synth_cc above, and channel-mode messages are rare.
+void FluidSynthModel::restoreSixteenChannelLayout(int controller) {
+    if (controller < MidiConstants::firstChannelModeCc || synth == nullptr)
+        return;
+    fluid_synth_reset_basic_channel(synth.get(), -1);
+    fluid_synth_set_basic_channel(
+        synth.get(), 0, FLUID_CHANNEL_MODE_OMNION_POLY, 0);
+}
+
+int FluidSynthModel::getSelectedChannel() const {
+    return static_cast<int>(channel.load(std::memory_order_relaxed));
+}
+
 bool FluidSynthModel::isSampleRateSupported() const {
     return sampleRateSupported.load(std::memory_order_acquire);
+}
+
+bool FluidSynthModel::getLoadedFontBankOffset(int& offset) const {
+    const int fontId{sfont_id.load(std::memory_order_acquire)};
+    if (fontId == -1 || synth == nullptr)
+        return false;
+    offset = fluid_synth_get_bank_offset(synth.get(), fontId);
+    return true;
+}
+
+bool FluidSynthModel::setLoadedFontBankOffset(int offset) {
+    const int fontId{sfont_id.load(std::memory_order_acquire)};
+    if (fontId == -1 || synth == nullptr)
+        return false;
+    return fluid_synth_set_bank_offset(synth.get(), fontId, offset) == FLUID_OK;
 }
 
 bool FluidSynthModel::unloadAndLoadFont(const String& absPath) {
@@ -1126,7 +1196,7 @@ void FluidSynthModel::dispatchSysEx(const uint8_t* payload, int payloadBytes) {
             enginePreset[ch].load(std::memory_order_relaxed),
             false,
             false);
-        for (int idx = 0; idx < kNumSoundCcs; ++idx)
+        for (int idx = 0; idx < kNumMixerCcs; ++idx)
             fluid_synth_cc(
                 synth.get(), ch, static_cast<int>(ccIndexOrder[idx]),
                 engineCc[ch][idx].load(std::memory_order_relaxed));
@@ -1178,6 +1248,7 @@ void FluidSynthModel::dispatchMidiEvent(const MidiMessage& m, int samplePosition
                 midiCh,
                 m.getControllerNumber(),
                 m.getControllerValue());
+            restoreSixteenChannelLayout(m.getControllerNumber());
 
             // Mirror mapped sound controllers (CC71-79) into the channel's saved
             // state + sliders. We are on the audio thread: parameter and ValueTree
@@ -1281,4 +1352,9 @@ void FluidSynthModel::processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiM
     }
 
     renderSamples(buffer, renderPosition, numSamples - renderPosition);
+
+    // Master trim, applied once over the whole block after every segment has been
+    // rendered. Smoothed so host automation cannot step the gain mid-block.
+    outputLevelSmoother.setTargetValue(outputLevelGain.load(std::memory_order_relaxed));
+    outputLevelSmoother.applyGain(buffer, numSamples);
 }

@@ -6,6 +6,36 @@ Juicy16 Beta 1 is pre-release audio software. Use copies of important DAW projec
 
 Do not download a candidate unless its release notes list your operating system, CPU architecture, DAW, and plugin format as tested. “Cross-platform” does not mean every OS/host combination is supported.
 
+## Is your setup supported? Check before downloading
+
+Answer all four. If any answer is no, this candidate is not for your machine, and
+nothing below applies.
+
+| | Supported | Not supported |
+| --- | --- | --- |
+| **Operating system** | macOS 11.0 or later; Windows 10 version 1607 or later | Anything older; Linux |
+| **CPU** | Apple Silicon (`arm64`) on macOS; `x86_64` on Windows | Intel Macs; Windows ARM64; 32-bit Windows |
+| **Plugin format** | AU and VST3 on macOS; VST3 on Windows | VST2; AUv3; standalone as a release format |
+| **Bank file** | SF2, SF3, DLS | Anything else |
+
+On macOS, `Apple menu > About This Mac` names the chip: "Apple M1/M2/M3/M4" is
+supported, "Intel" is not. On Windows, `Settings > System > About` must show
+"64-bit operating system, x64-based processor".
+
+Two further limits worth knowing before you spend time on this:
+
+- **The candidate is ad-hoc signed**, not Developer ID signed or notarized, so
+  macOS will refuse it until you clear quarantine. The exact command is in the
+  Gatekeeper section below. If you are not willing to do that, stop here.
+- **Which DAWs are actually validated is per candidate.** The release notes list
+  them. Approved *scope* is not the same as tested, and a host absent from that
+  list is untested rather than known-good.
+
+The full matrix — including sample rates, bank-format evidence, and what is
+explicitly out of scope — is [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md). Known
+limitations you should read before reporting a bug are in
+[KNOWN_ISSUES.md](KNOWN_ISSUES.md).
+
 ## Intended tester audience
 
 The first canary should be experienced macOS AU/VST3 and Windows VST3 users who can preserve 16-channel MIDI routing, identify Bank Select/Program Change events, restore a backup, and submit a minimal reproduction. The group should include FL Studio, Cubase, Logic, one additional AU host, and one additional VST3 host, plus users of SF2, SF3, conventional DLS, and known malformed DLS exports.
@@ -24,6 +54,23 @@ The tester count, invitation channel, support hours, and withdrawal owner requir
 8. Repeat after rewind, loop, stop/start, save/reopen, and beginning playback mid-song.
 9. Only then test a copy of an existing project.
 
+### Working without a mouse
+
+Every core workflow is reachable from the keyboard, so please report anything
+that is not — especially a host that swallows Tab before it reaches the editor.
+
+- Tab moves between the bank browse button, the 16-channel table, and the six
+  sound sliders.
+- On the channel table, up and down arrows select the MIDI channel the sliders
+  and status line follow.
+- Return on the selected row opens that channel's instrument list; arrows and
+  Return pick from it, and focus comes back to the table.
+- On a focused slider, arrows change the value.
+
+Screen-reader announcements are untested. Every control carries an accessible
+name, but nobody has yet run Juicy16 under VoiceOver or Narrator, so reports from
+that angle are especially useful.
+
 ## Installation
 
 Verify the download first. The archive ships with a `.sha256` file beside it, and `SHA256SUMS` inside covering every packaged file:
@@ -32,7 +79,10 @@ Verify the download first. The archive ships with a `.sha256` file beside it, an
 shasum -a 256 -c Juicy16-<version>-<candidate>-macos-arm64.zip.sha256
 ```
 
-Do not install a package whose filename contains `LOCAL-DIRTY` or `ADHOC`. Those labels mark local validation builds, not candidates for testing.
+Two labels can appear in the filename, and they mean different things:
+
+- `LOCAL-DIRTY` — built from an uncommitted working tree. **Never install one.** It cannot be traced to a commit, so a bug report against it is unreproducible.
+- `ADHOC` — ad-hoc signed rather than Developer ID signed. **Expected for Beta 1**, by an explicit release decision. It is why the Gatekeeper step below is required.
 
 Unpack the archive and copy the bundles into your user plug-in folders:
 
@@ -42,16 +92,42 @@ Unpack the archive and copy the bundles into your user plug-in folders:
 
 Back up any existing bundle at those paths before replacing it. Close every DAW first, then rescan plug-ins after copying.
 
-### macOS Gatekeeper
+### macOS Gatekeeper — required for every Beta 1 install
 
-Beta candidates are not yet Developer ID signed or notarized, so macOS will refuse to load the plug-in until you clear its quarantine attribute:
+Beta 1 is **ad-hoc signed by decision**: it carries a valid signature, but not a
+Developer ID one, and it is not notarized. macOS will therefore refuse to load it
+until you clear the quarantine attribute the download added. This is expected, not
+a fault in the download.
+
+**Verify the checksum first**, then:
 
 ```bash
 xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/Components/Juicy16.component
 xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/Juicy16.vst3
 ```
 
-Only do this for a bundle whose checksum you have verified against the one published with the candidate. If a DAW still refuses to load or validate the plug-in, report it with the exact host and macOS version rather than disabling wider security settings.
+Only ever do this for a bundle whose checksum you have verified against the one
+published with the candidate. Clearing quarantine tells macOS you vouch for the
+file, so the checksum is the thing standing in for the missing Developer ID
+signature.
+
+What you may see if you skip it:
+
+| Symptom | Meaning |
+|---|---|
+| The plug-in never appears in the DAW's list after a rescan | The host silently skipped a quarantined bundle |
+| *"Juicy16 cannot be opened because the developer cannot be verified"* | Quarantine is still set |
+| *"Juicy16 is damaged and can't be opened"* | Also usually quarantine, not actual corruption — verify the checksum, then clear it |
+| Logic or GarageBand reports the AU as failing validation | `auval` ran against a quarantined bundle |
+
+Confirm it worked with `xattr -p com.apple.quarantine <bundle>`, which should
+report that the attribute does not exist.
+
+If a DAW still refuses to load or validate the plug-in **after** clearing
+quarantine on a checksum-verified bundle, that is a real defect: report it with
+the exact host and macOS version. Do not disable System Integrity Protection or
+switch Gatekeeper off entirely — no Juicy16 problem requires that, and we will not
+ask you to.
 
 ## Support boundary
 

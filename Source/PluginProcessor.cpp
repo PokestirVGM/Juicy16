@@ -50,20 +50,17 @@ JuicySFAudioProcessor::JuicySFAudioProcessor()
     // no properties, no subtrees (yet)
     valueTreeState.state.appendChild({ "banks", {}, {} }, nullptr);
 
-    // one program assignment (instrument + ADSR/filter) per MIDI channel (0..15).
-    // Sound controllers default to 64 = neutral (MIDI convention for CC70-79).
+    // one assignment per MIDI channel (0..15): instrument, plus the mixer
+    // controls. Volume and pan default to the GM channel defaults, which are also
+    // FluidSynth's own channel initialisation values.
     ValueTree channelPrograms{ "channelPrograms" };
     for (int i = 0; i < 16; i++) {
         channelPrograms.appendChild({ "ch", {
             { "num", i },
             { "bank", i == 9 ? 128 : 0 },
             { "preset", 0 },
-            { "attack", 64 },
-            { "decay", 64 },
-            { "sustain", 64 },
-            { "release", 64 },
-            { "filterCutOff", 64 },
-            { "filterResonance", 64 }
+            { "volume", MidiConstants::defaultChannelVolume },
+            { "pan", MidiConstants::centreValue }
         }, {} }, nullptr);
     }
     valueTreeState.state.appendChild(channelPrograms, nullptr);
@@ -102,9 +99,6 @@ struct DiscreteParameterInt final : public AudioParameterInt {
 };
 
 AudioProcessorValueTreeState::ParameterLayout JuicySFAudioProcessor::createParameterLayout() {
-    // Sound-controller params default to 64 = neutral (bipolar modulators; the MIDI
-    // convention for CC70-79). 0/127 are full negative/positive modulation.
-    const int neutral{64};
     AudioProcessorValueTreeState::ParameterLayout layout;
     const auto intParam = [] (const String& id, const String& name,
                               int minimum, int maximum, int defaultValue,
@@ -120,12 +114,24 @@ AudioProcessorValueTreeState::ParameterLayout JuicySFAudioProcessor::createParam
         intParam("bank", "which bank is selected in the SoundFont", MidiConstants::midiMinValue, 128, MidiConstants::midiMinValue, "Bank"),
         // note: banks may be sparse, and lack a 0th preset. so defend against this.
         intParam("preset", "which patch (program/instrument) is selected in the SoundFont", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, MidiConstants::midiMinValue, "Preset"),
-        intParam("attack", "volume envelope attack time", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, neutral, "A"),
-        intParam("decay", "volume envelope decay time", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, neutral, "D"),
-        intParam("sustain", "volume envelope sustain level", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, neutral, "S"),
-        intParam("release", "volume envelope release time", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, neutral, "R"),
-        intParam("filterCutOff", "low-pass filter cut-off frequency", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, neutral, "Cut"),
-        intParam("filterResonance", "low-pass filter resonance", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, neutral, "Res"));
+        // Per-channel mixer controls for the selected channel. Incoming CC7/CC10
+        // on any channel overwrite these, exactly as Program Change overwrites a
+        // manual instrument pick.
+        intParam("volume", "channel volume (CC7) for the selected MIDI channel",
+                 MidiConstants::midiMinValue, MidiConstants::midiMaxValue,
+                 MidiConstants::defaultChannelVolume, "Vol"),
+        intParam("pan", "pan (CC10) for the selected MIDI channel",
+                 MidiConstants::midiMinValue, MidiConstants::midiMaxValue,
+                 MidiConstants::centreValue, "Pan"));
+
+    // Master output trim. Not a MIDI controller and not per channel: it is the
+    // user's gain-staging control over the whole plugin, applied after rendering.
+    layout.add(make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"outputLevel", 1}, "master output level",
+        juce::NormalisableRange<float>{GuiConstants::outputLevelMinDb,
+                                       GuiConstants::outputLevelMaxDb, 0.1f},
+        0.0f,
+        juce::AudioParameterFloatAttributes{}.withLabel("Out")));
 
     // Per-channel program parameters ("progCh1".."progCh16"), each in its own
     // parameter group. Two purposes:
@@ -306,8 +312,9 @@ void JuicySFAudioProcessor::getStateInformation (MemoryBlock& destData)
 
     // Create an outer XML element..
     XmlElement xml{"MYPLUGINSETTINGS"};
-    // v2: sound-controller values are bipolar with 64 = neutral (older saves stored
-    // unipolar values where 0 was neutral — those are not restored, see setStateInformation)
+    // v3: per-channel state is bank/preset plus the mixer controls volume and pan.
+    // v1 and v2 stored six CC71-79 sound-controller values instead; those are read
+    // as absent rather than migrated (see setStateInformation).
     xml.setAttribute("stateVersion", currentStateVersion);
 
     // Store the values of all our parameters, using their param ID as the XML attribute
@@ -334,16 +341,19 @@ void JuicySFAudioProcessor::getStateInformation (MemoryBlock& destData)
         }
     }
     {
-        // per-channel instrument + ADSR/filter assignments
+        // per-channel instrument + mixer assignments
         ValueTree tree{valueTreeState.state.getChildWithName("channelPrograms")};
         XmlElement* channelProgramsElement{xml.createNewChildElement("channelPrograms")};
         for (int i = 0; i < tree.getNumChildren(); i++) {
             ValueTree ch{tree.getChild(i)};
             XmlElement* chElement{channelProgramsElement->createNewChildElement("ch")};
             chElement->setAttribute("num", static_cast<int>(ch.getProperty("num", i)));
-            for (const String& p : { "bank", "preset", "attack", "decay",
-                                     "sustain", "release", "filterCutOff", "filterResonance" }) {
-                chElement->setAttribute(p, static_cast<int>(ch.getProperty(p, 0)));
+            // Driven off the model's own list so the writer and the reader cannot
+            // drift apart when the per-channel schema changes.
+            for (const String& p : FluidSynthModel::perChannelParams) {
+                chElement->setAttribute(
+                    p, static_cast<int>(
+                           ch.getProperty(p, FluidSynthModel::defaultParamValue(p))));
             }
         }
     }
@@ -394,14 +404,13 @@ void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInByt
                     nullptr);
                 return;
             }
-            // Pre-v2 saves stored sound-controller values with unipolar semantics
-            // (0 = neutral); v2 is bipolar (64 = neutral). Restoring old values
-            // unchanged would apply full negative modulation, so old saves keep
-            // their bank/preset assignments but reset the six sound controllers
-            // to the new neutral.
-            const bool restoreSoundCtrls{stateVersion >= 2};
-            const StringArray soundCtrlParams{ "attack", "decay", "sustain",
-                                               "release", "filterCutOff", "filterResonance" };
+            // v3 replaced the six per-channel sound controllers (CC71-79) with
+            // volume and pan (CC7/CC10). A v1 or v2 save has no volume/pan
+            // attributes at all, so those channels simply keep the GM defaults
+            // this instance was constructed with; the obsolete attributes are
+            // ignored rather than migrated, because there is no meaningful
+            // mapping from an envelope control to a mixer control.
+            const bool restoreMixer{stateVersion >= 3};
             // Restore per-channel assignments BEFORE the soundFont, so that the
             // font load (triggered below) re-applies them to the synth.
             {
@@ -412,9 +421,8 @@ void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInByt
                         int num{chElement->getIntAttribute("num", -1)};
                         ValueTree ch{tree.getChildWithProperty("num", num)};
                         if (ch.isValid()) {
-                            for (const String& p : { "bank", "preset", "attack", "decay",
-                                                     "sustain", "release", "filterCutOff", "filterResonance" }) {
-                                if (!restoreSoundCtrls && soundCtrlParams.contains(p))
+                            for (const String& p : FluidSynthModel::perChannelParams) {
+                                if (!restoreMixer && (p == "volume" || p == "pan"))
                                     continue;
                                 const int maximum{p == "bank" ? 128 : MidiConstants::midiMaxValue};
                                 const int restored{chElement->getIntAttribute(
@@ -467,8 +475,8 @@ void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInByt
             if (params) {
                 for (auto* param : getParameters()) {
                     if (auto* p = dynamic_cast<AudioProcessorParameterWithID*>(param)) {
-                        if (!restoreSoundCtrls && soundCtrlParams.contains(p->paramID))
-                            continue; // pre-v2 save: leave sound controllers at neutral
+                        if (!restoreMixer && (p->paramID == "volume" || p->paramID == "pan"))
+                            continue; // pre-v3 save has no mixer values; keep GM defaults
                         p->setValueNotifyingHost(static_cast<float>(params->getDoubleAttribute(p->paramID, p->getValue())));
                     }
                 }

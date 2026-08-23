@@ -73,10 +73,59 @@ void addSixteenChannelChords(juce::MidiBuffer& midi)
                 (channel - 1) * 4);
 }
 
+// One channel holding one note: the light end of the range, and the figure a
+// tester should compare against when a single instance feels expensive.
+void addSingleNote(juce::MidiBuffer& midi)
+{
+    midi.addEvent(juce::MidiMessage::noteOn(1, 60, static_cast<juce::uint8>(100)), 0);
+}
+
+// Drives the engine at its configured 512-voice ceiling. A preset may build a
+// note from more than one voice, so the note count is an upper bound on notes,
+// not on voices; the probe reports what FluidSynth actually allocated.
+constexpr int voiceCeiling{512};
+
+void addVoiceCeilingChords(juce::MidiBuffer& midi, int blockSize, bool sameTimestamp)
+{
+    constexpr int notesPerChannel{voiceCeiling / 16};
+    int index{0};
+    for (int channel = 1; channel <= 16; ++channel)
+        for (int note = 0; note < notesPerChannel; ++note, ++index)
+            midi.addEvent(
+                juce::MidiMessage::noteOn(
+                    channel, 36 + note * 2, static_cast<juce::uint8>(100)),
+                sameTimestamp ? 0 : (index * blockSize) / voiceCeiling);
+}
+
+// A block's worth of the automation a busy game rip produces: a Program Change
+// and five controllers on every channel, all timestamped within the block.
+void addAutomationStorm(juce::MidiBuffer& midi, int blockSize, int programOffset)
+{
+    for (int channel = 1; channel <= 16; ++channel) {
+        const int base{((channel - 1) * blockSize) / 16};
+        midi.addEvent(
+            juce::MidiMessage::programChange(channel, (programOffset + channel) % 128),
+            base);
+        for (const int controller : {1, 7, 10, 11, 74}) {
+            midi.addEvent(
+                juce::MidiMessage::controllerEvent(
+                    channel, controller, (programOffset * 7 + controller) % 128),
+                juce::jmin(base + controller, blockSize - 1));
+        }
+        midi.addEvent(
+            juce::MidiMessage::pitchWheel(channel, (programOffset * 512) % 16384),
+            juce::jmin(base + 6, blockSize - 1));
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv)
 {
+    // Line-buffered so FluidSynth's unbuffered stderr interleaves correctly with
+    // the section headers when a CI job captures both streams.
+    std::setvbuf(stdout, nullptr, _IOLBF, 0);
+
     juce::ScopedJuceInitialiser_GUI juceInitialiser;
     if (argc != 2) {
         std::fprintf(stderr, "usage: JuicySFPerfProbe <bank.dls|sf2|sf3>\n");
@@ -142,6 +191,112 @@ int main(int argc, char** argv)
               blockSize == 64
                   ? "renders faster than realtime at the smallest tested block"
                   : "renders faster than realtime");
+    }
+
+    std::printf("\n-- render throughput, one channel sounding --\n");
+    {
+        constexpr int blockSize{64};
+        JuicySFAudioProcessor processor;
+        processor.prepareToPlay(sampleRate, blockSize);
+        const auto state{stateFor(bank.getFullPathName())};
+        processor.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
+
+        juce::AudioBuffer<float> audio{2, blockSize};
+        juce::MidiBuffer opening;
+        addSingleNote(opening);
+        audio.clear();
+        processor.processBlock(audio, opening);
+
+        const int blocks{static_cast<int>(sampleRate * 5.0 / blockSize)};
+        const double start{juce::Time::getMillisecondCounterHiRes()};
+        for (int block = 0; block < blocks; ++block) {
+            juce::MidiBuffer empty;
+            audio.clear();
+            processor.processBlock(audio, empty);
+        }
+        const double elapsedMs{juce::Time::getMillisecondCounterHiRes() - start};
+        const double audioMs{blocks * blockSize * 1000.0 / sampleRate};
+        std::printf("  block %4d: %6.0f ms cpu for %6.0f ms audio (%.1f%% of realtime)\n",
+                    blockSize, elapsedMs, audioMs, 100.0 * elapsedMs / audioMs);
+        check(elapsedMs < audioMs,
+              "one channel renders faster than realtime at the smallest tested block");
+    }
+
+    std::printf("\n-- voice ceiling stress --\n");
+    for (const bool sameTimestamp : {true, false}) {
+        std::printf("  %s\n", sameTimestamp
+            ? "all note-ons at one timestamp:" : "note-ons spread across the block:");
+        constexpr int blockSize{64};
+        JuicySFAudioProcessor processor;
+        processor.prepareToPlay(sampleRate, blockSize);
+        const auto state{stateFor(bank.getFullPathName())};
+        processor.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
+
+        juce::AudioBuffer<float> audio{2, blockSize};
+        juce::MidiBuffer opening;
+        addVoiceCeilingChords(opening, blockSize, sameTimestamp);
+        audio.clear();
+        processor.processBlock(audio, opening);
+
+        int playing{0};
+        auto& model{processor.getFluidSynthModel()};
+        for (int channel = 0; channel < 16; ++channel) {
+            FluidSynthModel::VoiceStateCounts counts;
+            if (model.getVoiceStateCounts(channel, counts))
+                playing += counts.playing;
+        }
+
+        const int blocks{static_cast<int>(sampleRate * 5.0 / blockSize)};
+        const double start{juce::Time::getMillisecondCounterHiRes()};
+        for (int block = 0; block < blocks; ++block) {
+            juce::MidiBuffer empty;
+            audio.clear();
+            processor.processBlock(audio, empty);
+        }
+        const double elapsedMs{juce::Time::getMillisecondCounterHiRes() - start};
+        const double audioMs{blocks * blockSize * 1000.0 / sampleRate};
+        std::printf("  %d note-ons -> %d voices playing\n", voiceCeiling, playing);
+        std::printf("  block %4d: %6.0f ms cpu for %6.0f ms audio (%.1f%% of realtime)\n",
+                    blockSize, elapsedMs, audioMs, 100.0 * elapsedMs / audioMs);
+        // The ceiling must be reachable, or the stress case is not the stress
+        // case. Voice stealing below it would be a silent downgrade.
+        check(playing > voiceCeiling / 2,
+              "dense material reaches a substantial fraction of the 512-voice ceiling");
+        check(elapsedMs < audioMs,
+              "the voice ceiling renders faster than realtime at the smallest tested block");
+    }
+
+    std::printf("\n-- program change and controller automation --\n");
+    {
+        constexpr int blockSize{64};
+        JuicySFAudioProcessor processor;
+        processor.prepareToPlay(sampleRate, blockSize);
+        const auto state{stateFor(bank.getFullPathName())};
+        processor.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
+
+        juce::AudioBuffer<float> audio{2, blockSize};
+        juce::MidiBuffer opening;
+        addSixteenChannelChords(opening);
+        audio.clear();
+        processor.processBlock(audio, opening);
+
+        const int blocks{static_cast<int>(sampleRate * 5.0 / blockSize)};
+        const double start{juce::Time::getMillisecondCounterHiRes()};
+        for (int block = 0; block < blocks; ++block) {
+            juce::MidiBuffer midi;
+            addAutomationStorm(midi, blockSize, block);
+            audio.clear();
+            processor.processBlock(audio, midi);
+        }
+        const double elapsedMs{juce::Time::getMillisecondCounterHiRes() - start};
+        const double audioMs{blocks * blockSize * 1000.0 / sampleRate};
+        const int events{blocks * 16 * 7};
+        std::printf("  %d events (%d per block: 16 program changes, 80 CCs, 16 bends)\n",
+                    events, 16 * 7);
+        std::printf("  block %4d: %6.0f ms cpu for %6.0f ms audio (%.1f%% of realtime)\n",
+                    blockSize, elapsedMs, audioMs, 100.0 * elapsedMs / audioMs);
+        check(elapsedMs < audioMs,
+              "continuous program-change and controller automation renders faster than realtime");
     }
 
     // Reloading the same path would not notify, the ValueTree property being

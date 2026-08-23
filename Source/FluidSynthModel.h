@@ -70,6 +70,22 @@ public:
     // at a stale rate and producing incorrectly pitched audio.
     bool isSampleRateSupported() const;
 
+    // Which MIDI channel the shared bank/preset/sound-control parameters edit,
+    // zero-based. Read-only view of uiState.selectedChannel.
+    int getSelectedChannel() const;
+
+    // Voice limit as configured and as the synth reports it. FluidSynth sizes its
+    // rvoice event queue from the settings value at construction, so the two must
+    // agree or dense material silently drops engine events.
+    bool getConfiguredPolyphony(int& configured, int& active) const;
+
+    // FluidSynth supports a per-font bank offset, so every program path here
+    // converts between the raw engine bank and the font's own logical bank.
+    // Juicy16 never sets an offset, which would leave that conversion untested;
+    // these let the offline harness install one. Message thread, processing stopped.
+    bool getLoadedFontBankOffset(int& offset) const;
+    bool setLoadedFontBankOffset(int offset);
+
     struct VoiceStateCounts {
         int playing{0};
         int on{0};
@@ -81,20 +97,10 @@ public:
     // processing; FluidSynth voice pointers are sampled and consumed internally.
     bool getVoiceStateCounts(int channel, VoiceStateCounts& counts) const;
 
-    struct SoundControllerContract {
-        int controller{-1};
-        String parameterId;
-        int generator{-1};
-        double amount{0.0};
-        int sourceFlags{0};
-    };
-
-    // Read-only contract/health diagnostics for the six plugin-defined default
-    // modulators. These let release tests freeze their neutral point, destination,
-    // and direction without exposing the FluidSynth instance itself.
-    static bool getSoundControllerContract(int controller,
-                                           SoundControllerContract& contract);
-    bool soundControllerModulatorsReady() const;
+    // Master output level in dB, applied after rendering with smoothing so a
+    // host automating it cannot produce a step discontinuity. FluidSynth's own
+    // gain stays at its documented default; this is the user-facing trim.
+    void setOutputLevelDb(float decibels);
 
     // invoked on the message thread after refreshBanks rebuilds the `banks` tree
     // (font load/unload). Used to push program names to the VST3 unit interface.
@@ -129,10 +135,13 @@ public:
     static String progParamId(int chZeroBased);
     static int progParamChannel(const String& parameterID);
 
+    // Every parameter stored independently per MIDI channel. Public so the state
+    // writer and reader in PluginProcessor share one definition of the per-channel
+    // schema instead of repeating it and drifting.
+    static const StringArray perChannelParams;
+
 private:
     static const StringArray programChangeParams;
-    // every parameter that is stored independently per MIDI channel
-    static const StringArray perChannelParams;
 
     // True only on the thread synchronously mirroring engine/channel state into
     // parameters. Thread-local storage avoids suppressing unrelated host automation
@@ -170,9 +179,18 @@ private:
     void syncAppliedProgramOnMessageThread(int midiCh,
                                            const AppliedProgram& applied);
     void recordProgramApplyFailure(int midiCh);
+    // Undo the basic-channel reconfiguration a CC124-127 channel-mode message
+    // performs, which would otherwise disable most of the 16 channels. No-op for
+    // every other controller. Audio thread.
+    void restoreSixteenChannelLayout(int controller);
+    // The loaded font's FluidSynth bank offset, or 0 when no font is loaded.
+    // Message thread only: FluidSynth takes its API lock to answer.
+    int loadedFontBankOffset() const;
 
+    // Voice ceiling. Dense 16-channel material must never steal voices.
+    static constexpr int maximumPolyphony{512};
     static constexpr int kNumChannels{16};
-    static constexpr int kNumSoundCcs{6}; // CC71,72,73,74,75,79 (see ccIndexOrder)
+    static constexpr int kNumMixerCcs{2}; // CC7 volume, CC10 pan (see ccIndexOrder)
 
     // shared audio-thread path for "set this channel's program" (MIDI PC or the
     // VST3 progChN parameters): applies to the synth and captures the result for
@@ -200,17 +218,20 @@ private:
 
     static bool isSystemResetSysex(const uint8_t* data, int size);
 
-    // per-channel sound-controller values captured on the audio thread when a
-    // mapped CC (71/72/73/74/75/79) arrives; −1 = nothing pending. Consumed on the
-    // message thread in handleAsyncUpdate — ValueTree/param writes must NOT happen
-    // on the audio thread.
-    std::atomic<int> midiCcValue[kNumChannels][kNumSoundCcs];
+    // per-channel mixer values captured on the audio thread when a mapped CC
+    // (7 volume / 10 pan) arrives; −1 = nothing pending. Consumed on the message
+    // thread in handleAsyncUpdate — ValueTree/param writes must NOT happen on the
+    // audio thread.
+    std::atomic<int> midiCcValue[kNumChannels][kNumMixerCcs];
     std::atomic<unsigned int> midiCcDirtyMask{0}; // bit per channel
-    std::atomic<bool> soundControllerModsReady{false};
-    // Last value actually sent to the synth for the six exposed sound CCs. Reset
+    // Last value actually sent to the synth for the exposed mixer CCs. Reset
     // SysEx restoration reads only these atomics, so it cannot race a newer MIDI
     // event by consulting stale message-thread ValueTrees.
-    std::atomic<int> engineCc[kNumChannels][kNumSoundCcs];
+    std::atomic<int> engineCc[kNumChannels][kNumMixerCcs];
+    // Master trim. Written from the message thread or a host automation thread,
+    // read on the audio thread; the smoother lives on the audio thread only.
+    std::atomic<float> outputLevelGain{1.0f};
+    juce::SmoothedValue<float> outputLevelSmoother;
     // Exact input trace used by the offline conformance suite. These atomics are
     // diagnostics only; synthesis behavior still comes from FluidSynth.
     std::atomic<int> lastCcValue[kNumChannels][128];
@@ -222,7 +243,7 @@ private:
     std::atomic<int> lastChannelPressureSample[kNumChannels];
     std::atomic<int> lastKeyPressureValue[kNumChannels][128];
     std::atomic<int> lastKeyPressureSample[kNumChannels][128];
-    static const fluid_midi_control_change ccIndexOrder[kNumSoundCcs];
+    static const fluid_midi_control_change ccIndexOrder[kNumMixerCcs];
     static int ccToIndex(int cc); // −1 if not one of ours
 
 

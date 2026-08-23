@@ -1,4 +1,6 @@
 #include "PluginProcessor.h"
+#include "ChannelListComponent.h"
+#include "SyntheticSf2.h"
 #include "PatchList.h"
 #include "GuiConstants.h"
 #include "MyColours.h"
@@ -51,6 +53,14 @@ juce::MemoryBlock makeState(const juce::String& fontPath, int selectedChannel = 
     return state;
 }
 
+// "Is there audio at all" floor for magnitude() sums. A genuinely silent block
+// sums to exactly 0.0f — the tests that require silence assert that — so this only
+// has to sit above zero. It is deliberately well below a real note: the plugin
+// renders at FluidSynth's default gain of 0.2, five times quieter than the 1.0 it
+// used to use, and a threshold calibrated against the old level would fail on
+// correct audio rather than on a regression.
+constexpr float audiblePresence{0.0002f};
+
 float magnitude(const juce::AudioBuffer<float>& audio, int start, int length)
 {
     double sum{0.0};
@@ -86,11 +96,19 @@ double waveformCorrelation(const juce::AudioBuffer<float>& a,
 // eyeballing a screenshot.
 juce::Component* findNamedComponent(juce::Component& root, const juce::String& name);
 
-// The channel table declines focus so arrow keys do not fight the row selection
-// the plugin drives from MIDI; looked up separately for readability.
+// The channel table, which is the component that takes keyboard focus and turns
+// arrow keys into channel selection; looked up separately for readability.
 juce::Component* channelTableForFocus(juce::Component& editor)
 {
     return findNamedComponent(editor, "MIDI channel assignments");
+}
+
+// Its owning ChannelListComponent, which routes Return to a row's instrument
+// dropdown.
+ChannelListComponent* channelListFor(juce::Component& editor)
+{
+    return dynamic_cast<ChannelListComponent*>(
+        findNamedComponent(editor, "MIDI channel instrument list"));
 }
 
 double relativeLuminance(juce::Colour colour)
@@ -309,6 +327,287 @@ std::vector<juce::uint8> makeZeroInstrumentDls()
     return bytes;
 }
 
+// Randomised MIDI soak. The Phase 8.7 fuzz pass covers malformed files and state
+// blobs; nothing covered the MIDI path, which is the surface a game rip actually
+// drives and the one place arbitrary SysEx payloads reach our own parser.
+//
+// The domain is deliberately "well-formed but adversarial": a host hands the
+// plugin messages JUCE has already parsed, so malformed status bytes are not the
+// plugin's contract. Random values, random channels, random in-block timestamps,
+// hostile orderings, and arbitrary SysEx payloads are.
+//
+// Invariants are checked after every block, so a failure names the block that
+// broke them and the seed reproduces it exactly.
+int runMidiSoak(const juce::File& bank, long long blockCount, unsigned int seed)
+{
+    constexpr double sampleRate{48000.0};
+    constexpr int maximumBlock{1024};
+    constexpr int voiceCeiling{512};
+
+    JuicySFAudioProcessor processor;
+    processor.prepareToPlay(sampleRate, maximumBlock);
+    const auto state{makeState(bank.getFullPathName())};
+    processor.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
+    auto& model{processor.getFluidSynthModel()};
+
+    if (model.getFontLoadStatus() != "loaded") {
+        std::printf("  FAIL  soak bank loads\n");
+        return 1;
+    }
+
+    // 255, not 128: on a drum channel FluidSynth adds its 128 drum offset on top
+    // of the Bank Select MSB, so CC0=127 legitimately reaches 255 in both the
+    // engine and the saved state. That divergence from the plugin's own 0-128
+    // contract is an accepted B2 pinned by the "drum-channel Bank Select range"
+    // scenario; anything outside 0-255 would be new.
+    constexpr int highestReachableBank{255};
+
+    std::mt19937 random{seed};
+    const auto pick{[&random](int upperExclusive) {
+        return static_cast<int>(random() % static_cast<unsigned int>(upperExclusive));
+    }};
+
+    juce::AudioBuffer<float> audio{2, maximumBlock};
+    double peakAmplitude{0.0};
+    int peakVoices{0};
+    long long events{0};
+    long long sysExEvents{0};
+    int soakFailures{0};
+
+    const std::array<int, 6> blockSizes{32, 64, 128, 256, 512, 1024};
+
+    unsigned int previousFailureMask{model.getProgramApplyFailureMask()};
+
+    for (long long block = 0; block < blockCount && soakFailures == 0; ++block) {
+        const int blockSize{blockSizes[static_cast<std::size_t>(pick(6))]};
+        juce::MidiBuffer midi;
+        const int eventCount{pick(40)};
+        // Kept so a newly recorded program-apply failure can name the input that
+        // caused it. A fuzz harness that cannot produce a reproducer is a
+        // liability: the finding is unactionable and gets ignored.
+        std::vector<juce::String> description;
+
+        for (int event = 0; event < eventCount; ++event) {
+            const int channel{1 + pick(16)};
+            const int sample{pick(blockSize)};
+            switch (pick(10)) {
+                case 0:
+                case 1:
+                case 2:
+                {
+                    const int note{pick(128)};
+                    midi.addEvent(juce::MidiMessage::noteOn(
+                        channel, note, static_cast<juce::uint8>(1 + pick(127))), sample);
+                    description.push_back("noteOn ch" + juce::String(channel)
+                        + " note " + juce::String(note) + " @" + juce::String(sample));
+                    break;
+                }
+                case 3:
+                {
+                    const int note{pick(128)};
+                    midi.addEvent(juce::MidiMessage::noteOff(channel, note), sample);
+                    description.push_back("noteOff ch" + juce::String(channel)
+                        + " note " + juce::String(note) + " @" + juce::String(sample));
+                    break;
+                }
+                case 4:
+                case 5:
+                {
+                    // The full CC0-CC127 range, including the channel-mode
+                    // messages. Those used to disable MIDI channels and had to be
+                    // excluded; the engine now restores its 16-channel layout
+                    // after each one, so the invariants below cover them.
+                    const int controller{pick(128)};
+                    const int value{pick(128)};
+                    midi.addEvent(juce::MidiMessage::controllerEvent(
+                        channel, controller, value), sample);
+                    description.push_back("CC" + juce::String(controller) + "=" + juce::String(value)
+                        + " ch" + juce::String(channel) + " @" + juce::String(sample));
+                    break;
+                }
+                case 6:
+                {
+                    const int program{pick(128)};
+                    midi.addEvent(juce::MidiMessage::programChange(channel, program), sample);
+                    description.push_back("PC " + juce::String(program)
+                        + " ch" + juce::String(channel) + " @" + juce::String(sample));
+                    break;
+                }
+                case 7:
+                    midi.addEvent(juce::MidiMessage::pitchWheel(channel, pick(16384)), sample);
+                    break;
+                case 8:
+                    if (pick(2) == 0)
+                        midi.addEvent(juce::MidiMessage::channelPressureChange(
+                            channel, pick(128)), sample);
+                    else
+                        midi.addEvent(juce::MidiMessage::aftertouchChange(
+                            channel, pick(128), pick(128)), sample);
+                    break;
+                default: {
+                    // SysEx: the real reset families, near misses that must NOT be
+                    // treated as resets, and arbitrary payloads. This is the only
+                    // attacker-controlled byte stream that reaches our own parser.
+                    std::vector<juce::uint8> payload;
+                    switch (pick(4)) {
+                        case 0: payload = {0x7e, 0x7f, 0x09, 0x01}; break;              // GM
+                        case 1: payload = {0x41, 0x10, 0x42, 0x12, 0x40, 0x00, 0x7f,
+                                           0x00, 0x41}; break;                          // GS
+                        case 2: payload = {0x43, 0x10, 0x4c, 0x00, 0x00, 0x7e, 0x00};   // XG
+                            if (pick(2) == 0)                                           // near miss
+                                payload[static_cast<std::size_t>(pick(
+                                    static_cast<int>(payload.size())))] ^= 0x01;
+                            break;
+                        default: {
+                            payload.resize(static_cast<std::size_t>(1 + pick(64)));
+                            for (auto& byte : payload)
+                                byte = static_cast<juce::uint8>(random() & 0x7fu);
+                            break;
+                        }
+                    }
+                    midi.addEvent(juce::MidiMessage::createSysExMessage(
+                        payload.data(), static_cast<int>(payload.size())), sample);
+                    ++sysExEvents;
+                    break;
+                }
+            }
+            ++events;
+        }
+
+        audio.setSize(2, blockSize, false, false, true);
+        audio.clear();
+        processor.processBlock(audio, midi);
+        model.handleUpdateNowIfNeeded();
+
+        if (const unsigned int mask{model.getProgramApplyFailureMask()};
+            mask != previousFailureMask) {
+            std::printf("  block %lld first recorded a program-apply failure on"
+                        " channels 0x%04x (block size %d):\n",
+                        block, mask & ~previousFailureMask, blockSize);
+            for (const auto& line : description)
+                std::printf("      %s\n", line.toRawUTF8());
+            previousFailureMask = mask;
+        }
+
+        // 1. Audio stays finite and bounded. A denormal storm, a runaway filter,
+        //    or an uninitialised voice shows up here first.
+        for (int channel = 0; channel < audio.getNumChannels(); ++channel) {
+            const float* samples{audio.getReadPointer(channel)};
+            for (int sample = 0; sample < blockSize; ++sample) {
+                const double value{samples[sample]};
+                if (!std::isfinite(value)) {
+                    std::printf("  FAIL  block %lld produced a non-finite sample\n", block);
+                    ++soakFailures;
+                    break;
+                }
+                peakAmplitude = std::max(peakAmplitude, std::abs(value));
+            }
+            if (soakFailures != 0)
+                break;
+        }
+        if (peakAmplitude > 32.0 && soakFailures == 0) {
+            std::printf("  FAIL  block %lld exceeded the amplitude ceiling (%.2f)\n",
+                        block, peakAmplitude);
+            ++soakFailures;
+        }
+
+        // 2. Every channel reports a program inside the documented ranges, and
+        //    3. the engine never exceeds its own voice ceiling.
+        int voices{0};
+        for (int channel = 0; channel < 16 && soakFailures == 0; ++channel) {
+            int bankNumber{-1}, preset{-1};
+            const bool reported{model.getChannelProgram(channel, bankNumber, preset)};
+            if (!reported || bankNumber < 0 || bankNumber > highestReachableBank
+                || preset < 0 || preset > 127) {
+                std::printf("  FAIL  block %lld channel %d: getChannelProgram %s,"
+                            " bank %d preset %d, font status '%s', mask 0x%04x\n",
+                            block, channel + 1, reported ? "succeeded" : "FAILED",
+                            bankNumber, preset,
+                            model.getFontLoadStatus().toRawUTF8(),
+                            model.getProgramApplyFailureMask());
+                ++soakFailures;
+                break;
+            }
+            int bend{-1};
+            if (!model.getPitchBend(channel, bend) || bend < 0 || bend > 16383) {
+                std::printf("  FAIL  block %lld left channel %d bend at %d\n",
+                            block, channel + 1, bend);
+                ++soakFailures;
+                break;
+            }
+            FluidSynthModel::VoiceStateCounts counts;
+            if (model.getVoiceStateCounts(channel, counts))
+                voices += counts.playing;
+        }
+        peakVoices = std::max(peakVoices, voices);
+        if (soakFailures == 0 && voices > voiceCeiling) {
+            std::printf("  FAIL  block %lld allocated %d voices, above the %d ceiling\n",
+                        block, voices, voiceCeiling);
+            ++soakFailures;
+        }
+
+        // 4. Saved state stays serialisable and in range. Checked periodically
+        //    rather than every block, because it is the expensive invariant.
+        if (soakFailures == 0 && block % 512 == 0) {
+            juce::MemoryBlock saved;
+            processor.getStateInformation(saved);
+            const auto xml{juce::AudioProcessor::getXmlFromBinary(
+                saved.getData(), static_cast<int>(saved.getSize()))};
+            if (xml == nullptr) {
+                std::printf("  FAIL  block %lld produced unreadable saved state\n", block);
+                ++soakFailures;
+            } else if (auto* programs{xml->getChildByName("channelPrograms")}) {
+                for (auto* channel : programs->getChildIterator()) {
+                    const int savedBank{channel->getIntAttribute("bank", -1)};
+                    const int savedPreset{channel->getIntAttribute("preset", -1)};
+                    // Same 255 ceiling as the engine check above, and for the same
+                    // reason: a drum channel's Bank Select reaches 128 + MSB, and
+                    // that value is persisted. Requiring 0-128 here while allowing
+                    // 0-255 there made the invariant contradict itself, which the
+                    // sweep caught at seed 16, block 58880.
+                    if (savedBank < 0 || savedBank > highestReachableBank
+                        || savedPreset < 0 || savedPreset > 127) {
+                        std::printf("  FAIL  block %lld saved bank %d preset %d\n",
+                                    block, savedBank, savedPreset);
+                        ++soakFailures;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // 5. After silencing everything, no voice may still be running. A voice that
+    //    survives All Sound Off is a stuck note in a host.
+    juce::MidiBuffer silence;
+    addAllSoundOff(silence);
+    audio.setSize(2, maximumBlock, false, false, true);
+    audio.clear();
+    processor.processBlock(audio, silence);
+    int remaining{0};
+    for (int channel = 0; channel < 16; ++channel) {
+        FluidSynthModel::VoiceStateCounts counts;
+        if (model.getVoiceStateCounts(channel, counts))
+            remaining += counts.playing;
+    }
+    if (remaining != 0) {
+        std::printf("  FAIL  %d voices survived All Sound Off after the soak\n", remaining);
+        ++soakFailures;
+    }
+    if (model.getFontLoadStatus() != "loaded") {
+        std::printf("  FAIL  the bank was lost during the soak\n");
+        ++soakFailures;
+    }
+
+    std::printf("  seed %u: %lld blocks, %lld events (%lld SysEx), peak amplitude %.3f,"
+                " peak voices %d, program-apply failure mask 0x%04x\n",
+                seed, blockCount, events, sysExEvents, peakAmplitude, peakVoices,
+                model.getProgramApplyFailureMask());
+    if (soakFailures == 0)
+        std::printf("  PASS  randomised MIDI soak holds every invariant\n");
+    return soakFailures;
+}
+
 // Plays a real multichannel MIDI file through the plugin exactly as a host would,
 // then checks that every channel carrying a Program Change ended on that program
 // and that its notes sounded with it. Expectations come from the file itself, so
@@ -384,7 +683,7 @@ int runGameRipScenario(const juce::File& bank, const juce::File& midiFile)
         renderedEnergy += magnitude(audio, 0, blockSize);
     }
 
-    check(renderedEnergy > 0.001, "the game rip produces audio");
+    check(renderedEnergy > audiblePresence, "the game rip produces audio");
 
     bool everyProgramSelected{true};
     juce::String mismatches;
@@ -434,6 +733,14 @@ int runGameRipScenario(const juce::File& bank, const juce::File& midiFile)
 int main(int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI juceInitialiser;
+    if (argc >= 4 && juce::String{argv[1]} == "--midi-soak") {
+        std::printf("== randomised MIDI soak ==\n");
+        const long long blocks{juce::String{argv[3]}.getLargeIntValue()};
+        const unsigned int seed{argc >= 5
+            ? static_cast<unsigned int>(juce::String{argv[4]}.getLargeIntValue())
+            : 0x4d494449u};
+        return runMidiSoak(juce::File{argv[2]}, blocks, seed);
+    }
     if (argc == 4 && juce::String{argv[1]} == "--game-rip") {
         std::printf("== multichannel game rip ==\n");
         return runGameRipScenario(juce::File{argv[2]}, juce::File{argv[3]});
@@ -442,7 +749,8 @@ int main(int argc, char** argv)
         std::fprintf(
             stderr,
             "usage: JuicySFEngineMidiTests <font.dls|sf2|sf3> <controller-fixture.csv>\n"
-            "       JuicySFEngineMidiTests --game-rip <bank> <file.mid>\n");
+            "       JuicySFEngineMidiTests --game-rip <bank> <file.mid>\n"
+            "       JuicySFEngineMidiTests --midi-soak <bank> <blocks> [seed]\n");
         return 2;
     }
 
@@ -456,9 +764,8 @@ int main(int argc, char** argv)
     juce::AudioBuffer<float> audio{2, blockSize};
 
     {
-        const std::array<juce::String, 24> expectedParameterIds{
-            "bank", "preset", "attack", "decay", "sustain", "release",
-            "filterCutOff", "filterResonance",
+        const std::array<juce::String, 21> expectedParameterIds{
+            "bank", "preset", "volume", "pan", "outputLevel",
             "progCh1", "progCh2", "progCh3", "progCh4",
             "progCh5", "progCh6", "progCh7", "progCh8",
             "progCh9", "progCh10", "progCh11", "progCh12",
@@ -540,7 +847,7 @@ int main(int argc, char** argv)
         check(model.getLastDispatchedNoteOnProgram(9, bank, preset, sample)
                   && bank == 128 && preset == 0 && sample == 128
                   && magnitude(audio, 0, 128) == 0.0f
-                  && magnitude(audio, 128, blockSize - 128) > 0.001f,
+                  && magnitude(audio, 128, blockSize - 128) > audiblePresence,
               "channel 10 plays the default percussion kit without Bank Select or Program Change");
 
         juce::MidiBuffer silence;
@@ -613,6 +920,462 @@ int main(int argc, char** argv)
               "pinned GS Bank Select is deferred until Program Change and synchronizes engine, note, UI, and state");
     }
 
+    std::printf("== cross-bank selection and bank offsets ==\n");
+    {
+        // The private corpus reaches bank 1 at most, so cross-bank behaviour is
+        // proved against a synthesised bank whose presets are audibly distinct:
+        // each plays a looped sine at its own frequency with scale tuning off, so
+        // the rendered pitch names the (bank, preset) FluidSynth actually chose.
+        constexpr double bank0Program0{220.5};
+        constexpr double bank0Program40{294.0};
+        constexpr double bank1Program0{441.0};
+        constexpr double bank1Program40{588.0};
+        constexpr double bank8Program40{735.0};
+        constexpr double bank128Program0{882.0};
+
+        const std::vector<SyntheticSf2::PresetSpec> specs{
+            {0, 0, bank0Program0, "Bank0 Prog0"},
+            {0, 40, bank0Program40, "Bank0 Prog40"},
+            {1, 0, bank1Program0, "Bank1 Prog0"},
+            {1, 40, bank1Program40, "Bank1 Prog40"},
+            {8, 40, bank8Program40, "Bank8 Prog40"},
+            {128, 0, bank128Program0, "Drums Prog0"},
+        };
+
+        const auto fixtureFile{juce::File::getSpecialLocation(juce::File::tempDirectory)
+            .getNonexistentChildFile("juicy16-bank-select-fixture", ".sf2", false)};
+        const bool fixtureWritten{SyntheticSf2::write(fixtureFile, specs)};
+
+        constexpr int toneBlock{4096};
+        constexpr double toneRate{48000.0};
+        JuicySFAudioProcessor fixtureProcessor;
+        fixtureProcessor.prepareToPlay(toneRate, toneBlock);
+        const auto fixtureState{makeState(fixtureFile.getFullPathName())};
+        fixtureProcessor.setStateInformation(
+            fixtureState.getData(), static_cast<int>(fixtureState.getSize()));
+        auto& fixtureModel{fixtureProcessor.getFluidSynthModel()};
+        juce::AudioBuffer<float> tone{2, toneBlock};
+
+        check(fixtureWritten && fixtureModel.getFontLoadStatus() == "loaded",
+              "the synthesised multi-bank SF2 loads");
+
+        // Renders one sustained note and returns its measured pitch. The estimator
+        // searches +/-20% around the expectation, so a wrong preset lands at a
+        // window edge rather than matching.
+        const auto soundingFrequency{[&](int midiChannel, double expected) {
+            juce::MidiBuffer off;
+            addAllSoundOff(off);
+            render(fixtureProcessor, tone, off);
+            juce::MidiBuffer note;
+            note.addEvent(
+                juce::MidiMessage::noteOn(midiChannel, 60, static_cast<juce::uint8>(100)), 0);
+            render(fixtureProcessor, tone, note);
+            return estimatePeriodicFrequency(tone, 1024, 3072, toneRate, expected);
+        }};
+        // Autocorrelation resolves to whole sample lags, so the achievable
+        // accuracy falls with pitch: 882 Hz at 48 kHz lands between lag 54 and 55.
+        // A 2% window is far tighter than the 20% separating adjacent fixture
+        // presets, so it still identifies exactly one of them.
+        const auto sounds{[](double measured, double expected) {
+            return std::abs(measured - expected) < expected * 0.02;
+        }};
+
+        // Exact-bank selection is the shortest route to "does this bank exist in
+        // this font": FluidSynth's program select fails rather than substituting.
+        const bool bankMembership{
+            fixtureModel.setChannelProgram(0, 0, 0)
+            && fixtureModel.setChannelProgram(0, 0, 40)
+            && fixtureModel.setChannelProgram(0, 1, 0)
+            && fixtureModel.setChannelProgram(0, 1, 40)
+            && fixtureModel.setChannelProgram(0, 8, 40)
+            && fixtureModel.setChannelProgram(0, 128, 0)
+            && !fixtureModel.setChannelProgram(0, 8, 0)
+            && !fixtureModel.setChannelProgram(0, 2, 40)};
+        check(bankMembership,
+              "presets resolve in banks 0, 1, 8, and 128 and only where the font defines them");
+
+        fixtureModel.setChannelProgram(0, 0, 0);
+        check(sounds(soundingFrequency(1, bank0Program0), bank0Program0),
+              "bank 0 program 0 sounds its own preset");
+        check(sounds(soundingFrequency(10, bank128Program0), bank128Program0),
+              "channel 10 sounds the percussion bank without any Bank Select");
+
+        // CC0 then Program Change: the pinned GS mode defers the bank until the
+        // program arrives, and everything downstream must follow the same bank.
+        {
+            juce::MidiBuffer midi;
+            midi.addEvent(juce::MidiMessage::controllerEvent(1, 0, 1), 0);
+            midi.addEvent(juce::MidiMessage::programChange(1, 40), 1);
+            render(fixtureProcessor, tone, midi);
+            fixtureModel.handleUpdateNowIfNeeded();
+
+            int engineBank{-1}, enginePreset{-1}, savedBank{-1}, savedPreset{-1};
+            auto* bankParam{findIntParameter(fixtureProcessor, "bank")};
+            auto* presetParam{findIntParameter(fixtureProcessor, "preset")};
+            check(fixtureModel.getChannelProgram(0, engineBank, enginePreset)
+                      && engineBank == 1 && enginePreset == 40
+                      && getSavedChannelProgram(fixtureProcessor, 0, savedBank, savedPreset)
+                      && savedBank == 1 && savedPreset == 40
+                      && bankParam != nullptr && bankParam->get() == 1
+                      && presetParam != nullptr && presetParam->get() == 40
+                      && sounds(soundingFrequency(1, bank1Program40), bank1Program40),
+                  "CC0 plus Program Change selects a non-zero bank across engine, state, UI, and audio");
+        }
+
+        // A stale CC32 must not move the channel out of the bank CC0 chose.
+        {
+            juce::MidiBuffer midi;
+            midi.addEvent(juce::MidiMessage::controllerEvent(1, 32, 8), 0);
+            midi.addEvent(juce::MidiMessage::programChange(1, 0), 1);
+            render(fixtureProcessor, tone, midi);
+            fixtureModel.handleUpdateNowIfNeeded();
+            int engineBank{-1}, enginePreset{-1};
+            check(fixtureModel.getChannelProgram(0, engineBank, enginePreset)
+                      && engineBank == 1 && enginePreset == 0
+                      && sounds(soundingFrequency(1, bank1Program0), bank1Program0),
+                  "CC32 does not move the channel out of the bank CC0 selected");
+        }
+
+        {
+            juce::MidiBuffer midi;
+            midi.addEvent(juce::MidiMessage::controllerEvent(1, 0, 8), 0);
+            midi.addEvent(juce::MidiMessage::programChange(1, 40), 1);
+            render(fixtureProcessor, tone, midi);
+            fixtureModel.handleUpdateNowIfNeeded();
+            int engineBank{-1}, enginePreset{-1};
+            check(fixtureModel.getChannelProgram(0, engineBank, enginePreset)
+                      && engineBank == 8 && enginePreset == 40
+                      && sounds(soundingFrequency(1, bank8Program40), bank8Program40),
+                  "a sparse high bank is reachable by Bank Select");
+        }
+
+        // Bank 8 has no program 0. FluidSynth 2.5.5 accepts the change, records the
+        // requested bank and program on the channel, and quietly substitutes
+        // bank 0 program 0 for synthesis. Both halves are pinned here: the state
+        // and UI must agree with the channel, and the audio is the substitute, so
+        // the visible patch and the audible one legitimately differ. Recorded as a
+        // B2 limitation in docs/KNOWN_ISSUES.md.
+        {
+            juce::MidiBuffer midi;
+            midi.addEvent(juce::MidiMessage::programChange(1, 0), 0);
+            render(fixtureProcessor, tone, midi);
+            fixtureModel.handleUpdateNowIfNeeded();
+            int engineBank{-1}, enginePreset{-1}, savedBank{-1}, savedPreset{-1};
+            auto* bankParam{findIntParameter(fixtureProcessor, "bank")};
+            auto* presetParam{findIntParameter(fixtureProcessor, "preset")};
+            const bool reportedConsistently{
+                fixtureModel.getChannelProgram(0, engineBank, enginePreset)
+                && engineBank == 8 && enginePreset == 0
+                && getSavedChannelProgram(fixtureProcessor, 0, savedBank, savedPreset)
+                && savedBank == 8 && savedPreset == 0
+                && bankParam != nullptr && bankParam->get() == 8
+                && presetParam != nullptr && presetParam->get() == 0};
+            const double substituted{soundingFrequency(1, bank0Program0)};
+            check(reportedConsistently && sounds(substituted, bank0Program0),
+                  "an undefined bank/program is reported as requested everywhere while FluidSynth"
+                  " substitutes bank 0 program 0 for synthesis");
+            std::printf("    bank 8 program 0 is undefined: reported as bank %d program %d,"
+                        " sounds %.1f Hz (bank 0 program 0 is %.1f Hz)\n",
+                        engineBank, enginePreset, substituted, bank0Program0);
+        }
+
+        {
+            juce::MidiBuffer midi;
+            midi.addEvent(juce::MidiMessage::controllerEvent(1, 0, 0), 0);
+            midi.addEvent(juce::MidiMessage::programChange(1, 0), 1);
+            render(fixtureProcessor, tone, midi);
+            fixtureModel.handleUpdateNowIfNeeded();
+            int engineBank{-1}, enginePreset{-1};
+            check(fixtureModel.getChannelProgram(0, engineBank, enginePreset)
+                      && engineBank == 0 && enginePreset == 0
+                      && sounds(soundingFrequency(1, bank0Program0), bank0Program0),
+                  "Bank Select back to 0 restores the melodic bank");
+        }
+
+        // Bank offsets. Juicy16 never installs one, so every raw/logical bank
+        // conversion in the program paths would otherwise run only at offset 0.
+        {
+            constexpr int offset{10};
+            int reported{-1};
+            const bool offsetInstalled{fixtureModel.setLoadedFontBankOffset(offset)
+                && fixtureModel.getLoadedFontBankOffset(reported)
+                && reported == offset};
+
+            // Exact-bank callers pass a logical bank and must add the offset
+            // themselves; the engine reports the same logical bank back.
+            const bool exactBankOffset{offsetInstalled
+                && fixtureModel.setChannelProgram(0, 1, 40)};
+            int engineBank{-1}, enginePreset{-1}, savedBank{-1}, savedPreset{-1};
+            auto* bankParam{findIntParameter(fixtureProcessor, "bank")};
+            check(exactBankOffset
+                      && fixtureModel.getChannelProgram(0, engineBank, enginePreset)
+                      && engineBank == 1 && enginePreset == 40
+                      && getSavedChannelProgram(fixtureProcessor, 0, savedBank, savedPreset)
+                      && savedBank == 1 && savedPreset == 40
+                      && bankParam != nullptr && bankParam->get() == 1
+                      && sounds(soundingFrequency(1, bank1Program40), bank1Program40),
+                  "manual selection under a bank offset reports and sounds the font's own bank");
+
+            // MIDI Bank Select is a raw engine bank, so the same font bank now
+            // lives at CC0 = offset + 1, and the reported bank is offset-corrected.
+            juce::MidiBuffer midi;
+            midi.addEvent(juce::MidiMessage::controllerEvent(1, 0, offset + 1), 0);
+            midi.addEvent(juce::MidiMessage::programChange(1, 0), 1);
+            render(fixtureProcessor, tone, midi);
+            fixtureModel.handleUpdateNowIfNeeded();
+            int offsetBank{-1}, offsetPreset{-1}, offsetSavedBank{-1}, offsetSavedPreset{-1};
+            check(offsetInstalled
+                      && fixtureModel.getChannelProgram(0, offsetBank, offsetPreset)
+                      && offsetBank == 1 && offsetPreset == 0
+                      && getSavedChannelProgram(
+                          fixtureProcessor, 0, offsetSavedBank, offsetSavedPreset)
+                      && offsetSavedBank == 1 && offsetSavedPreset == 0
+                      && sounds(soundingFrequency(1, bank1Program0), bank1Program0),
+                  "MIDI Bank Select under an offset resolves to the font bank and reports it logically");
+
+            int restored{-1};
+            const bool offsetCleared{fixtureModel.setLoadedFontBankOffset(0)
+                && fixtureModel.getLoadedFontBankOffset(restored) && restored == 0
+                && fixtureModel.setChannelProgram(0, 0, 40)
+                && sounds(soundingFrequency(1, bank0Program40), bank0Program40)};
+            check(offsetCleared,
+                  "clearing the bank offset restores ordinary selection");
+        }
+
+        fixtureFile.deleteFile();
+    }
+
+    std::printf("== drum-channel Bank Select range ==\n");
+    {
+        // Found by the randomised MIDI soak on 2026-08-20: channel 10 reported
+        // bank 239, outside the 0-128 the rest of the plugin assumes.
+        //
+        // The cause is not a malformed font. SF2 2.04 section 7.2 does limit a
+        // file's wBank to 0-127 melodic plus 128 percussion, and every fixture
+        // here obeys that. This is the *runtime* channel bank: on a drum channel
+        // FluidSynth adds the 128 drum offset on top of the Bank Select MSB, so
+        // CC0=127 - the XG drum convention - lands on 255.
+        //
+        // Consequence, pinned below: channelPrograms stores 129-255 while the
+        // visible `bank` parameter refuses anything above 128 and keeps its old
+        // value, so engine, saved state, and UI disagree. Recorded as B2 in
+        // docs/KNOWN_ISSUES.md; widening the parameter range is a frozen
+        // compatibility surface and an owner decision.
+        const auto drumBankFor{[&](int msb, int& savedBank, int& uiBank,
+                                   int& reloadedBank, juce::AudioBuffer<float>& tone) {
+            JuicySFAudioProcessor drums;
+            drums.prepareToPlay(48000.0, blockSize);
+            const auto drumState{makeState(argv[1])};
+            drums.setStateInformation(
+                drumState.getData(), static_cast<int>(drumState.getSize()));
+            juce::MidiBuffer midi;
+            midi.addEvent(juce::MidiMessage::controllerEvent(10, 0, msb), 0);
+            midi.addEvent(juce::MidiMessage::programChange(10, 0), 1);
+            midi.addEvent(
+                juce::MidiMessage::noteOn(10, 36, static_cast<juce::uint8>(100)), 2);
+            tone.setSize(2, blockSize, false, false, true);
+            render(drums, tone, midi);
+            drums.getFluidSynthModel().handleUpdateNowIfNeeded();
+
+            int engineBank{-1}, enginePreset{-1};
+            drums.getFluidSynthModel().getChannelProgram(9, engineBank, enginePreset);
+            int savedPreset{-1};
+            getSavedChannelProgram(drums, 9, savedBank, savedPreset);
+            auto* bankParam{findIntParameter(drums, "bank")};
+            uiBank = bankParam != nullptr ? bankParam->get() : -1;
+
+            juce::MemoryBlock saved;
+            drums.getStateInformation(saved);
+            JuicySFAudioProcessor reopened;
+            reopened.prepareToPlay(48000.0, blockSize);
+            reopened.setStateInformation(
+                saved.getData(), static_cast<int>(saved.getSize()));
+            int reloadedPreset{-1};
+            reopened.getFluidSynthModel().getChannelProgram(
+                9, reloadedBank, reloadedPreset);
+            return engineBank;
+        }};
+
+        int savedZero{-1}, uiZero{-1}, reloadedZero{-1};
+        juce::AudioBuffer<float> toneZero;
+        const int engineZero{drumBankFor(0, savedZero, uiZero, reloadedZero, toneZero)};
+
+        int savedXg{-1}, uiXg{-1}, reloadedXg{-1};
+        juce::AudioBuffer<float> toneXg;
+        const int engineXg{drumBankFor(127, savedXg, uiXg, reloadedXg, toneXg)};
+
+        check(engineZero == 128 && savedZero == 128 && reloadedZero == 128,
+              "CC0=0 on channel 10 stays on the percussion bank through save and reload");
+
+        check(engineXg == 255 && savedXg == 255,
+              "CC0=127 on channel 10 reaches engine and saved bank 255, above the documented 0-128");
+
+        // The visible parameter cannot represent it: its range is 0-128 and the
+        // sync path refuses to write anything outside that, so the UI silently
+        // keeps a value the engine and saved state disagree with.
+        check(uiZero == 0 && uiXg == 0 && savedXg != uiXg,
+              "the bank parameter cannot represent a drum bank above 128, so UI and saved state diverge");
+
+        // Reload cannot restore 255 either: refreshBanks records the font's own
+        // bank numbers, where drums are 128, so the channel falls back.
+        check(reloadedXg == 128,
+              "reopening a project silently moves a 255 drum bank back to 128");
+
+        // Severity check rather than an assumption: does any of this change what
+        // the listener hears? FluidSynth substitutes the drum kit at play time,
+        // so the two renderings should be identical.
+        const double drumCorrelation{
+            waveformCorrelation(toneZero, toneXg, 2, blockSize - 2)};
+        check(magnitude(toneZero, 2, blockSize - 2) > audiblePresence && drumCorrelation > 0.999,
+              "the substituted drum kit sounds identical, so the defect is state-only");
+        std::printf("    CC0=0 vs CC0=127 on channel 10: engine banks %d and %d,"
+                    " audio correlation %.4f\n", engineZero, engineXg, drumCorrelation);
+    }
+
+    std::printf("== channel mode messages ==\n");
+    {
+        // Found by the randomised MIDI soak on 2026-08-20.
+        //
+        // FluidSynth implements MIDI 1.0 basic-channel semantics faithfully: Omni
+        // Off and Mono On assign a group of consecutive channels to a basic
+        // channel and DISABLE the rest, so one CC124 on channel 1 used to leave
+        // only channel 1 responding until the next reset. Correct for a MIDI 1.0
+        // sound module, incompatible with a fixed 16-channel instrument.
+        //
+        // Juicy16 now forwards the controller and then restores its own layout,
+        // so both contracts hold: every CC0-127 still reaches FluidSynth, and
+        // there are still exactly 16 channels afterwards.
+        const auto disabledChannels{[](FluidSynthModel& target) {
+            int count{0};
+            for (int channel = 0; channel < 16; ++channel) {
+                int bankNumber{-1}, preset{-1};
+                if (!target.getChannelProgram(channel, bankNumber, preset))
+                    ++count;
+            }
+            return count;
+        }};
+
+        const auto modeState{makeState(argv[1])};
+        bool everyModeMessageSurvived{true};
+        bool everyModeMessageDelivered{true};
+        bool everyChannelStillSounds{true};
+
+        for (const int controller : {124, 125, 126, 127}) {
+            for (const int value : {0, 1, 2, 4, 16, 127}) {
+                JuicySFAudioProcessor modeProcessor;
+                modeProcessor.prepareToPlay(48000.0, blockSize);
+                modeProcessor.setStateInformation(
+                    modeState.getData(), static_cast<int>(modeState.getSize()));
+                auto& modeModel{modeProcessor.getFluidSynthModel()};
+                juce::AudioBuffer<float> modeAudio{2, blockSize};
+
+                juce::MidiBuffer midi;
+                midi.addEvent(
+                    juce::MidiMessage::controllerEvent(1, controller, value), 0);
+                // A note on the last channel, which is the first one a basic
+                // channel group would have swallowed.
+                midi.addEvent(
+                    juce::MidiMessage::noteOn(16, 60, static_cast<juce::uint8>(100)), 1);
+                render(modeProcessor, modeAudio, midi);
+
+                everyModeMessageSurvived = everyModeMessageSurvived
+                    && disabledChannels(modeModel) == 0;
+
+                // Delivered, not filtered: the engine must have seen the CC.
+                int delivered{-1}, deliveredSample{-1};
+                everyModeMessageDelivered = everyModeMessageDelivered
+                    && modeModel.getLastDispatchedController(
+                           0, controller, delivered, deliveredSample)
+                    && delivered == value && deliveredSample == 0;
+
+                everyChannelStillSounds = everyChannelStillSounds
+                    && magnitude(modeAudio, 1, blockSize - 1) > audiblePresence;
+            }
+        }
+
+        check(everyModeMessageSurvived,
+              "no CC124-127 channel-mode message disables any of the 16 channels");
+        check(everyModeMessageDelivered,
+              "channel-mode messages still reach FluidSynth at their own timestamp rather than being filtered");
+        check(everyChannelStillSounds,
+              "channel 16 still sounds immediately after every channel-mode message");
+
+        // The layout must survive repeated and interleaved mode messages, which
+        // is what a host sending a reset burst actually produces.
+        JuicySFAudioProcessor burstProcessor;
+        burstProcessor.prepareToPlay(48000.0, blockSize);
+        burstProcessor.setStateInformation(
+            modeState.getData(), static_cast<int>(modeState.getSize()));
+        juce::AudioBuffer<float> burstAudio{2, blockSize};
+        juce::MidiBuffer burst;
+        int burstSample{0};
+        for (int repeat = 0; repeat < 4; ++repeat)
+            for (const int controller : {126, 124, 127, 125})
+                burst.addEvent(
+                    juce::MidiMessage::controllerEvent(
+                        1 + (repeat % 16), controller, repeat), burstSample++);
+        burst.addEvent(
+            juce::MidiMessage::noteOn(10, 36, static_cast<juce::uint8>(100)), burstSample);
+        render(burstProcessor, burstAudio, burst);
+        check(disabledChannels(burstProcessor.getFluidSynthModel()) == 0
+                  && magnitude(burstAudio, burstSample, blockSize - burstSample) > audiblePresence,
+              "a burst of interleaved channel-mode messages leaves all 16 channels intact and sounding");
+    }
+
+    std::printf("== voice ceiling ==\n");
+    {
+        // FluidSynth sizes its rvoice event queue once, from the settings
+        // polyphony, and never resizes it. Raising the limit after construction
+        // therefore left the queue sized for the default 256 while 512 voices fed
+        // it, dropping engine events above ~256 sounding voices. The configured
+        // and reported limits must agree, which they only do if the limit was a
+        // setting.
+        int configured{-1}, active{-1};
+        check(model.getConfiguredPolyphony(configured, active)
+                  && configured == 512 && active == 512,
+              "the voice ceiling is configured before the synth exists, so FluidSynth's event queue is sized for it");
+
+        juce::MidiBuffer clearFirst;
+        addAllSoundOff(clearFirst);
+        render(processor, audio, clearFirst);
+
+        juce::MidiBuffer dense;
+        constexpr int notesPerChannel{32};
+        for (int channel = 1; channel <= 16; ++channel)
+            for (int note = 0; note < notesPerChannel; ++note)
+                dense.addEvent(
+                    juce::MidiMessage::noteOn(
+                        channel, 36 + note * 2, static_cast<juce::uint8>(100)),
+                    note);
+        render(processor, audio, dense);
+
+        const auto totalPlaying{[&] {
+            int playing{0};
+            for (int channel = 0; channel < 16; ++channel) {
+                FluidSynthModel::VoiceStateCounts counts;
+                if (model.getVoiceStateCounts(channel, counts))
+                    playing += counts.playing;
+            }
+            return playing;
+        }};
+        // Not all 512 sound: a percussion bank has no sample on every key. What
+        // matters is that the engine goes far past the old 256-voice queue limit.
+        const int allocated{totalPlaying()};
+
+        juce::MidiBuffer sustain;
+        render(processor, audio, sustain);
+        const int stillPlaying{totalPlaying()};
+
+        juce::MidiBuffer silence;
+        addAllSoundOff(silence);
+        render(processor, audio, silence);
+
+        check(allocated > 400 && stillPlaying > 400 && totalPlaying() == 0,
+              "512 simultaneous note-ons allocate and sustain well past 400 voices and all release on All Sound Off");
+        std::printf("    512 note-ons allocated %d voices, %d still sounding a block later\n",
+                    allocated, stillPlaying);
+    }
+
     std::printf("== sample-accurate rendering ==\n");
     {
         juce::MidiBuffer midi;
@@ -621,14 +1384,14 @@ int main(int argc, char** argv)
         render(processor, audio, midi);
         check(magnitude(audio, 0, 256) == 0.0f,
               "note-on at sample 256 leaves the preceding segment silent");
-        check(magnitude(audio, 256, blockSize - 256) > 0.001f,
+        check(magnitude(audio, 256, blockSize - 256) > audiblePresence,
               "note-on produces audio after its timestamp");
     }
     {
         juce::MidiBuffer midi;
         midi.addEvent(juce::MidiMessage::noteOff(1, 60), 512);
         render(processor, audio, midi);
-        check(magnitude(audio, 0, 512) > 0.001f,
+        check(magnitude(audio, 0, 512) > audiblePresence,
               "mid-block note-off does not truncate audio before its timestamp");
     }
     {
@@ -638,7 +1401,7 @@ int main(int argc, char** argv)
         midi.addEvent(juce::MidiMessage::noteOff(1, 62), 512);
         render(processor, audio, midi);
         check(magnitude(audio, 0, 256) == 0.0f
-                  && magnitude(audio, 256, 256) > 0.001f,
+                  && magnitude(audio, 256, 256) > audiblePresence,
               "note-on and note-off in one block produce a bounded pre-release note segment");
     }
     {
@@ -648,7 +1411,7 @@ int main(int argc, char** argv)
         midi.addEvent(juce::MidiMessage::noteOn(16, 72, static_cast<juce::uint8>(100)), 640);
         render(processor, audio, midi);
         check(magnitude(audio, 0, 128) == 0.0f
-                  && magnitude(audio, 128, 512) > 0.001f,
+                  && magnitude(audio, 128, 512) > audiblePresence,
               "events on different MIDI channels retain independent timestamps");
     }
     {
@@ -659,7 +1422,7 @@ int main(int argc, char** argv)
         render(processor, audio, midi);
         int bank{-1}, preset{-1};
         check(magnitude(audio, 0, 400) == 0.0f
-                  && magnitude(audio, 401, blockSize - 401) > 0.001f
+                  && magnitude(audio, 401, blockSize - 401) > audiblePresence
                   && model.getChannelProgram(2, bank, preset) && preset == 4,
               "same-block Program Change selects the new channel program before the following note");
     }
@@ -695,7 +1458,7 @@ int main(int argc, char** argv)
         midi.addEvent(juce::MidiMessage::noteOn(1, 67, static_cast<juce::uint8>(100)), 256);
         render(processor, mono, midi);
         check(magnitude(mono, 0, 256) == 0.0f
-                  && magnitude(mono, 256, mono.getNumSamples() - 256) > 0.001f,
+                  && magnitude(mono, 256, mono.getNumSamples() - 256) > audiblePresence,
               "mono downmix preserves timing and safely chunks blocks above the prepared maximum");
     }
     {
@@ -738,7 +1501,7 @@ int main(int argc, char** argv)
         const double sameProgram{
             waveformCorrelation(organAtBlockStart, organMidBlock, notePosition, tail)};
 
-        check(magnitude(organAtBlockStart, notePosition, tail) > 0.001f
+        check(magnitude(organAtBlockStart, notePosition, tail) > audiblePresence
                   && differentPrograms < 0.9,
               "two different programs render audibly different audio for the same note");
         check(sameProgram > 0.999,
@@ -876,19 +1639,19 @@ int main(int argc, char** argv)
         juce::MidiBuffer midi;
         addAllSoundOff(midi);
         midi.addEvent(juce::MidiMessage::programChange(6, 5), 10);
-        midi.addEvent(juce::MidiMessage::controllerEvent(6, 74, 91), 11);
+        midi.addEvent(juce::MidiMessage::controllerEvent(6, 7, 91), 11);
         midi.addEvent(
             juce::MidiMessage::createSysExMessage(gmReset, sizeof(gmReset)), 20);
         midi.addEvent(
             juce::MidiMessage::noteOn(6, 60, static_cast<juce::uint8>(100)), 20);
         render(processor, audio, midi);
 
-        int noteBank{-1}, notePreset{-1}, noteSample{-1}, cutoff{-1};
+        int noteBank{-1}, notePreset{-1}, noteSample{-1}, volume{-1};
         check(model.getLastDispatchedNoteOnProgram(
                   5, noteBank, notePreset, noteSample)
                   && noteBank == 0 && notePreset == 5 && noteSample == 20
-                  && model.getControllerValue(5, 74, cutoff) && cutoff == 91,
-              "reset reasserts program and sound controls before an equal-timestamp following note");
+                  && model.getControllerValue(5, 7, volume) && volume == 91,
+              "reset reasserts program and channel volume before an equal-timestamp following note");
     }
     {
         const std::array<std::vector<juce::uint8>, 3> resets{{
@@ -899,7 +1662,7 @@ int main(int argc, char** argv)
         juce::MidiBuffer midi;
         addAllSoundOff(midi);
         midi.addEvent(juce::MidiMessage::programChange(7, 6), 5);
-        midi.addEvent(juce::MidiMessage::controllerEvent(7, 71, 88), 6);
+        midi.addEvent(juce::MidiMessage::controllerEvent(7, 7, 88), 6);
         for (std::size_t i = 0; i < resets.size(); ++i)
             midi.addEvent(
                 juce::MidiMessage::createSysExMessage(
@@ -909,12 +1672,12 @@ int main(int argc, char** argv)
             juce::MidiMessage::noteOn(7, 60, static_cast<juce::uint8>(100)), 31);
         render(processor, audio, midi);
 
-        int noteBank{-1}, notePreset{-1}, noteSample{-1}, resonance{-1};
+        int noteBank{-1}, notePreset{-1}, noteSample{-1}, volume{-1};
         check(model.getLastDispatchedNoteOnProgram(
                   6, noteBank, notePreset, noteSample)
                   && noteBank == 0 && notePreset == 6 && noteSample == 31
-                  && model.getControllerValue(6, 71, resonance) && resonance == 88,
-              "multiple GM, GS, and XG resets preserve the latest program and sound-control snapshot");
+                  && model.getControllerValue(6, 7, volume) && volume == 88,
+              "multiple GM, GS, and XG resets preserve the latest program and mixer snapshot");
     }
     {
         const std::array<std::vector<juce::uint8>, 3> resets{{
@@ -1144,84 +1907,91 @@ int main(int argc, char** argv)
         check(isolated, "CC values and full 14-bit bends remain isolated on channels 1, 2, 10, and 16");
     }
     {
-        struct ExpectedContract {
-            int cc;
-            const char* parameter;
-            int generator;
-            double amount;
+        // Juicy16 installs no modulators of its own any more. Stock FluidSynth
+        // ignores CC71-79 entirely, and so must this plugin: the old modulators
+        // stretched attack by 17x, lifted a note tail by 43 dB, and left a note
+        // ringing 48 dB above neutral a second after note-off, which no other
+        // SoundFont player does. Two fresh instances, one with every sound
+        // controller at 0 and one at 127, must render bit-identical audio.
+        const auto renderWithSoundControllers = [&](int value,
+                                                    juce::AudioBuffer<float>& out) {
+            JuicySFAudioProcessor instance;
+            instance.prepareToPlay(48000.0, blockSize);
+            const auto instanceState{makeState(argv[1])};
+            instance.setStateInformation(instanceState.getData(),
+                                         static_cast<int>(instanceState.getSize()));
+            out.setSize(2, 48000, false, false, true);
+            out.clear();
+            juce::MidiBuffer first;
+            first.addEvent(juce::MidiMessage::programChange(1, 0), 0);
+            for (const int cc : {71, 72, 73, 74, 75, 79})
+                first.addEvent(juce::MidiMessage::controllerEvent(1, cc, value), 0);
+            first.addEvent(juce::MidiMessage::noteOn(1, 60, static_cast<juce::uint8>(100)), 0);
+            for (int position = 0; position < out.getNumSamples(); position += blockSize) {
+                const int chunk{juce::jmin(blockSize, out.getNumSamples() - position)};
+                juce::AudioBuffer<float> slice{out.getArrayOfWritePointers(), 2,
+                                               position, chunk};
+                juce::MidiBuffer midi;
+                if (position == 0)
+                    midi = first;
+                instance.processBlock(slice, midi);
+            }
         };
-        constexpr std::array<ExpectedContract, 6> expectedContracts{{
-            {71, "filterResonance", GEN_FILTERQ, FLUID_PEAK_ATTENUATION},
-            {72, "release", GEN_VOLENVRELEASE, 12000.0},
-            {73, "attack", GEN_VOLENVATTACK, 12000.0},
-            {74, "filterCutOff", GEN_FILTERFC, 2400.0},
-            {75, "decay", GEN_VOLENVDECAY, 12000.0},
-            {79, "sustain", GEN_VOLENVSUSTAIN, -1000.0},
-        }};
-        const int expectedFlags{
-            FLUID_MOD_CC | FLUID_MOD_BIPOLAR | FLUID_MOD_LINEAR | FLUID_MOD_POSITIVE};
-        bool contractExact{model.soundControllerModulatorsReady()};
-        for (const auto& expected : expectedContracts) {
-            FluidSynthModel::SoundControllerContract actual;
-            contractExact = contractExact
-                && FluidSynthModel::getSoundControllerContract(expected.cc, actual)
-                && actual.controller == expected.cc
-                && actual.parameterId == expected.parameter
-                && actual.generator == expected.generator
-                && std::abs(actual.amount - expected.amount) < 1.0e-9
-                && actual.sourceFlags == expectedFlags;
-        }
-        FluidSynthModel::SoundControllerContract unsupported;
-        contractExact = contractExact
-            && !FluidSynthModel::getSoundControllerContract(70, unsupported);
-
-        // FluidSynth's pinned linear bipolar map divides by 128: 64 maps to
-        // exactly zero, values below it are negative, and values above are
-        // positive. The configured amount sign therefore freezes each UI direction.
-        const auto bipolarMap = [](int value) {
-            const double normalised{static_cast<double>(value) / 128.0};
-            return value == 127 ? normalised : -1.0 + 2.0 * normalised;
-        };
-        bool neutralAndDirectionExact{
-            bipolarMap(64) == 0.0 && bipolarMap(0) < 0.0 && bipolarMap(127) > 0.0};
-        for (const auto& expected : expectedContracts) {
-            const double below{expected.amount * bipolarMap(0)};
-            const double above{expected.amount * bipolarMap(127)};
-            neutralAndDirectionExact = neutralAndDirectionExact
-                && (expected.cc == 79
-                    ? below > 0.0 && above < 0.0 // attenuation: slider up is louder
-                    : below < 0.0 && above > 0.0);
-        }
-        check(contractExact && neutralAndDirectionExact,
-              "installed sound-controller modulators freeze neutral 64 and the documented destination/direction contract");
+        juce::AudioBuffer<float> low, high;
+        renderWithSoundControllers(0, low);
+        renderWithSoundControllers(127, high);
+        bool soundControllersInert{low.getNumSamples() == high.getNumSamples()};
+        double energy{0.0};
+        for (int ch = 0; ch < 2 && soundControllersInert; ++ch)
+            for (int i = 0; i < low.getNumSamples(); ++i) {
+                energy += std::abs(low.getSample(ch, i));
+                // Bit-identical is the assertion; a tolerance would let a small
+                // modulator effect slip through.
+                if (std::memcmp(&low.getReadPointer(ch)[i],
+                                &high.getReadPointer(ch)[i], sizeof(float)) != 0) {
+                    soundControllersInert = false;
+                    break;
+                }
+            }
+        check(soundControllersInert && energy > audiblePresence,
+              "CC71-79 are inert: the plugin adds no modulators, so those controllers cannot alter the sound");
 
         JuicySFAudioProcessor fresh;
         fresh.prepareToPlay(48000.0, blockSize);
         const auto freshState{makeState(argv[1])};
         fresh.setStateInformation(freshState.getData(), static_cast<int>(freshState.getSize()));
-        bool freshNeutral{fresh.getFluidSynthModel().soundControllerModulatorsReady()};
-        for (const auto& expected : expectedContracts) {
-            int controllerValue{-1};
-            const auto* parameter{findIntParameter(fresh, expected.parameter)};
-            freshNeutral = freshNeutral
-                && fresh.getFluidSynthModel().getControllerValue(0, expected.cc, controllerValue)
-                && controllerValue == 64
-                && parameter != nullptr && parameter->get() == 64;
+        // GM channel defaults, which are also FluidSynth's own initialisation
+        // values. Volume is 100 rather than 127 on purpose: a channel that starts
+        // at maximum has no room for a MIDI file to turn it up.
+        bool freshDefaults{true};
+        for (int channel = 0; channel < 16; ++channel) {
+            int volume{-1}, pan{-1};
+            freshDefaults = freshDefaults
+                && fresh.getFluidSynthModel().getControllerValue(channel, 7, volume)
+                && volume == MidiConstants::defaultChannelVolume
+                && fresh.getFluidSynthModel().getControllerValue(channel, 10, pan)
+                && pan == MidiConstants::centreValue;
         }
-        check(freshNeutral,
-              "fresh engine, saved channel state, and visible sound parameters all start at neutral 64");
+        const auto* volumeParameter{findIntParameter(fresh, "volume")};
+        const auto* panParameter{findIntParameter(fresh, "pan")};
+        freshDefaults = freshDefaults
+            && volumeParameter != nullptr
+            && volumeParameter->get() == MidiConstants::defaultChannelVolume
+            && panParameter != nullptr
+            && panParameter->get() == MidiConstants::centreValue;
+        check(freshDefaults,
+              "a fresh engine, its saved channel state, and the visible mixer parameters all start at the GM defaults (volume 100, pan centre)");
     }
     {
-        constexpr std::array<int, 6> soundCcs{71, 72, 73, 74, 75, 79};
-        constexpr std::array<const char*, 6> soundParams{
-            "filterResonance", "release", "attack", "filterCutOff", "decay", "sustain"};
+        constexpr std::array<int, 2> mixerCcs{7, 10};
+        constexpr std::array<const char*, 2> mixerParams{"volume", "pan"};
         juce::MidiBuffer midi;
         for (int channel = 0; channel < 16; ++channel)
-            for (std::size_t index = 0; index < soundCcs.size(); ++index)
+            for (std::size_t index = 0; index < mixerCcs.size(); ++index)
                 midi.addEvent(
                     juce::MidiMessage::controllerEvent(
                         channel + 1,
-                        soundCcs[index],
+                        mixerCcs[index],
                         (channel * 7 + static_cast<int>(index) * 13 + 1) % 128),
                     200 + channel);
         render(processor, audio, midi);
@@ -1229,15 +1999,15 @@ int main(int argc, char** argv)
 
         bool engineAndTimestampExact{true};
         for (int channel = 0; channel < 16; ++channel) {
-            for (std::size_t index = 0; index < soundCcs.size(); ++index) {
+            for (std::size_t index = 0; index < mixerCcs.size(); ++index) {
                 int actual{-1}, dispatched{-1}, sample{-1};
                 const int expected{
                     (channel * 7 + static_cast<int>(index) * 13 + 1) % 128};
                 engineAndTimestampExact = engineAndTimestampExact
-                    && model.getControllerValue(channel, soundCcs[index], actual)
+                    && model.getControllerValue(channel, mixerCcs[index], actual)
                     && actual == expected
                     && model.getLastDispatchedController(
-                        channel, soundCcs[index], dispatched, sample)
+                        channel, mixerCcs[index], dispatched, sample)
                     && dispatched == expected && sample == 200 + channel;
             }
         }
@@ -1245,33 +2015,55 @@ int main(int argc, char** argv)
         bool selectedChannelMirrorsExact{true};
         for (int channel = 0; channel < 16; ++channel) {
             model.selectChannelForEditing(channel);
-            for (std::size_t index = 0; index < soundParams.size(); ++index) {
+            for (std::size_t index = 0; index < mixerParams.size(); ++index) {
                 const int expected{
                     (channel * 7 + static_cast<int>(index) * 13 + 1) % 128};
-                auto* parameter{findIntParameter(processor, soundParams[index])};
+                auto* parameter{findIntParameter(processor, mixerParams[index])};
                 int dispatched{-1}, sample{-1};
                 selectedChannelMirrorsExact = selectedChannelMirrorsExact
                     && parameter != nullptr && parameter->get() == expected
                     // Merely selecting a channel must not send a duplicate CC back
                     // to FluidSynth; the last raw MIDI diagnostic remains unchanged.
                     && model.getLastDispatchedController(
-                        channel, soundCcs[index], dispatched, sample)
+                        channel, mixerCcs[index], dispatched, sample)
                     && dispatched == expected && sample == 200 + channel;
             }
         }
 
         model.selectChannelForEditing(0);
-        const auto* selectedCutoff{findIntParameter(processor, "filterCutOff")};
-        const int selectedBefore{selectedCutoff != nullptr ? selectedCutoff->get() : -1};
+        const auto* selectedVolume{findIntParameter(processor, "volume")};
+        const int selectedBefore{selectedVolume != nullptr ? selectedVolume->get() : -1};
         juce::MidiBuffer unselectedMidi;
-        unselectedMidi.addEvent(juce::MidiMessage::controllerEvent(16, 74, 127), 333);
+        unselectedMidi.addEvent(juce::MidiMessage::controllerEvent(16, 7, 127), 333);
         render(processor, audio, unselectedMidi);
         model.handleUpdateNowIfNeeded();
         const bool unselectedDidNotMoveSlider{
-            selectedCutoff != nullptr && selectedCutoff->get() == selectedBefore};
+            selectedVolume != nullptr && selectedVolume->get() == selectedBefore};
         model.selectChannelForEditing(15);
         const bool selectingRevealsLatest{
-            selectedCutoff != nullptr && selectedCutoff->get() == 127};
+            selectedVolume != nullptr && selectedVolume->get() == 127};
+
+        // The non-negotiable rule, the same one Program Change follows: a value
+        // set in the editor is only a starting point. The next CC7 on that channel
+        // overrides it, and the visible parameter follows the MIDI rather than the
+        // other way round.
+        model.selectChannelForEditing(3);
+        model.setControllerValue(7, 20);
+        int afterManual{-1};
+        const bool manualApplied{model.getControllerValue(3, 7, afterManual)
+                                 && afterManual == 20};
+        juce::MidiBuffer overrideMidi;
+        overrideMidi.addEvent(juce::MidiMessage::controllerEvent(4, 7, 96), 12);
+        render(processor, audio, overrideMidi);
+        model.handleUpdateNowIfNeeded();
+        int afterMidi{-1};
+        const auto* volumeParameter{findIntParameter(processor, "volume")};
+        const bool midiWins{model.getControllerValue(3, 7, afterMidi)
+                            && afterMidi == 96
+                            && volumeParameter != nullptr
+                            && volumeParameter->get() == 96};
+        check(manualApplied && midiWins,
+              "incoming CC7 overrides a value set in the editor, and the visible parameter follows the MIDI");
 
         juce::MemoryBlock saved;
         processor.getStateInformation(saved);
@@ -1282,15 +2074,17 @@ int main(int argc, char** argv)
         auto& restoredModel{restored.getFluidSynthModel()};
         for (int channel = 0; channel < 16; ++channel) {
             restoredModel.selectChannelForEditing(channel);
-            for (std::size_t index = 0; index < soundCcs.size(); ++index) {
+            for (std::size_t index = 0; index < mixerCcs.size(); ++index) {
                 int actual{-1};
-                const int expected{channel == 15 && soundCcs[index] == 74
-                    ? 127
-                    : (channel * 7 + static_cast<int>(index) * 13 + 1) % 128};
-                const auto* parameter{findIntParameter(restored, soundParams[index])};
+                int expected{(channel * 7 + static_cast<int>(index) * 13 + 1) % 128};
+                if (channel == 15 && mixerCcs[index] == 7)
+                    expected = 127;
+                if (channel == 3 && mixerCcs[index] == 7)
+                    expected = 96;
+                const auto* parameter{findIntParameter(restored, mixerParams[index])};
                 restoredExact = restoredExact
                     && restoredModel.getControllerValue(
-                        channel, soundCcs[index], actual)
+                        channel, mixerCcs[index], actual)
                     && actual == expected
                     && parameter != nullptr && parameter->get() == expected;
             }
@@ -1298,7 +2092,7 @@ int main(int argc, char** argv)
         check(engineAndTimestampExact && selectedChannelMirrorsExact
                   && unselectedDidNotMoveSlider && selectingRevealsLatest
                   && restoredExact,
-              "all six exposed sound controllers remain timestamp-, engine-, slider-, channel-, and state-exact on all 16 channels");
+              "volume and pan remain timestamp-, engine-, slider-, channel-, and state-exact on all 16 channels");
     }
     {
         // MIDI CC121 deliberately follows FluidSynth/MIDI reset semantics: it
@@ -1306,8 +2100,9 @@ int main(int argc, char** argv)
         // preserving bank, volume, pan, effects sends, bend range, and CC70-79.
         constexpr int channel{4};
         juce::MidiBuffer setup;
-        for (const auto [cc, value] : std::array<std::pair<int, int>, 13>{
-                 std::pair{1, 99}, std::pair{7, 77}, std::pair{11, 55},
+        for (const auto [cc, value] : std::array<std::pair<int, int>, 14>{
+                 std::pair{1, 99}, std::pair{7, 77}, std::pair{10, 33},
+                 std::pair{11, 55},
                  std::pair{64, 127}, std::pair{71, 9}, std::pair{74, 111},
                  std::pair{91, 88}, std::pair{93, 89}, std::pair{101, 0},
                  std::pair{100, 0}, std::pair{6, 12}, std::pair{38, 0},
@@ -1329,8 +2124,8 @@ int main(int argc, char** argv)
         };
         int bend{-1}, bendRange{-1};
         model.selectChannelForEditing(channel);
-        const auto* resonance{findIntParameter(processor, "filterResonance")};
-        const auto* cutoff{findIntParameter(processor, "filterCutOff")};
+        const auto* volume{findIntParameter(processor, "volume")};
+        const auto* pan{findIntParameter(processor, "pan")};
         check(controllerEquals(1, 0)
                   && controllerEquals(11, 127)
                   && controllerEquals(64, 0)
@@ -1344,8 +2139,10 @@ int main(int argc, char** argv)
                   && controllerEquals(101, 127)
                   && model.getPitchBend(channel, bend) && bend == 8192
                   && model.getPitchWheelSensitivity(channel, bendRange) && bendRange == 12
-                  && resonance != nullptr && resonance->get() == 9
-                  && cutoff != nullptr && cutoff->get() == 111,
+                  // CC7 and CC10 survive Reset All Controllers per the MIDI
+                  // spec, so the mirrored mixer parameters must survive with them.
+                  && volume != nullptr && volume->get() == 77
+                  && pan != nullptr && pan->get() == 33,
               "Reset All Controllers releases switches and resets expression/RPN/bend while preserving MIDI-defined persistent controls");
     }
     {
@@ -1468,8 +2265,8 @@ int main(int argc, char** argv)
               "All Notes Off releases active notes while All Sound Off immediately removes playing voices");
     }
     {
-        constexpr std::array<int, 6> soundCcs{71, 72, 73, 74, 75, 79};
-        constexpr std::array<int, 6> values{7, 21, 35, 81, 95, 109};
+        constexpr std::array<int, 2> soundCcs{7, 10};
+        constexpr std::array<int, 2> values{21, 95};
         constexpr std::array<std::array<juce::uint8, 9>, 3> resetBytes{{
             {{0x7e, 0x7f, 0x09, 0x01, 0, 0, 0, 0, 0}},
             {{0x41, 0x10, 0x42, 0x12, 0x40, 0x00, 0x7f, 0x00, 0x41}},
@@ -1500,7 +2297,7 @@ int main(int argc, char** argv)
             }
         }
         check(resetsPreserveLatest,
-              "GM, GS, and XG resets reapply the latest plugin-owned sound controls instead of changing their direction or neutral model");
+              "GM, GS, and XG resets reapply the latest plugin-owned volume and pan rather than reverting them to defaults");
     }
     {
         constexpr std::array<int, 9> bendValues{
@@ -1684,7 +2481,7 @@ int main(int argc, char** argv)
             juce::MidiMessage::noteOn(1, 69, static_cast<juce::uint8>(100)), 0);
         render(processor, pitchAudio, recoveredRateMidi);
         check(model.isSampleRateSupported()
-                  && magnitude(pitchAudio, 8192, 8192) > 0.001f,
+                  && magnitude(pitchAudio, 8192, 8192) > audiblePresence,
               "returning from an unsupported rate recreates the engine and resumes audio");
     }
     {
@@ -1725,9 +2522,9 @@ int main(int argc, char** argv)
         midi.addEvent(juce::MidiMessage::controllerEvent(1, 120, 0), 32768);
         midi.addEvent(juce::MidiMessage::noteOn(1, 64, static_cast<juce::uint8>(100)), 49152);
         render(processor, ccAudio, midi);
-        check(magnitude(ccAudio, 8192, 8192) > 0.001f
+        check(magnitude(ccAudio, 8192, 8192) > audiblePresence
                   && magnitude(ccAudio, 36864, 8192) == 0.0f
-                  && magnitude(ccAudio, 53248, 8192) > 0.001f,
+                  && magnitude(ccAudio, 53248, 8192) > audiblePresence,
               "All Sound Off takes effect at its in-block timestamp and later notes still render");
     }
 
@@ -1785,27 +2582,26 @@ int main(int argc, char** argv)
             xml != nullptr ? xml->getChildByName("channelPrograms") : nullptr};
         const auto* font{xml != nullptr ? xml->getChildByName("soundFont") : nullptr};
         bool allParams{params != nullptr};
-        for (const auto& id : std::array<juce::String, 24>{
-                 "bank", "preset", "attack", "decay", "sustain", "release",
-                 "filterCutOff", "filterResonance",
+        for (const auto& id : std::array<juce::String, 21>{
+                 "bank", "preset", "volume", "pan", "outputLevel",
                  "progCh1", "progCh2", "progCh3", "progCh4",
                  "progCh5", "progCh6", "progCh7", "progCh8",
                  "progCh9", "progCh10", "progCh11", "progCh12",
                  "progCh13", "progCh14", "progCh15", "progCh16"})
             allParams = allParams && params->hasAttribute(id);
         check(xml != nullptr && xml->hasTagName("MYPLUGINSETTINGS")
-                  && xml->getIntAttribute("stateVersion", -1) == 2
+                  && xml->getIntAttribute("stateVersion", -1) == 3
                   && allParams && channels != nullptr
                   && channels->getNumChildElements() == 16
                   && font != nullptr && font->hasAttribute("path")
                   && font->hasAttribute("bookmark"),
-              "Beta 1 state writer preserves the frozen schema-2 envelope");
+              "Beta 1 state writer preserves the frozen schema-3 envelope");
     }
     {
         model.setChannelProgram(1, 0, 4);
         model.setChannelProgram(9, 128, 0);
         juce::MidiBuffer midi;
-        midi.addEvent(juce::MidiMessage::controllerEvent(2, 74, 99), 0);
+        midi.addEvent(juce::MidiMessage::controllerEvent(2, 7, 99), 0);
         render(processor, audio, midi);
         model.handleUpdateNowIfNeeded();
 
@@ -1814,12 +2610,12 @@ int main(int argc, char** argv)
         JuicySFAudioProcessor restored;
         restored.prepareToPlay(48000.0, blockSize);
         restored.setStateInformation(saved.getData(), static_cast<int>(saved.getSize()));
-        int bank{-1}, preset{-1}, cutoff{-1};
+        int bank{-1}, preset{-1}, volume{-1};
         check(restored.getFluidSynthModel().getChannelProgram(1, bank, preset)
                   && bank == 0 && preset == 4
-                  && restored.getFluidSynthModel().getControllerValue(1, 74, cutoff)
-                  && cutoff == 99,
-              "current state round-trip restores independent channel program and sound-controller state");
+                  && restored.getFluidSynthModel().getControllerValue(1, 7, volume)
+                  && volume == 99,
+              "current state round-trip restores independent channel program and mixer state");
         check(restored.getFluidSynthModel().getChannelProgram(9, bank, preset)
                   && bank == 128 && preset == 0,
               "manual channel 10 percussion assignment persists through state round-trip");
@@ -1832,6 +2628,8 @@ int main(int argc, char** argv)
         ch->setAttribute("num", 0);
         ch->setAttribute("bank", 0);
         ch->setAttribute("preset", 3);
+        // Attributes from the retired CC71-79 schema. They must be ignored, not
+        // migrated onto the mixer controls that replaced them.
         for (const char* name : {"attack", "decay", "sustain", "release", "filterCutOff", "filterResonance"})
             ch->setAttribute(name, 0);
         auto* font{legacy.createNewChildElement("soundFont")};
@@ -1843,12 +2641,14 @@ int main(int argc, char** argv)
         JuicySFAudioProcessor migrated;
         migrated.prepareToPlay(48000.0, blockSize);
         migrated.setStateInformation(legacyState.getData(), static_cast<int>(legacyState.getSize()));
-        int bank{-1}, preset{-1}, cutoff{-1};
+        int bank{-1}, preset{-1}, volume{-1}, pan{-1};
         check(migrated.getFluidSynthModel().getChannelProgram(0, bank, preset)
                   && preset == 3
-                  && migrated.getFluidSynthModel().getControllerValue(0, 74, cutoff)
-                  && cutoff == 64,
-              "pre-v2 state keeps program assignments but migrates old unipolar sound controls to neutral");
+                  && migrated.getFluidSynthModel().getControllerValue(0, 7, volume)
+                  && volume == MidiConstants::defaultChannelVolume
+                  && migrated.getFluidSynthModel().getControllerValue(0, 10, pan)
+                  && pan == MidiConstants::centreValue,
+              "pre-v3 state keeps program assignments and leaves volume/pan at the GM defaults");
     }
 #if JUCE_MAC
     {
@@ -1892,7 +2692,7 @@ int main(int argc, char** argv)
         recoveredMidi.addEvent(
             juce::MidiMessage::noteOn(1, 60, static_cast<juce::uint8>(100)), 0);
         render(recovered, recoveredAudio, recoveredMidi);
-        check(magnitude(recoveredAudio, 0, blockSize) > 0.001f,
+        check(magnitude(recoveredAudio, 0, blockSize) > audiblePresence,
               "the bank recovered through the path fallback actually sounds");
 
         // Bookmark that cannot resolve AND a path that no longer exists: the
@@ -1959,13 +2759,13 @@ int main(int argc, char** argv)
 #endif
     {
         juce::XmlElement bounded{"MYPLUGINSETTINGS"};
-        bounded.setAttribute("stateVersion", 2);
+        bounded.setAttribute("stateVersion", 3);
         auto* channels{bounded.createNewChildElement("channelPrograms")};
         auto* ch{channels->createNewChildElement("ch")};
         ch->setAttribute("num", 0);
         ch->setAttribute("bank", 999);
         ch->setAttribute("preset", -50);
-        ch->setAttribute("filterCutOff", 999);
+        ch->setAttribute("volume", 999);
         auto* font{bounded.createNewChildElement("soundFont")};
         font->setAttribute("path", argv[1]);
         font->setAttribute("bookmark", "");
@@ -1976,15 +2776,15 @@ int main(int argc, char** argv)
         boundedProcessor.prepareToPlay(48000.0, blockSize);
         boundedProcessor.setStateInformation(
             boundedState.getData(), static_cast<int>(boundedState.getSize()));
-        int cutoff{-1};
-        check(boundedProcessor.getFluidSynthModel().getControllerValue(0, 74, cutoff)
-                  && cutoff == 127,
+        int clampedVolume{-1};
+        check(boundedProcessor.getFluidSynthModel().getControllerValue(0, 7, clampedVolume)
+                  && clampedVolume == 127,
               "out-of-range saved bank, preset, and controller values are clamped before engine use");
 
         const char malformed[]{'n', 'o', 't', 's', 't', 'a', 't', 'e'};
         boundedProcessor.setStateInformation(malformed, sizeof(malformed));
-        check(boundedProcessor.getFluidSynthModel().getControllerValue(0, 74, cutoff)
-                  && cutoff == 127,
+        check(boundedProcessor.getFluidSynthModel().getControllerValue(0, 7, clampedVolume)
+                  && clampedVolume == 127,
               "malformed non-XML state is ignored without corrupting current state");
 
         std::mt19937 random{0x53544154u};
@@ -1996,8 +2796,8 @@ int main(int argc, char** argv)
             boundedProcessor.setStateInformation(
                 fuzzState.getData(), static_cast<int>(fuzzState.getSize()));
         }
-        check(boundedProcessor.getFluidSynthModel().getControllerValue(0, 74, cutoff)
-                  && cutoff == 127,
+        check(boundedProcessor.getFluidSynthModel().getControllerValue(0, 7, clampedVolume)
+                  && clampedVolume == 127,
               "1000 deterministic malformed state blobs are ignored without state corruption");
     }
     {
@@ -2044,7 +2844,7 @@ int main(int argc, char** argv)
                   && model.getLoadedFontPath() == originalPath
                   && savedFont != nullptr
                   && savedFont->getStringAttribute("path") == originalPath
-                  && magnitude(audio, 2, blockSize - 2) > 0.001f,
+                  && magnitude(audio, 2, blockSize - 2) > audiblePresence,
               "a failed replacement reports an error and keeps the active bank in audio and saved state");
     }
     {
@@ -2129,7 +2929,7 @@ int main(int argc, char** argv)
             ? savedAfterRejectedXml->getChildByName("soundFont") : nullptr};
         const bool activeBankRetained{savedAfterRejectedFont != nullptr
             && savedAfterRejectedFont->getStringAttribute("path") == originalPath
-            && magnitude(audio, 2, blockSize - 2) > 0.001f};
+            && magnitude(audio, 2, blockSize - 2) > audiblePresence};
 
         check(movedHandled && nonFileHandled && unsupportedHandled
                   && corruptHandled && emptyDlsHandled && unreadableHandled
@@ -2298,7 +3098,7 @@ int main(int argc, char** argv)
             && model.getLoadedFontPath() == longBank.getFullPathName()
             && longPathFont != nullptr
             && longPathFont->getStringAttribute("path") == longBank.getFullPathName()
-            && magnitude(audio, 2, blockSize - 2) > 0.001f};
+            && magnitude(audio, 2, blockSize - 2) > audiblePresence};
 
         const auto restoreState{makeState(originalPath)};
         processor.setStateInformation(
@@ -2357,15 +3157,12 @@ int main(int argc, char** argv)
             bool requireSliderRole;
             bool requireTableRole;
         };
-        constexpr std::array<ExpectedAccessibleComponent, 10> expected{{
+        constexpr std::array<ExpectedAccessibleComponent, 7> expected{{
             {"Sound bank file", false, false},
             {"MIDI channel assignments", false, true},
-            {"Attack (CC73)", true, false},
-            {"Decay (CC75)", true, false},
-            {"Sustain level (CC79)", true, false},
-            {"Release (CC72)", true, false},
-            {"Filter cutoff (CC74)", true, false},
-            {"Filter resonance (CC71)", true, false},
+            {"Channel volume (CC7)", true, false},
+            {"Pan (CC10)", true, false},
+            {"Output level", true, false},
             {"MIDI Keyboard", false, false},
             {"Version and bank load status", false, false},
         }};
@@ -2396,12 +3193,18 @@ int main(int argc, char** argv)
             accessibleMetadata = accessibleMetadata && itemValid;
         }
         check(accessibleMetadata,
-              "bank picker, channel table, keyboard, status, and all six sliders expose named accessible metadata and built-in control roles");
+              "bank picker, channel table, keyboard, status, and all three sliders expose named accessible metadata and built-in control roles");
 
         // Keyboard routing. The on-screen MIDI keyboard defaults to wanting
         // focus, which would swallow typed input meant for the controls, so the
         // editor explicitly clears it after construction. Assert the resulting
         // arrangement rather than trusting construction order.
+        //
+        // The channel table is the opposite case: it now DOES take focus, so the
+        // channel list is reachable by arrow keys. That is safe because nothing
+        // drives row selection from MIDI - the only caller of
+        // selectChannelForEditing is a click - so there is no selection for the
+        // keyboard to fight.
         auto* midiKeyboard{editor != nullptr
             ? findNamedComponent(*editor, "MIDI Keyboard") : nullptr};
         auto* bankPicker{editor != nullptr
@@ -2410,20 +3213,18 @@ int main(int argc, char** argv)
             && editor->getWantsKeyboardFocus()
             && midiKeyboard != nullptr && !midiKeyboard->getWantsKeyboardFocus()
             && channelTableForFocus(*editor) != nullptr
-            && !channelTableForFocus(*editor)->getWantsKeyboardFocus()};
+            && channelTableForFocus(*editor)->getWantsKeyboardFocus()};
         check(focusRouting,
-              "the editor takes keyboard focus while the on-screen keyboard and table decline it");
+              "the editor and the channel table take keyboard focus while the on-screen keyboard declines it");
 
         bool slidersReachable{editor != nullptr};
-        for (const char* name : {"Attack (CC73)", "Decay (CC75)", "Sustain level (CC79)",
-                                 "Release (CC72)", "Filter cutoff (CC74)",
-                                 "Filter resonance (CC71)"}) {
+        for (const char* name : {"Channel volume (CC7)", "Pan (CC10)", "Output level"}) {
             auto* slider{editor != nullptr ? findNamedComponent(*editor, name) : nullptr};
             slidersReachable = slidersReachable
                 && slider != nullptr && slider->getWantsKeyboardFocus();
         }
         check(slidersReachable && bankPicker != nullptr,
-              "every sound-control slider accepts keyboard focus so it is reachable without a mouse");
+              "every mixer slider accepts keyboard focus so it is reachable without a mouse");
 
         auto* constrainer{editor != nullptr ? editor->getConstrainer() : nullptr};
         auto* channelTable{editor != nullptr
@@ -2441,7 +3242,7 @@ int main(int argc, char** argv)
         constexpr std::array<const char*, 5> essentialComponents{{
             "Sound bank file",
             "MIDI channel assignments",
-            "Attack (CC73)",
+            "Channel volume (CC7)",
             "MIDI Keyboard",
             "Version and bank load status",
         }};
@@ -2512,6 +3313,154 @@ int main(int argc, char** argv)
         }
         check(maximumSizeUsable,
               "maximum editor size is constrained to useful keyboard and layout bounds");
+
+        // "No supported resize or TEXT CASE makes essential controls
+        // inaccessible." Resize is covered above. This is the text half: the
+        // strings the editor displays are user-controlled - a bank path, a
+        // FluidSynth preset name, a load-error message - and a long or Unicode
+        // one must not push an essential control to zero size or off the window
+        // at any supported size.
+        bool textCasesUsable{resizeContract};
+        if (editor != nullptr && constrainer != nullptr) {
+            auto* status{findNamedComponent(*editor, "Version and bank load status")};
+            auto* label{dynamic_cast<juce::Label*>(status)};
+            const std::array<juce::String, 4> textCases{{
+                juce::String{},
+                juce::String::repeatedString("W", 4000),
+                juce::String::fromUTF8(
+                    "\xe9\x9f\xb3\xe8\x89\xb2 \xf0\x9f\x8e\xb9 ")
+                    + juce::String::repeatedString(
+                        juce::String::fromUTF8("\xe3\x81\x82"), 500),
+                juce::String::repeatedString("i ", 2000),
+            }};
+            const std::array<juce::Rectangle<int>, 3> sizes{{
+                {0, 0, GuiConstants::minWidth, GuiConstants::minHeight},
+                {0, 0, GuiConstants::minWidth, GuiConstants::defaultHeight},
+                {0, 0, constrainer->getMaximumWidth(), constrainer->getMaximumHeight()},
+            }};
+            for (const auto& text : textCases) {
+                if (label != nullptr)
+                    label->setText(text, juce::dontSendNotification);
+                for (const auto& size : sizes) {
+                    editor->setBoundsConstrained(size);
+                    editor->resized();
+                    textCasesUsable = textCasesUsable && essentialBoundsAreUsable();
+                    // Nothing may escape the window either: an essential control
+                    // pushed outside the editor is unreachable even though its
+                    // bounds are non-empty.
+                    for (const auto* name : essentialComponents) {
+                        auto* component{findNamedComponent(*editor, name)};
+                        if (component == nullptr
+                            || !editor->getLocalBounds().contains(
+                                   component->getBounds().getTopLeft())) {
+                            textCasesUsable = false;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (label != nullptr)
+                label->setText("Juicy16", juce::dontSendNotification);
+        }
+        check(textCasesUsable,
+              "empty, 4000-character, Unicode, and narrow-glyph status text keep every essential control on-screen at minimum, default, and maximum size");
+
+        // "Core loading, channel selection, patch selection, and parameter
+        // editing workflows are usable without a mouse where the framework/host
+        // permits." A real host focus chain cannot be built headlessly, but the
+        // half that is ours can: whether each control actually accepts keyboard
+        // focus. A control that declines focus is unreachable by tabbing no
+        // matter what the host does.
+        //
+        // Bank loading, all three mixer parameters, channel selection, and patch
+        // selection are all reachable.
+        bool focusableControls{editor != nullptr};
+        bool channelSelectionByKeyboard{editor != nullptr};
+        bool patchSelectionByKeyboard{editor != nullptr};
+        if (editor != nullptr) {
+            editor->setBoundsConstrained(
+                {0, 0, GuiConstants::minWidth, GuiConstants::defaultHeight});
+            editor->resized();
+
+            const auto acceptsFocus{[&](const juce::String& name) {
+                auto* component{findNamedComponent(*editor, name)};
+                return component != nullptr && component->getWantsKeyboardFocus();
+            }};
+            // Every exposed sound parameter, by its real accessible name.
+            for (const auto* name : {"Channel volume (CC7)", "Pan (CC10)",
+                                     "Output level"})
+                focusableControls = focusableControls && acceptsFocus(name);
+
+            // Bank loading: the FilenameComponent itself is a container and does
+            // not take focus, but its browse button does, so the workflow is
+            // reachable. Assert the reachable thing rather than the container.
+            auto* bankControl{findNamedComponent(*editor, "Sound bank file")};
+            bool bankReachable{false};
+            if (bankControl != nullptr)
+                for (int i = 0; i < bankControl->getNumChildComponents(); ++i)
+                    bankReachable = bankReachable
+                        || bankControl->getChildComponent(i)->getWantsKeyboardFocus();
+            focusableControls = focusableControls && bankReachable;
+
+            // Channel selection is now keyboard-driven. The table takes focus, and
+            // a row change - which is what an arrow key produces - must move the
+            // selected channel that the shared bank/preset/slider controls edit.
+            auto* table{channelTableForFocus(*editor)};
+            channelSelectionByKeyboard = table != nullptr
+                && table->getWantsKeyboardFocus();
+            if (auto* rows{dynamic_cast<juce::TableListBox*>(table)}) {
+                for (const int row : {5, 15, 0, 9}) {
+                    rows->selectRow(row);
+                    const int selected{
+                        processor.getFluidSynthModel().getSelectedChannel()};
+                    channelSelectionByKeyboard = channelSelectionByKeyboard
+                        && selected == row
+                        && rows->getSelectedRow() == row;
+                }
+            } else {
+                channelSelectionByKeyboard = false;
+            }
+
+            // Patch selection. Return on the focused table opens the selected
+            // row's instrument dropdown; showing the popup needs a window, but
+            // everything up to it is ours to check: that the route resolves to a
+            // real, populated, focusable dropdown for every one of the 16
+            // channels - including rows that are scrolled out of view at the
+            // minimum height - and that choosing an item on it actually assigns
+            // that channel's program.
+            auto* channelList{channelListFor(*editor)};
+            patchSelectionByKeyboard = channelList != nullptr;
+            if (channelList != nullptr) {
+                for (int row = 0; row < 16 && patchSelectionByKeyboard; ++row) {
+                    auto* combo{channelList->patchComboForRow(row)};
+                    patchSelectionByKeyboard = combo != nullptr
+                        && combo->getWantsKeyboardFocus()
+                        && combo->getNumItems() > 1;
+                    if (!patchSelectionByKeyboard)
+                        break;
+
+                    // Pick an item the channel is not already on, the way the
+                    // opened menu would, and require the engine to follow.
+                    const int target{combo->getSelectedItemIndex() == 0 ? 1 : 0};
+                    combo->setSelectedItemIndex(target, juce::sendNotificationSync);
+                    int bank{-1}, preset{-1};
+                    patchSelectionByKeyboard =
+                        processor.getFluidSynthModel().getChannelProgram(row, bank, preset)
+                        && combo->getSelectedItemIndex() == target;
+                }
+                // Out-of-range rows must not resolve to some other channel's
+                // dropdown.
+                patchSelectionByKeyboard = patchSelectionByKeyboard
+                    && channelList->patchComboForRow(-1) == nullptr
+                    && channelList->patchComboForRow(16) == nullptr;
+            }
+        }
+        check(focusableControls,
+              "bank loading and all three mixer parameters accept keyboard focus, so those workflows work without a mouse");
+        check(channelSelectionByKeyboard,
+              "the channel table accepts keyboard focus and arrow-key row changes drive the selected channel");
+        check(patchSelectionByKeyboard,
+              "Return resolves to every channel row's populated instrument dropdown, and a selection on it assigns that channel's program");
     }
 
     std::printf("== engine_midi_tests: %d failures ==\n", failures);

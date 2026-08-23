@@ -20,6 +20,30 @@ if (NOT PLUTIL_RESULT EQUAL 0 OR NOT AU_VERSION STREQUAL PROJECT_VERSION)
   message(FATAL_ERROR "AU version '${AU_VERSION}' does not match '${PROJECT_VERSION}'")
 endif ()
 
+# DISPLAY_VERSION was previously only reported. It is the version a user reads in
+# the status bar and the one the packager writes into the archive name and
+# BUILD_INFO.txt, so it has to be checked against the binary that actually ships:
+# a packager that derives it from a drifted CMake line must fail here.
+set(AU_BINARY "${ARTIFACTS_DIR}/AU/Juicy16.component/Contents/MacOS/Juicy16")
+if (NOT EXISTS "${AU_BINARY}")
+  message(FATAL_ERROR "AU executable is absent: ${AU_BINARY}")
+endif ()
+execute_process(
+  COMMAND /usr/bin/strings "${AU_BINARY}"
+  RESULT_VARIABLE STRINGS_RESULT
+  OUTPUT_VARIABLE AU_STRINGS)
+if (NOT STRINGS_RESULT EQUAL 0)
+  message(FATAL_ERROR "Could not read strings from ${AU_BINARY}")
+endif ()
+# Anchored on a digit so the status label's accessibility description
+# ("Juicy16 version and latest ...") cannot be mistaken for the version itself.
+string(REGEX MATCH "Juicy16 v[0-9][^ \n]*" AU_UI_VERSION "${AU_STRINGS}")
+string(REPLACE "Juicy16 v" "" AU_UI_VERSION "${AU_UI_VERSION}")
+if (NOT AU_UI_VERSION STREQUAL DISPLAY_VERSION)
+  message(FATAL_ERROR
+    "AU displays version '${AU_UI_VERSION}' but the caller expected '${DISPLAY_VERSION}'")
+endif ()
+
 function(assert_plist_value KEY EXPECTED_VALUE)
   execute_process(
     COMMAND /usr/bin/plutil -extract "${KEY}" raw "${AU_PLIST}"

@@ -95,6 +95,46 @@ jobs:
       - name: Build and run sanitized harnesses
         run: JUICY16_BUILD_JOBS=3 tools/ci_gates.sh asan
 
+  macos-leaks:
+    name: macOS leaks (arm64)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: brew install pkg-config fluid-synth
+
+      - name: Cache JUCE ${{ env.JUCE_VERSION }}
+        id: juce-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/juicydeps
+          key: juce-${{ env.JUCE_VERSION }}-macos-14-${{ runner.arch }}
+
+      - name: Build and install pinned JUCE
+        if: steps.juce-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "$JUCE_VERSION" \
+            https://github.com/juce-framework/JUCE.git "$RUNNER_TEMP/JUCE"
+          cmake -S "$RUNNER_TEMP/JUCE" -B "$RUNNER_TEMP/JUCE/build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$HOME/juicydeps"
+          cmake --build "$RUNNER_TEMP/JUCE/build" --target install --parallel 3
+
+      # LeakSanitizer is unavailable on Darwin arm64, so the ASan job runs with
+      # leak detection off. macOS `leaks` covers that gap, including the Core
+      # Foundation objects the bookmark path owns.
+      - name: Run every offline harness under leaks
+        run: JUICY16_BUILD_JOBS=3 tools/ci_gates.sh leaks
+
+      - name: Archive leaks reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-leaks-reports
+          path: build-ci-debug/Testing/leaks-*.log
+          if-no-files-found: ignore
+
   macos-release-strict:
     name: macOS portable Release (arm64, strict)
     runs-on: macos-14
@@ -161,10 +201,11 @@ jobs:
   windows-vst3:
     name: Windows VST3 (x64, unvalidated)
     runs-on: windows-2022
-    # Phase 4.3 of MILESTONE_PLAN.md is open: no MSVC FluidSynth dependency
-    # policy has been approved, DLS capability on Windows is unproven, and no
-    # Windows artifact has been host-validated. This job reports status only and
-    # must not gate a release until that work lands and this flag is removed.
+    # Phase 4.3 of MILESTONE_PLAN.md is open. The dependency closure below is
+    # now the approved pinned one rather than an ad-hoc vcpkg install, but the
+    # recipe has never been executed and no Windows artifact has been
+    # host-validated. This job reports status only and must not gate a release
+    # until it has run green and Phase 4.3 completes.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -187,22 +228,67 @@ jobs:
           cmake --build "$RUNNER_TEMP/JUCE/build" --config Release \
             --target install --parallel 3
 
-      - name: Install FluidSynth via vcpkg
-        shell: bash
-        run: vcpkg install fluidsynth:x64-windows
+      # Keyed on the recipe itself: every pinned version and checksum lives
+      # there, so editing it necessarily rebuilds the closure. Mirrors the macOS
+      # dependency cache.
+      - name: Cache pinned dependency closure
+        id: windows-deps-cache
+        uses: actions/cache@v4
+        with:
+          path: C:\juicy16-deps
+          key: windows-deps-${{ hashFiles('tools/build_windows_dependencies.ps1') }}-x64
+
+      # The same pinned versions and checksums as the macOS closure, so both
+      # platforms share one dependency inventory. Static CRT, so the VST3 needs
+      # no Visual C++ redistributable.
+      - name: Build the pinned static dependency closure
+        if: steps.windows-deps-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          .\tools\build_windows_dependencies.ps1 `
+            -InstallPrefix C:\juicy16-deps -BuildJobs 3
 
       - name: Configure
-        shell: bash
+        shell: pwsh
         run: |
-          cmake -S . -B build -A x64 \
-            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" \
-            -DVCPKG_TARGET_TRIPLET=x64-windows \
-            -DCMAKE_PREFIX_PATH="C:/juicydeps" \
-            -DJUICYSF_COPY_PLUGIN_AFTER_BUILD=OFF \
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_PREFIX_PATH="C:/juicy16-deps;C:/juicydeps" `
+            -DFLUIDSYNTH_LINK_STATIC=ON `
+            -DJUICYSF_SF3_FIXTURE="C:/juicy16-deps/share/juicy16-test-fixtures/VintageDreamsWaves-v2.sf3" `
+            -DJUICYSF_COPY_PLUGIN_AFTER_BUILD=OFF `
             -DJUICYSF_WARNINGS_AS_ERRORS=ON
 
       - name: Build
         run: cmake --build build --config Release --parallel 3
 
+      # font_load_system_dls runs against C:\Windows\System32\drivers\gm.dls,
+      # which is the only DLS capability proof available here: the private
+      # corpus is not redistributable and cannot be present in CI.
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Report the VST3's runtime DLL dependencies
+        if: always()
+        shell: pwsh
+        run: |
+          $vst3 = Get-ChildItem -Path build -Recurse -Filter 'Juicy16.vst3' `
+            -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($null -eq $vst3) { Write-Host 'No VST3 bundle was produced.'; exit 0 }
+          Write-Host "VST3 bundle: $($vst3.FullName)"
+          Get-ChildItem -Path $vst3.FullName -Recurse -File |
+            ForEach-Object { Write-Host "  $($_.FullName.Substring($vst3.FullName.Length))" }
+          # A static closure plus the static CRT should leave only Windows system
+          # DLLs here. Anything else is a missing-dependency risk for testers.
+          $binary = Get-ChildItem -Path $vst3.FullName -Recurse -Filter '*.vst3' -File |
+            Select-Object -First 1
+          if ($null -ne $binary) {
+            & dumpbin /dependents $binary.FullName
+          }
+
+      - name: Archive the unvalidated Windows VST3
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-vst3-unvalidated
+          path: build/**/Juicy16.vst3/**
+          if-no-files-found: ignore

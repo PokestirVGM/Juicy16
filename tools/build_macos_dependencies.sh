@@ -70,6 +70,37 @@ build_and_install() {
   cmake --build "$build_dir" --target install --parallel "$build_jobs"
 }
 
+# Apply a reviewed patch to a fetched source tree, bracketed by the target file's
+# pre- and post-edit hashes. Hard failure on any mismatch: a dependency closure
+# that silently skipped a security patch must not produce an artifact. The same
+# three hashes appear in tools/build_windows_dependencies.ps1 and are pinned by
+# the dependency_patch_contract test.
+apply_patch() {
+  local source_dir=$1
+  local patch_file=$2
+  local patch_sha=$3
+  local target=$4
+  local base_sha=$5
+  local patched_sha=$6
+
+  if ! printf '%s  %s\n' "$patch_sha" "$patch_file" | shasum -a 256 -c -; then
+    echo "Checksum verification failed for patch $patch_file" >&2
+    exit 1
+  fi
+  if ! printf '%s  %s\n' "$base_sha" "$source_dir/$target" | shasum -a 256 -c -; then
+    echo "$target is not the reviewed patch base; upstream source changed." >&2
+    exit 1
+  fi
+  if ! patch -p1 -d "$source_dir" --forward --silent < "$patch_file"; then
+    echo "Failed to apply required patch $patch_file to $source_dir" >&2
+    exit 1
+  fi
+  if ! printf '%s  %s\n' "$patched_sha" "$source_dir/$target" | shasum -a 256 -c -; then
+    echo "Patching $target produced an unexpected result." >&2
+    exit 1
+  fi
+}
+
 fetch_source fluidsynth \
   https://github.com/FluidSynth/fluidsynth/archive/refs/tags/v2.5.5.tar.gz \
   0827eefc06f66157c332d7bd0d65ee81be5d4c795f214db7ba0e1c70ee394430
@@ -91,6 +122,15 @@ fetch_source opus \
 fetch_source sndfile \
   https://github.com/libsndfile/libsndfile/archive/refs/tags/1.2.2.tar.gz \
   ffe12ef8add3eaca876f04087734e6e8e029350082f3251f565fa9da55b52121
+
+# CVE-2025-52194 and the unbounded IRCAM channel count. Reachable from a crafted
+# SF3 through FluidSynth's SF3 sample decoder; see vendor/libsndfile_patched/.
+apply_patch "$work_dir/sndfile" \
+  "$repo_dir/vendor/libsndfile_patched/libsndfile-1.2.2-ircam-hardening.patch" \
+  9ab039a1261c8705f7238876d7ec634d375ddb78ac72a3676b9216e10f88995b \
+  src/ircam.c \
+  52fab7073b1c7716902ee217769a48117577c1f33e84fb038232e2fe41088470 \
+  27c25a5938d0c2571f9aaf0910ecedee57c440e62be66cf55f7708fa5ba3a1ab
 
 mkdir -p "$work_dir/fluidsynth/gcem"
 cmake -E copy_directory "$work_dir/gcem" "$work_dir/fluidsynth/gcem"
