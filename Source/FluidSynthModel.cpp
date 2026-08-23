@@ -654,6 +654,13 @@ void FluidSynthModel::parameterChanged(const String& parameterID, float /*newVal
                 if (chNode.isValid())
                     chNode.setProperty(isMute ? "mute" : "solo",
                                        engaged ? 1 : 0, nullptr);
+            } else {
+                // Host automation on the audio thread: defer the tree write, or
+                // the editor never learns that fifteen other rows just went
+                // quiet. Solo is the case that matters - it changes how every
+                // OTHER row should look.
+                pendingMuteSoloSync.store(true, std::memory_order_release);
+                triggerAsyncUpdate();
             }
             return;
         }
@@ -762,6 +769,19 @@ void FluidSynthModel::handleAsyncUpdate() {
                 valueTreeState.getParameter("reverbProfile"))};
             p != nullptr && p->getIndex() != customReverbProfileIndex())
             *p = customReverbProfileIndex();
+    }
+
+    if (pendingMuteSoloSync.exchange(false, std::memory_order_acquire)) {
+        const unsigned int mutes{muteMask.load(std::memory_order_relaxed)};
+        const unsigned int solos{soloMask.load(std::memory_order_relaxed)};
+        ValueTree chPrograms{valueTreeState.state.getChildWithName("channelPrograms")};
+        for (int ch = 0; ch < kNumChannels; ++ch) {
+            ValueTree chNode{chPrograms.getChildWithProperty("num", ch)};
+            if (!chNode.isValid())
+                continue;
+            chNode.setProperty("mute", (mutes & (1u << ch)) != 0 ? 1 : 0, nullptr);
+            chNode.setProperty("solo", (solos & (1u << ch)) != 0 ? 1 : 0, nullptr);
+        }
     }
 
     // consume per-channel program changes and sound-CC changes captured on the
@@ -927,11 +947,28 @@ void FluidSynthModel::setChannelControllerValue(int channelToWrite, int controll
 }
 
 unsigned int FluidSynthModel::deriveSilencedMask(unsigned int mutes, unsigned int solos) {
-    // Solo wins: while anything is soloed, mute is irrelevant and everything
-    // else is silenced. This is the mixer convention, and it means clearing the
-    // last solo restores exactly the mute picture the user left behind.
+    // A channel sounds if it is NOT muted AND (nothing is soloed OR it is one of
+    // the soloed ones). Mute always wins; solo only restricts which channels are
+    // candidates.
+    //
+    // The obvious alternative - solo overrides mute entirely - was tried first
+    // and is worse, because it has a case where pressing a button does nothing:
+    // solo channel 5, press mute on channel 5, and the mute is ignored because a
+    // solo is active. A control that visibly engages and changes nothing is the
+    // worst kind of wrong. Under this rule every press of M does exactly what it
+    // says, always.
+    //
+    // Consequences, all of them intended:
+    //  - Muting the only soloed channel produces silence. The row shows a lit
+    //    mute and recedes, so the reason is visible rather than mysterious.
+    //  - Soloing a channel that is muted also produces silence, for the same
+    //    reason and with the same visible explanation.
+    //  - Soloing every channel is the same as soloing none: the solo set stops
+    //    excluding anything and only the mutes remain.
+    //  - Clearing the last solo restores exactly the mute picture the user left
+    //    behind, because solo never altered it.
     constexpr unsigned int all{(1u << kNumChannels) - 1u};
-    return solos != 0 ? (~solos & all) : (mutes & all);
+    return (mutes | (solos != 0 ? ~solos : 0u)) & all;
 }
 
 void FluidSynthModel::refreshSilencedMask() {

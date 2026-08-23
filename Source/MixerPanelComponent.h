@@ -26,6 +26,11 @@ public:
 
     void paint(Graphics&) override;
     void resized() override;
+    // Every token colour is resolved here rather than in the constructor. The
+    // panel is built as an editor member BEFORE the editor installs its
+    // LookAndFeel, so a constructor findColour asks the default one, which has
+    // never heard of Juicy16's ColourIds: it asserts and returns black.
+    void lookAndFeelChanged() override;
 
 private:
     void valueTreePropertyChanged(ValueTree&, const Identifier&) override;

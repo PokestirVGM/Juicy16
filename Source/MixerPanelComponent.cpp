@@ -14,8 +14,6 @@ constexpr int kReverbKnobSize{34};
 void styleHeading(Label& label, const String& text) {
     label.setText(text.toUpperCase(), NotificationType::dontSendNotification);
     label.setFont(Font{juce::FontOptions{GuiConstants::labelFontHeight}});
-    label.setColour(Label::textColourId,
-                    label.getLookAndFeel().findColour(Juicy16::textLabelColourId));
     label.setJustificationType(Justification::centredLeft);
     label.setInterceptsMouseClicks(false, false);
 }
@@ -54,8 +52,6 @@ MixerPanelComponent::MixerPanelComponent(
     addAndMakeVisible(outputLevelSlider);
 
     outputLevelValue.setFont(Font{juce::FontOptions{GuiConstants::masterValueFontHeight}});
-    outputLevelValue.setColour(Label::textColourId,
-                               findColour(Juicy16::textPrimaryColourId));
     outputLevelValue.setJustificationType(Justification::centredLeft);
     outputLevelValue.setInterceptsMouseClicks(false, false);
     // The slider is the accessible control; this is its visible readout, and a
@@ -65,8 +61,6 @@ MixerPanelComponent::MixerPanelComponent(
 
     outputLevelUnit.setText("dB trim", NotificationType::dontSendNotification);
     outputLevelUnit.setFont(Font{juce::FontOptions{GuiConstants::labelFontHeight}});
-    outputLevelUnit.setColour(Label::textColourId,
-                              findColour(Juicy16::textLabelColourId));
     outputLevelUnit.setJustificationType(Justification::centredLeft);
     outputLevelUnit.setInterceptsMouseClicks(false, false);
     outputLevelUnit.setAccessible(false);
@@ -133,8 +127,6 @@ MixerPanelComponent::MixerPanelComponent(
             auto caption{make_unique<Label>()};
             caption->setText(captions[i], NotificationType::dontSendNotification);
             caption->setFont(Font{juce::FontOptions{GuiConstants::labelFontHeight}});
-            caption->setColour(Label::textColourId,
-                               findColour(Juicy16::textLabelColourId));
             caption->setJustificationType(Justification::centred);
             caption->setInterceptsMouseClicks(false, false);
             // The knob is the accessible control; its caption would only be
@@ -149,7 +141,6 @@ MixerPanelComponent::MixerPanelComponent(
     addAndMakeVisible(bankHeading);
 
     bankName.setFont(Font{juce::FontOptions{GuiConstants::bodyFontHeight}});
-    bankName.setColour(Label::textColourId, findColour(Juicy16::textPrimaryColourId));
     bankName.setJustificationType(Justification::centredLeft);
     bankName.setMinimumHorizontalScale(0.75f);
     bankName.setName("Loaded bank");
@@ -158,7 +149,6 @@ MixerPanelComponent::MixerPanelComponent(
     addAndMakeVisible(bankName);
 
     bankDetail.setFont(Font{juce::FontOptions{GuiConstants::valueFontHeight}});
-    bankDetail.setColour(Label::textColourId, findColour(Juicy16::textLabelColourId));
     bankDetail.setJustificationType(Justification::centredLeft);
     bankDetail.setAccessible(false);
     addAndMakeVisible(bankDetail);
@@ -186,14 +176,16 @@ void MixerPanelComponent::syncBankSummary() {
     const String loadedPath{fontState.getProperty("loadedPath", "").toString()};
     if (loadedPath.isEmpty()) {
         bankName.setText("No bank loaded", NotificationType::dontSendNotification);
-        bankName.setColour(Label::textColourId, findColour(Juicy16::textLabelColourId));
+        bankName.setColour(Label::textColourId,
+                           getLookAndFeel().findColour(Juicy16::textLabelColourId));
         bankDetail.setText({}, NotificationType::dontSendNotification);
         bankName.setTooltip({});
         return;
     }
     const File file{loadedPath};
     bankName.setText(file.getFileName(), NotificationType::dontSendNotification);
-    bankName.setColour(Label::textColourId, findColour(Juicy16::textPrimaryColourId));
+    bankName.setColour(Label::textColourId,
+                       getLookAndFeel().findColour(Juicy16::textPrimaryColourId));
     bankName.setTooltip(loadedPath);
 
     // Preset count, not "channels active": how many channels a file touches is
@@ -217,6 +209,22 @@ void MixerPanelComponent::valueTreePropertyChanged(ValueTree& tree,
         syncBankSummary();
     else if (tree.getType() == StringRef("banks"))
         syncBankSummary();
+}
+
+void MixerPanelComponent::lookAndFeelChanged() {
+    auto& lookAndFeel{getLookAndFeel()};
+    const Colour label{lookAndFeel.findColour(Juicy16::textLabelColourId)};
+    const Colour primary{lookAndFeel.findColour(Juicy16::textPrimaryColourId)};
+    for (Label* heading : {&masterHeading, &reverbHeading, &bankHeading})
+        heading->setColour(Label::textColourId, label);
+    outputLevelValue.setColour(Label::textColourId, primary);
+    outputLevelUnit.setColour(Label::textColourId, label);
+    bankDetail.setColour(Label::textColourId, label);
+    for (Label* caption : reverbLabels)
+        caption->setColour(Label::textColourId, label);
+    // The bank name switches between primary and label depending on whether a
+    // bank is loaded, so let that logic own it.
+    syncBankSummary();
 }
 
 void MixerPanelComponent::paint(Graphics& g) {
@@ -271,11 +279,14 @@ void MixerPanelComponent::resized() {
         reverbLabels[i]->setBounds(column);
     }
 
-    // The bank summary sits at the foot of the panel.
-    Rectangle<int> bank{r.removeFromBottom(
+    // The bank summary follows the reverb rather than being pinned to the foot
+    // of the panel. Pinned, it left a large void between the two that read as
+    // unfinished; stacked, the leftover space falls at the bottom where it reads
+    // as the panel simply ending.
+    Rectangle<int> bank{r.removeFromTop(
         GuiConstants::padding * 2 + kHeadingHeight + kBankNameHeight
         + kBankDetailHeight + 8)};
-    bankDividerY = bank.getY();
+    bankDividerY = bank.getBottom();
     bank.reduce(GuiConstants::padding + 4, GuiConstants::padding);
     bankHeading.setBounds(bank.removeFromTop(kHeadingHeight));
     bank.removeFromTop(8);

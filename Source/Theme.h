@@ -34,6 +34,17 @@ enum ColourIds {
     textErrorColourId,
     knobTrackColourId,
     accentColourId,
+    // Mute keeps its own hue in every accent: a lit mute and a lit solo must
+    // never be told apart by position alone.
+    muteActiveColourId,
+    // Focus and hover are NEUTRAL, never the accent. The accent means "this is
+    // the value" - a knob's arc, a lit solo, the selected row - so spending it on
+    // "this has focus" both muddies that and puts a coloured ring around
+    // whatever the mouse last touched.
+    focusRingColourId,
+    // Drawn over a channel that is silenced - by its own mute, or by another
+    // channel's solo - so "this is not sounding" is visible on the row itself.
+    rowSilencedColourId,
     keyboardBackgroundColourId,
 };
 

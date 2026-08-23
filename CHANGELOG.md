@@ -109,6 +109,36 @@ false premise and uncovered a real bug. See "The reverb was never audible" below
 
 ### Fixed
 
+- **Interface corrections from the first look at the running plugin.**
+  - A lit mute drew as a near-white box with a dark letter, which read as a blank
+    white rectangle. Mute now keeps its own warm red in every accent and solo
+    takes the accent, so the two are never told apart by position alone.
+  - **Soloing a channel did not visibly do anything to the other fifteen.** A
+    silenced row — muted, or not soloed while something else is — now recedes,
+    so solo shows its effect on the rows it affects rather than only on the
+    button that was pressed.
+  - **Mute and solo semantics changed: mute now wins over solo.** The old rule
+    let solo override mute entirely, which meant pressing mute on the only
+    soloed channel did nothing at all. A channel now sounds if it is not muted
+    and either nothing is soloed or it is one of the soloed ones. Four new
+    assertions pin the edge cases, including that soloing every channel is the
+    same as soloing none.
+  - **Custom colours were resolving to black.** A cell or panel built before it
+    is parented asks the DEFAULT LookAndFeel, which has never heard of Juicy16's
+    ColourIds, so it asserted and returned black — which is what made a lit mute
+    a blank box. Colours are now resolved in `lookAndFeelChanged`. This also
+    removed most of a Debug assertion flood: 138 hits down to 63.
+  - **Focus and hover are neutral, not accent.** A green ring appeared around
+    whatever the mouse last touched. The accent now means "this is the value" —
+    a knob's arc, a lit solo, the selected row, a held key — and focus uses a
+    neutral ring.
+  - Small text was too dim: the label, value and faint tokens were raised
+    (7.6:1, 9.4:1 and 4.9:1 on the panel), and the label and value type went from
+    11px to 12px.
+  - The right-hand panel pinned its bank summary to the bottom, leaving a void
+    between it and the reverb. The three sections now stack from the top.
+  - Rows, mute/solo buttons and row knobs were cramped; row height went 26 → 28
+    and the columns widened to match.
 - **The reverb was never audible, and now is.** FluidSynth's reverb has always
   been running — `synth.reverb.active` defaults to on — but Juicy16 asked for
   audio with `fluid_synth_process(synth, n, 0, nullptr, 2, out)`, which renders

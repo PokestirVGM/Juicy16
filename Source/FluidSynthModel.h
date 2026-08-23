@@ -339,6 +339,10 @@ private:
     // reconciled on the message thread; -1 = nothing pending.
     std::atomic<int> pendingReverbProfile{-1};
     std::atomic<bool> pendingReverbCustom{false};
+    // Set when mute/solo changed on a thread that must not touch the ValueTree.
+    // Without it, a host automating mute or solo moves the engine and the button
+    // but leaves the row's silenced appearance stale.
+    std::atomic<bool> pendingMuteSoloSync{false};
     // True while the model is writing reverb parameters to reflect a profile, so
     // those writes do not bounce the selection straight back to Custom.
     bool applyingReverbProfile{false};

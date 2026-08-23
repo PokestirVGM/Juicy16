@@ -28,8 +28,8 @@ struct GuiConstants {
 
     // Type scale.
     inline static const float bodyFontHeight = 13.0f;
-    inline static const float valueFontHeight = 11.0f;
-    inline static const float labelFontHeight = 11.0f;
+    inline static const float valueFontHeight = 12.0f;
+    inline static const float labelFontHeight = 12.0f;
     inline static const float masterValueFontHeight = 19.0f;
 
     // Knob arc thickness as a fraction of the knob's diameter, so a row knob and
@@ -51,15 +51,15 @@ struct GuiConstants {
     // Channel rack metrics. The column widths are the row's anatomy, left to
     // right, and minInstrumentWidth is what an instrument name needs before the
     // window stops shrinking.
-    inline static const int channelHeaderHeight = 22;
-    inline static const int channelRowHeight = 26;
+    inline static const int channelHeaderHeight = 24;
+    inline static const int channelRowHeight = 28;
     inline static const int numMidiChannels = 16;
     inline static const int channelNumberWidth = 34;
-    inline static const int muteSoloWidth = 46;
-    inline static const int mixerCellWidth = 70;
+    inline static const int muteSoloWidth = 54;
+    inline static const int mixerCellWidth = 74;
     inline static const int minInstrumentWidth = 140;
     // The knob inside a mixer cell, and the value readout beside it.
-    inline static const int rowKnobSize = 20;
+    inline static const int rowKnobSize = 22;
     inline static const int rowValueWidth = 30;
 
     // Derived, not guessed. Minimum width is the narrowest row that keeps every

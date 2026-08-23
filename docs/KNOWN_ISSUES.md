@@ -4,7 +4,7 @@ This file describes the unreleased `0.6.0-alpha.1` development state. It must be
 
 ## Debug-only: unregistered LookAndFeel colour IDs
 
-Constructing the editor produces 138 `jassertfalse` hits at
+Constructing the editor produces 63 `jassertfalse` hits at
 `juce_LookAndFeel.cpp:94` — `LookAndFeel::findColour` for a colour ID that was
 never registered, which returns black. **Debug builds only**; release builds
 compile the assertion out.
@@ -16,14 +16,20 @@ What is established:
 - It has no visible effect. Every surface was inspected in the running plugin at
   minimum, default and 1000px widths and rendered correctly, so whatever is
   asking for the colour is not drawing with the black it gets back.
-- `DrawableButton`'s four colour IDs were a plausible cause — `LookAndFeel_V4`
-  does not initialise them and the header's settings button is one — but
-  registering them changed the count by zero, so they are not it. They are now
-  set anyway, because a themed editor should define them.
+- **The majority were Juicy16's own, and are fixed.** A cell or panel component
+  built before it is parented resolves colours against the DEFAULT LookAndFeel,
+  which has never heard of Juicy16's ColourIds — so it asserted and returned
+  black. That is what made a lit mute button draw as a blank box. Those lookups
+  moved into `lookAndFeelChanged()`, which is the hook that fires once the real
+  LookAndFeel is in place, and the count fell from 138 to 63.
+- `DrawableButton`'s four colour IDs were a plausible cause for the remainder —
+  `LookAndFeel_V4` does not initialise them and the header's settings button is
+  one — but registering them changed the count by zero. They are set anyway,
+  because a themed editor should define them.
 
-Not yet identified: which ID, and which control asks for it. Worth attaching a
-debugger to `LookAndFeel::findColour` and reading `colourID` on the first hit.
-Low severity, but 138 assertions is loud enough to hide a real one.
+The remaining 63 are not yet identified and are most likely stock JUCE IDs that
+`LookAndFeel_V4::initialiseColours` never sets. Worth attaching a debugger to
+`LookAndFeel::findColour` and reading `colourID` on the first hit.
 
 ## Reverb
 

@@ -19,12 +19,16 @@ const juce::Colour kControlBorder   {0xff363636};
 const juce::Colour kRowAlternate    {0xff212121};
 const juce::Colour kRowSelected     {0xff2e2e2e};
 const juce::Colour kTextPrimary     {0xffe4e4e4};
-const juce::Colour kTextValue       {0xffa8a8a8};
-const juce::Colour kTextLabel       {0xff949494};
-const juce::Colour kTextFaint       {0xff7a7a7a};
+const juce::Colour kTextValue       {0xffc8c8c8};
+const juce::Colour kTextLabel       {0xffb4b4b4};
+const juce::Colour kTextFaint       {0xff909090};
 const juce::Colour kTextError       {0xffef8f77};
 const juce::Colour kKnobTrack       {0xff3d3d3d};
 const juce::Colour kKeyboard        {0xff151515};
+const juce::Colour kMuteActive      {0xffd0705e};
+const juce::Colour kFocusRing       {0xff9a9a9a};
+// A scrim, not a colour: laid over a silenced row's own background.
+const juce::Colour kRowSilenced     {0xa61c1c1c};
 
 const juce::Colour kAccentSage      {0xff8fa47a};
 const juce::Colour kAccentAmber     {0xffd8a24a};
@@ -88,6 +92,9 @@ void PluginLookAndFeel::applyTokens() {
     setColour(textErrorColourId,          kTextError);
     setColour(knobTrackColourId,          kKnobTrack);
     setColour(accentColourId,             kAccent);
+    setColour(muteActiveColourId,         kMuteActive);
+    setColour(focusRingColourId,          kFocusRing);
+    setColour(rowSilencedColourId,        kRowSilenced);
     setColour(keyboardBackgroundColourId, kKeyboard);
 
     // Stock JUCE ids, so any control the plugin has not styled by hand still
@@ -100,7 +107,7 @@ void PluginLookAndFeel::applyTokens() {
     setColour(juce::Label::outlineColourId,              juce::Colours::transparentBlack);
     setColour(juce::Label::textWhenEditingColourId,      kTextPrimary);
     setColour(juce::Label::backgroundWhenEditingColourId, kInput);
-    setColour(juce::Label::outlineWhenEditingColourId,   kAccent);
+    setColour(juce::Label::outlineWhenEditingColourId,   kFocusRing);
 
     setColour(juce::ListBox::backgroundColourId,         kWindow);
     setColour(juce::ListBox::textColourId,               kTextPrimary);
@@ -116,12 +123,12 @@ void PluginLookAndFeel::applyTokens() {
     setColour(juce::ComboBox::outlineColourId,           kBorder);
     setColour(juce::ComboBox::buttonColourId,            kTextFaint);
     setColour(juce::ComboBox::arrowColourId,             kTextFaint);
-    setColour(juce::ComboBox::focusedOutlineColourId,    kAccent);
+    setColour(juce::ComboBox::focusedOutlineColourId,    kFocusRing);
 
     setColour(juce::PopupMenu::backgroundColourId,          kPanel);
     setColour(juce::PopupMenu::textColourId,                kTextPrimary);
     setColour(juce::PopupMenu::headerTextColourId,          kTextLabel);
-    setColour(juce::PopupMenu::highlightedBackgroundColourId, kAccent.withAlpha(0.28f));
+    setColour(juce::PopupMenu::highlightedBackgroundColourId, kRowSelected);
     setColour(juce::PopupMenu::highlightedTextColourId,     kTextPrimary);
 
     setColour(juce::TextButton::buttonColourId,          kControl);
@@ -138,13 +145,13 @@ void PluginLookAndFeel::applyTokens() {
     setColour(juce::Slider::textBoxTextColourId,         kTextValue);
     setColour(juce::Slider::textBoxBackgroundColourId,   juce::Colours::transparentBlack);
     setColour(juce::Slider::textBoxOutlineColourId,      juce::Colours::transparentBlack);
-    setColour(juce::Slider::textBoxHighlightColourId,    kAccent.withAlpha(0.3f));
+    setColour(juce::Slider::textBoxHighlightColourId,    kControlBorder);
 
     setColour(juce::TextEditor::backgroundColourId,      kInput);
     setColour(juce::TextEditor::textColourId,            kTextPrimary);
     setColour(juce::TextEditor::outlineColourId,         kBorder);
-    setColour(juce::TextEditor::focusedOutlineColourId,  kAccent);
-    setColour(juce::TextEditor::highlightColourId,       kAccent.withAlpha(0.3f));
+    setColour(juce::TextEditor::focusedOutlineColourId,  kFocusRing);
+    setColour(juce::TextEditor::highlightColourId,       kControlBorder);
 
     setColour(juce::ScrollBar::backgroundColourId,       juce::Colours::transparentBlack);
     setColour(juce::ScrollBar::thumbColourId,            kControlBorder);
@@ -173,7 +180,8 @@ void PluginLookAndFeel::applyTokens() {
     setColour(juce::MidiKeyboardComponent::whiteNoteColourId,     juce::Colour{0xffcfcfcf});
     setColour(juce::MidiKeyboardComponent::blackNoteColourId,     juce::Colour{0xff1a1a1a});
     setColour(juce::MidiKeyboardComponent::keySeparatorLineColourId, juce::Colour{0xff4a4a4a});
-    setColour(juce::MidiKeyboardComponent::mouseOverKeyOverlayColourId, kAccent.withAlpha(0.4f));
+    setColour(juce::MidiKeyboardComponent::mouseOverKeyOverlayColourId,
+              kFocusRing.withAlpha(0.35f));
     setColour(juce::MidiKeyboardComponent::keyDownOverlayColourId, kAccent.withAlpha(0.75f));
     setColour(juce::MidiKeyboardComponent::textLabelColourId,     kTextFaint);
     setColour(juce::MidiKeyboardComponent::upDownButtonBackgroundColourId, kControl);
@@ -230,7 +238,7 @@ void PluginLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int wi
     g.fillPath(pointer);
 
     if (slider.hasKeyboardFocus(false)) {
-        g.setColour(slider.findColour(juce::Slider::rotarySliderFillColourId));
+        g.setColour(findColour(focusRingColourId).withAlpha(0.55f));
         g.drawEllipse(bounds.withSizeKeepingCentre(diameter, diameter), 1.0f);
     }
 }
@@ -243,7 +251,7 @@ void PluginLookAndFeel::drawLinearSlider(juce::Graphics& g, int x, int y, int wi
     LookAndFeel_V4::drawLinearSlider(g, x, y, width, height, sliderPos,
                                      minSliderPos, maxSliderPos, style, slider);
     if (slider.hasKeyboardFocus(false)) {
-        g.setColour(slider.findColour(juce::Slider::rotarySliderFillColourId));
+        g.setColour(findColour(focusRingColourId).withAlpha(0.55f));
         g.drawRect(juce::Rectangle<int>{x, y, width, height}.toFloat(), 1.0f);
     }
 }
@@ -317,7 +325,7 @@ void PluginLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Button& bu
     g.setColour(fill);
     g.fillRoundedRectangle(bounds, GuiConstants::cornerRadius);
     g.setColour(button.hasKeyboardFocus(false)
-        ? findColour(accentColourId)
+        ? findColour(focusRingColourId)
         : findColour(controlBorderColourId));
     g.drawRoundedRectangle(bounds, GuiConstants::cornerRadius, 1.0f);
 }
@@ -352,7 +360,7 @@ void PluginLookAndFeel::drawToggleButton(juce::Graphics& g,
         g.drawRoundedRectangle(track.reduced(0.5f), height * 0.5f, 1.0f);
     }
     if (button.hasKeyboardFocus(false)) {
-        g.setColour(findColour(accentColourId));
+        g.setColour(findColour(focusRingColourId).withAlpha(0.55f));
         g.drawRoundedRectangle(track.expanded(2.0f), (height + 4.0f) * 0.5f, 1.0f);
     }
 

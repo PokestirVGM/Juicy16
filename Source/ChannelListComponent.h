@@ -123,6 +123,11 @@ private:
         explicit MuteSoloCell(ChannelListComponent& owner);
         void setRow(int newRow);
         void resized() override;
+        // Colours must be resolved HERE, not in the constructor: a cell is built
+        // before it is parented, so a constructor findColour asks the default
+        // LookAndFeel, which has never heard of Juicy16's ColourIds - it asserts
+        // and hands back black. That is what made a lit mute a blank box.
+        void lookAndFeelChanged() override;
     private:
         ChannelListComponent& owner;
         juce::TextButton mute{"M"};
@@ -158,6 +163,13 @@ private:
     // Width the instrument column should take: everything the fixed columns
     // leave behind. No visible region belongs to no control.
     int instrumentColumnWidth() const;
+
+    // A channel is silenced by its own mute, or by another channel's solo. The
+    // row shows it either way: the controls recede and a scrim goes over the
+    // background, so "this is not sounding" is visible without reading buttons.
+    bool isRowSilenced(int row) const;
+    void refreshSilencedRows();
+    unsigned int lastSilencedMask{0};
 
     void rebuildPatchList();
     int patchIndexFor(int bank, int preset) const; // -1 if absent from font

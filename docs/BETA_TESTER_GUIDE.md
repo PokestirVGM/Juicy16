@@ -64,8 +64,12 @@ Two things to know about the row controls:
   Change. This is intended; please do not report it as a defect.
 - **Mute and solo do not follow the MIDI file.** Nothing in a MIDI file changes
   them, and no reset clears them. A muted channel stops sounding new notes but
-  still receives everything else, so unmuting mid-song picks up correctly. While
-  anything is soloed, everything not soloed is silent.
+  still receives everything else, so unmuting mid-song picks up correctly.
+- **Mute wins over solo.** A channel sounds if it is not muted and either nothing
+  is soloed or it is one of the soloed ones. Muting the only soloed channel does
+  produce silence — that is deliberate, so that pressing M always does something.
+  Every silenced row visibly recedes, and a lit mute is red while a lit solo is
+  the accent colour, so you can always see why a channel is quiet.
 
 Every one of those controls is a host parameter, so a host's automation and
 controller-link menus reach all 16 channels.

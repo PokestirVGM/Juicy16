@@ -2604,9 +2604,9 @@ int main(int argc, char** argv)
         check(audibleBeforeMute && silentWhenMuted && neighbourUnaffected,
               "mute silences its own channel's notes and no other channel's");
 
-        // Solo overrides mute entirely while it is engaged: the soloed channel
-        // sounds even though channel 3 is still muted, and every other channel is
-        // silenced without being muted.
+        // Solo restricts which channels are candidates; it does not overrule a
+        // mute. The soloed channel sounds, every channel that is not soloed goes
+        // quiet without being muted, and channel 3's own mute is untouched.
         setBool("soloCh", 5, true);
         const bool soloedSounds{levelOnChannel(5) > audiblePresence};
         const bool unsoloedSilent{levelOnChannel(3) <= audiblePresence
@@ -2617,6 +2617,59 @@ int main(int argc, char** argv)
                                 && levelOnChannel(3) > audiblePresence};
         check(soloedSounds && unsoloedSilent && muteRestored,
               "solo silences every channel that is not soloed, and clearing it restores the previous mutes");
+
+        // The edge case that decided the rule. Under "solo overrides mute",
+        // pressing mute on the ONLY soloed channel does nothing at all - a
+        // control that visibly engages and changes nothing. Mute wins instead,
+        // so every press of M does what it says.
+        setBool("muteCh", 2, false);
+        setBool("soloCh", 6, true);
+        const bool soloedAloneSounds{levelOnChannel(6) > audiblePresence};
+        setBool("muteCh", 6, true);
+        const bool mutingTheSoloedChannelSilencesIt{
+            levelOnChannel(6) <= audiblePresence};
+        setBool("muteCh", 6, false);
+        const bool unmutingBringsItBack{levelOnChannel(6) > audiblePresence};
+        // Soloing a channel that is already muted is the same statement made in
+        // the other order, and must give the same answer.
+        setBool("soloCh", 6, false);
+        setBool("muteCh", 7, true);
+        setBool("soloCh", 7, true);
+        const bool soloingAMutedChannelStaysSilent{
+            levelOnChannel(7) <= audiblePresence};
+        setBool("muteCh", 7, false);
+        setBool("soloCh", 7, false);
+        check(soloedAloneSounds && mutingTheSoloedChannelSilencesIt
+                  && unmutingBringsItBack && soloingAMutedChannelStaysSilent,
+              "mute wins over solo: muting the only soloed channel silences it, and soloing a muted channel does not unmute it");
+
+        // Soloing everything excludes nothing, so it must be identical to
+        // soloing nothing - only the mutes remain.
+        setBool("muteCh", 4, true);
+        for (int channel = 0; channel < 16; ++channel)
+            setBool("soloCh", channel, true);
+        const bool allSoloedIsLikeNoneSoloed{
+            levelOnChannel(5) > audiblePresence
+            && levelOnChannel(4) <= audiblePresence};
+        for (int channel = 0; channel < 16; ++channel)
+            setBool("soloCh", channel, false);
+        setBool("muteCh", 4, false);
+        // Two soloed channels both sound.
+        setBool("soloCh", 8, true);
+        setBool("soloCh", 11, true);
+        const bool bothSoloedSound{levelOnChannel(8) > audiblePresence
+                                   && levelOnChannel(11) > audiblePresence
+                                   && levelOnChannel(5) <= audiblePresence};
+        setBool("soloCh", 8, false);
+        const bool remainingSoloStillRestricts{
+            levelOnChannel(11) > audiblePresence
+            && levelOnChannel(8) <= audiblePresence};
+        setBool("soloCh", 11, false);
+        check(allSoloedIsLikeNoneSoloed && bothSoloedSound
+                  && remainingSoloStillRestricts,
+              "soloing every channel is the same as soloing none, several solos coexist, and clearing one leaves the rest restricting");
+
+        setBool("muteCh", 2, true);
 
         // Muting mid-note must release the notes already sounding rather than
         // leaving them ringing until their own note-off.

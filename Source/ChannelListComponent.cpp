@@ -84,13 +84,18 @@ ChannelListComponent::MuteSoloCell::MuteSoloCell(ChannelListComponent& ownerRef)
         button->setConnectedEdges(0);
         addAndMakeVisible(*button);
     }
-    // A lit mute and a lit solo must not look alike at a glance. Solo takes the
-    // accent; mute takes the primary text colour, which is the only other fill
-    // in the palette bright enough to read as "on".
+}
+
+void ChannelListComponent::MuteSoloCell::lookAndFeelChanged() {
+    // A lit mute and a lit solo must never be told apart by position alone, so
+    // they get different hues: solo takes the accent, mute keeps its own warm
+    // red in every accent. Both carry a dark label, which is legible on either
+    // fill - a near-white fill with a dark letter read as a blank white box.
+    auto& lookAndFeel{getLookAndFeel()};
     solo.setColour(juce::TextButton::buttonOnColourId,
-                   findColour(Juicy16::accentColourId));
+                   lookAndFeel.findColour(Juicy16::accentColourId));
     mute.setColour(juce::TextButton::buttonOnColourId,
-                   findColour(Juicy16::textPrimaryColourId));
+                   lookAndFeel.findColour(Juicy16::muteActiveColourId));
 }
 
 void ChannelListComponent::MuteSoloCell::setRow(int newRow) {
@@ -122,8 +127,9 @@ void ChannelListComponent::MuteSoloCell::setRow(int newRow) {
 }
 
 void ChannelListComponent::MuteSoloCell::resized() {
-    Rectangle<int> r{getLocalBounds().reduced(0, 5)};
-    const int width{(r.getWidth() - 4) / 2};
+    Rectangle<int> r{getLocalBounds().reduced(0, 4)};
+    const int gap{4};
+    const int width{(r.getWidth() - gap) / 2};
     mute.setBounds(r.removeFromLeft(width));
     solo.setBounds(r.removeFromRight(width));
 }
@@ -298,7 +304,32 @@ void ChannelListComponent::paintRowBackground(
         g.setColour(lookAndFeel.findColour(Juicy16::accentColourId));
         g.fillRect(0, 0, 2, height);
     }
-    juce::ignoreUnused(width);
+    if (isRowSilenced(rowNumber)) {
+        // Whether this channel muted itself or another channel soloed, the row
+        // reads as not sounding. Soloing one channel visibly quiets fifteen.
+        g.setColour(lookAndFeel.findColour(Juicy16::rowSilencedColourId));
+        g.fillRect(0, 0, width, height);
+    }
+}
+
+bool ChannelListComponent::isRowSilenced(int row) const {
+    return fluidSynthModel.isChannelSilenced(row);
+}
+
+void ChannelListComponent::refreshSilencedRows() {
+    const unsigned int mask{fluidSynthModel.getSilencedMask()};
+    if (mask == lastSilencedMask)
+        return;
+    lastSilencedMask = mask;
+    for (int row = 0; row < numChannels; ++row) {
+        const float alpha{(mask & (1u << row)) != 0 ? 0.45f : 1.0f};
+        // Mute and solo stay at full strength: they are how the user gets the
+        // channel back, so they must not recede with the rest of the row.
+        for (const int column : {instrumentColumn, volumeColumn, panColumn})
+            if (auto* cell{table.getCellComponent(column, row)})
+                cell->setAlpha(alpha);
+    }
+    table.repaint();
 }
 
 void ChannelListComponent::paintCell(
@@ -315,7 +346,8 @@ void ChannelListComponent::paintCell(
     auto& lookAndFeel{getLookAndFeel()};
     g.setColour(lookAndFeel.findColour(rowNumber == getSelectedChannelIndex()
         ? Juicy16::textPrimaryColourId
-        : Juicy16::textValueColourId));
+        : Juicy16::textValueColourId)
+        .withMultipliedAlpha(isRowSilenced(rowNumber) ? 0.45f : 1.0f));
     g.setFont(font);
     // channel number, displayed 1-indexed
     g.drawText(String(rowNumber + 1),
@@ -351,6 +383,7 @@ Component* ChannelListComponent::refreshComponentForCell(
             if (cell == nullptr)
                 cell = new PatchCell(*this);
             cell->setRow(rowNumber);
+            cell->setAlpha(isRowSilenced(rowNumber) ? 0.45f : 1.0f);
             return cell;
         }
         case volumeColumn:
@@ -359,6 +392,7 @@ Component* ChannelListComponent::refreshComponentForCell(
             if (cell == nullptr)
                 cell = new MixerCell(*this, columnId);
             cell->setRow(rowNumber);
+            cell->setAlpha(isRowSilenced(rowNumber) ? 0.45f : 1.0f);
             return cell;
         }
         default:
@@ -421,6 +455,10 @@ void ChannelListComponent::valueTreePropertyChanged(
         // one of those would rebuild every visible cell for nothing.
         if (property == StringRef("bank") || property == StringRef("preset"))
             table.updateContent();
+        // Solo changes what fifteen OTHER rows look like, so this cannot be a
+        // per-row repaint driven by the row that changed.
+        else if (property == StringRef("mute") || property == StringRef("solo"))
+            refreshSilencedRows();
     } else if (type == StringRef("uiState")
                && property == StringRef("selectedChannel")) {
         // the selection marker is a paint concern, not a content one

@@ -227,9 +227,21 @@ no controller reset or GM/GS/XG reset SysEx clears them.
   needs no resync.
 - Muting a channel that is already sounding sends it All Notes Off, so held notes
   release naturally rather than ringing on or cutting off with a click.
-- While **any** channel is soloed, every channel that is not soloed is silenced
-  and mute is irrelevant. Clearing the last solo restores exactly the mute
-  picture that was there before.
+- **A channel sounds if it is not muted, and either nothing is soloed or it is
+  one of the soloed ones.** Mute always wins; solo only restricts which channels
+  are candidates. So:
+  - Muting the only soloed channel produces silence. Pressing M always does what
+    it says — under the obvious alternative, "solo overrides mute", that press
+    would have done nothing at all.
+  - Soloing a channel that is muted also produces silence, which is the same
+    statement in the other order.
+  - Soloing every channel is the same as soloing none: the solo set stops
+    excluding anything and only the mutes remain.
+  - Clearing the last solo restores exactly the mute picture that was there
+    before, because solo never altered it.
+- **You can always see why a channel is quiet.** A silenced row recedes, and a
+  lit mute is red while a lit solo is the accent colour, so a muted channel and a
+  not-soloed channel never look alike.
 
 ### CC71-79 are forwarded but do nothing
 

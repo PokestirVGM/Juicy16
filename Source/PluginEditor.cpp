@@ -58,8 +58,6 @@ public:
 
         accentHeading.setText("ACCENT", dontSendNotification);
         accentHeading.setFont(Font{juce::FontOptions{GuiConstants::labelFontHeight}});
-        accentHeading.setColour(Label::textColourId,
-                                findColour(Juicy16::textLabelColourId));
         accentHeading.setAccessible(false);
         addAndMakeVisible(accentHeading);
 
@@ -94,7 +92,6 @@ public:
 
         facts.setText(engineFacts, dontSendNotification);
         facts.setFont(Font{juce::FontOptions{GuiConstants::valueFontHeight}});
-        facts.setColour(Label::textColourId, findColour(Juicy16::textValueColourId));
         facts.setJustificationType(Justification::topLeft);
         facts.setName("Build information");
         facts.setTitle("Build information");
@@ -106,6 +103,17 @@ public:
 
     void paint(Graphics& g) override {
         g.fillAll(findColour(Juicy16::panelBackgroundColourId));
+    }
+
+    // Resolved here, not in the constructor: the panel is built before it is
+    // given the plugin's LookAndFeel, and the default one has never heard of
+    // Juicy16's ColourIds - it asserts and returns black.
+    void lookAndFeelChanged() override {
+        auto& lookAndFeel{getLookAndFeel()};
+        accentHeading.setColour(Label::textColourId,
+                                lookAndFeel.findColour(Juicy16::textLabelColourId));
+        facts.setColour(Label::textColourId,
+                        lookAndFeel.findColour(Juicy16::textValueColourId));
     }
 
     void resized() override {
@@ -204,7 +212,7 @@ JuicySFAudioProcessorEditor::JuicySFAudioProcessorEditor(
     addAndMakeVisible(filePicker);
 
     settingsButton.setImages(
-        makeGearDrawable(findColour(Juicy16::textLabelColourId)).get());
+        makeGearDrawable(lookAndFeel.findColour(Juicy16::textLabelColourId)).get());
     settingsButton.setName("Settings");
     settingsButton.setTitle("Settings");
     settingsButton.setDescription("Open Juicy16 settings");
@@ -281,8 +289,8 @@ void JuicySFAudioProcessorEditor::syncStatusLabel() {
     // red.
     statusLabel.setColour(
         Label::textColourId,
-        findColour(status == "error" ? Juicy16::textErrorColourId
-                                     : Juicy16::textLabelColourId));
+        lookAndFeel.findColour(status == "error" ? Juicy16::textErrorColourId
+                                                 : Juicy16::textLabelColourId));
 }
 
 void JuicySFAudioProcessorEditor::valueTreePropertyChanged(ValueTree& tree, const Identifier& property) {
