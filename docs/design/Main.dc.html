@@ -1,0 +1,226 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; font-family: "IBM Plex Sans", system-ui, sans-serif; }
+    a { color: #8fa47a; } a:hover { color: #6f8459; }
+    .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+  </style>
+</helmet>
+
+<div style="width: 920px; height: 580px; box-sizing: border-box; background: #1c1c1c; color: #e4e4e4; display: flex; flex-direction: column; font-size: 12px; overflow: hidden;">
+
+  <div style="display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 10px; background: #262626; border-bottom: 1px solid #333333; flex-shrink: 0;">
+    <img src="juicy16-logo.png" alt="Juicy16" style="height: 17px; width: auto; display: block; flex-shrink: 0; padding-right: 2px;">
+    <div style="flex-grow: 1; display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; background: #171717; border: 1px solid #333333; border-radius: 2px; overflow: hidden; min-width: 0;">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6f6f6f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
+      <span style="color: #6f6f6f; white-space: nowrap;">VGMTrans Output /</span>
+      <span style="color: #e4e4e4; font-weight: 500; white-space: nowrap;">SEQ_BGM_VS_RAI.dls</span>
+    </div>
+    <div style="width: 24px; height: 24px; border: 1px solid #333333; border-radius: 2px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9a9a9a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3.2"></circle>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+      </svg>
+    </div>
+  </div>
+
+  <div style="flex-grow: 1; display: flex; align-items: stretch; min-height: 0;">
+
+    <div style="flex-grow: 1; display: flex; flex-direction: column; min-width: 0;">
+      <div style="display: flex; align-items: center; gap: 12px; height: 22px; padding: 0 10px; color: #767676; font-size: 10px; letter-spacing: 0.08em; flex-shrink: 0;">
+        <div style="width: 22px; text-align: right;">CH</div>
+        <div style="width: 38px;"></div>
+        <div style="flex-grow: 1;">INSTRUMENT</div>
+        <div style="width: 56px; text-align: center;">VOL</div>
+        <div style="width: 56px; text-align: center;">PAN</div>
+      </div>
+      <sc-for list="{{channels}}" as="ch" hint-placeholder-count="16">
+        <div style="display: flex; align-items: center; gap: 12px; height: 26px; padding: 0 10px; background: {{ch.rowBg}}; box-shadow: inset 2px 0 0 0 {{ch.marker}}; flex-shrink: 0;">
+          <div class="mono" style="width: 22px; text-align: right; color: {{ch.chColour}}; font-size: 11px;">{{ch.num}}</div>
+          <div style="width: 38px; display: flex; gap: 4px; flex-shrink: 0;">
+            <div style="width: 17px; height: 15px; border-radius: 2px; background: #232323; border: 1px solid #363636; color: #6f6f6f; font-size: 9px; display: flex; align-items: center; justify-content: center;">M</div>
+            <div style="width: 17px; height: 15px; border-radius: 2px; background: #232323; border: 1px solid #363636; color: #6f6f6f; font-size: 9px; display: flex; align-items: center; justify-content: center;">S</div>
+          </div>
+          <div style="flex-grow: 1; display: flex; align-items: center; gap: 7px; min-width: 0; opacity: {{ch.fade}};">
+            <span class="mono" style="color: #7f7f7f; font-size: 11px;">{{ch.program}}</span>
+            <span style="color: #d4d4d4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ch.name}}</span>
+            <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#5f5f5f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>
+          </div>
+          <div style="width: 56px; display: flex; align-items: center; justify-content: flex-end; gap: 6px; opacity: {{ch.fade}}; flex-shrink: 0;">
+            <svg width="19" height="19" viewBox="0 0 26 26">
+              <path d="M 6.1 19.9 A 9.75 9.75 0 1 1 19.9 19.9" fill="none" stroke="#343434" stroke-width="3.2" stroke-linecap="round"></path>
+              <path d="M 6.1 19.9 A 9.75 9.75 0 1 1 19.9 19.9" fill="none" stroke="#8fa47a" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="{{ch.volDash}}"></path>
+            </svg>
+            <span class="mono" style="color: #909090; font-size: 10px; width: 20px; text-align: right;">{{ch.volume}}</span>
+          </div>
+          <div style="width: 56px; display: flex; align-items: center; justify-content: flex-end; gap: 6px; opacity: {{ch.fade}}; flex-shrink: 0;">
+            <svg width="19" height="19" viewBox="0 0 26 26">
+              <path d="M 6.1 19.9 A 9.75 9.75 0 1 1 19.9 19.9" fill="none" stroke="#343434" stroke-width="3.2" stroke-linecap="round"></path>
+              <line x1="13" y1="3.5" x2="13" y2="5.5" stroke="#565656" stroke-width="1.5" stroke-linecap="round"></line>
+              <line x1="13" y1="13" x2="13" y2="5.6" stroke="#cccccc" stroke-width="2.3" stroke-linecap="round" transform="rotate({{ch.panAngle}} 13 13)"></line>
+            </svg>
+            <span class="mono" style="color: #909090; font-size: 10px; width: 20px; text-align: right;">{{ch.pan}}</span>
+          </div>
+        </div>
+      </sc-for>
+      <div style="flex-grow: 1; background: #1c1c1c;"></div>
+    </div>
+
+    <div style="width: 236px; flex-shrink: 0; background: #232323; border-left: 1px solid #333333; display: flex; flex-direction: column;">
+
+      <div style="padding: 12px 14px; border-bottom: 1px solid #303030;">
+        <div style="color: #767676; font-size: 10px; letter-spacing: 0.08em; margin-bottom: 10px;">MASTER</div>
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <svg width="44" height="44" viewBox="0 0 26 26">
+            <path d="M 6.1 19.9 A 9.75 9.75 0 1 1 19.9 19.9" fill="none" stroke="#343434" stroke-width="2.6" stroke-linecap="round"></path>
+            <line x1="13" y1="13" x2="13" y2="5.2" stroke="#e4e4e4" stroke-width="2" stroke-linecap="round"></line>
+            <circle cx="13" cy="13" r="5.6" fill="#2c2c2c" stroke="#3d3d3d" stroke-width="1"></circle>
+          </svg>
+          <div>
+            <div class="mono" style="color: #ffffff; font-size: 18px; line-height: 1.1;">0.0</div>
+            <div style="color: #767676; font-size: 10px;">dB trim</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="padding: 12px 14px; border-bottom: 1px solid #303030;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+          <span style="color: #767676; font-size: 10px; letter-spacing: 0.08em;">REVERB</span>
+          <div style="width: 26px; height: 14px; border-radius: 7px; background: #8fa47a; display: flex; align-items: center; justify-content: flex-end; padding: 0 2px; box-sizing: border-box;">
+            <div style="width: 10px; height: 10px; border-radius: 50%; background: #1a1a1a;"></div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; justify-content: space-between; height: 24px; padding: 0 8px; background: #171717; border: 1px solid #333333; border-radius: 2px; margin-bottom: 12px;">
+          <span style="color: #d4d4d4;">Universal</span>
+          <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#5f5f5f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px;">
+          <sc-for list="{{reverb}}" as="r" hint-placeholder-count="4">
+            <div style="display: flex; flex-direction: column; align-items: center; gap: 5px;">
+              <svg width="36" height="36" viewBox="0 0 26 26">
+                <path d="M 6.1 19.9 A 9.75 9.75 0 1 1 19.9 19.9" fill="none" stroke="#343434" stroke-width="2.6" stroke-linecap="round"></path>
+                <path d="M 6.1 19.9 A 9.75 9.75 0 1 1 19.9 19.9" fill="none" stroke="#8fa47a" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="{{r.dash}}"></path>
+                <circle cx="13" cy="13" r="4.6" fill="#2c2c2c" stroke="#3d3d3d" stroke-width="1"></circle>
+              </svg>
+              <span style="color: #8a8a8a; font-size: 10px;">{{r.label}}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <div style="flex-grow: 1;"></div>
+
+      <div style="padding: 12px 14px; border-top: 1px solid #303030;">
+        <div style="color: #767676; font-size: 10px; letter-spacing: 0.08em; margin-bottom: 7px;">BANK</div>
+        <div style="color: #d4d4d4; margin-bottom: 3px;">SEQ_BGM_VS_RAI.dls</div>
+        <div class="mono" style="color: #767676; font-size: 11px;">DLS · 12 channels active</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="height: 66px; background: #151515; border-top: 1px solid #333333; position: relative; flex-shrink: 0; overflow: hidden;">
+    <sc-for list="{{whiteKeys}}" as="k" hint-placeholder-count="64">
+      <div style="position: absolute; top: 0; left: {{k.left}}; width: {{k.width}}; height: 66px; box-sizing: border-box; background: {{k.fill}}; border-right: 1px solid #4a4a4a;">
+        <sc-if value="{{k.label}}" hint-placeholder-val="{{true}}">
+          <span class="mono" style="position: absolute; bottom: 2px; left: 1px; font-size: 7px; color: #6f6f6f; white-space: nowrap;">{{k.label}}</span>
+        </sc-if>
+      </div>
+    </sc-for>
+    <sc-for list="{{blackKeys}}" as="k" hint-placeholder-count="45">
+      <div style="position: absolute; top: 0; left: {{k.left}}; width: {{k.width}}; height: 41px; background: {{k.fill}}; border-radius: 0 0 1px 1px;"></div>
+    </sc-for>
+  </div>
+
+  <div style="display: flex; align-items: center; justify-content: space-between; height: 22px; padding: 0 10px; background: #232323; border-top: 1px solid #333333; color: #767676; font-size: 11px; flex-shrink: 0;">
+    <span>Bank loaded successfully.</span>
+    <span class="mono">v0.5.1-alpha.6</span>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":920,"height":580}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const accent = '#8fa47a';
+    const rows = [
+      ['0:030', 'Multi-Region Instrument', 115, 64, true],
+      ['0:060', 'Single-Region Instrument', 100, 40, true],
+      ['0:029', 'Single-Region Instrument', 104, 88, true],
+      ['0:060', 'Single-Region Instrument', 96, 64, true],
+      ['0:027', 'Multi-Region Instrument', 110, 20, true],
+      ['0:060', 'Single-Region Instrument', 98, 108, true],
+      ['0:061', 'Single-Region Instrument', 92, 64, true],
+      ['0:044', 'Multi-Region Instrument', 106, 50, true],
+      ['0:080', 'Drumset', 120, 64, true],
+      ['0:000', 'Multi-Region Instrument', 100, 64, false],
+      ['0:080', 'Drumset', 118, 64, true],
+      ['0:046', 'Single-Region Instrument', 88, 76, true],
+      ['0:000', 'Multi-Region Instrument', 100, 64, false],
+      ['0:000', 'Multi-Region Instrument', 100, 64, false],
+      ['0:000', 'Multi-Region Instrument', 100, 64, false],
+      ['0:000', 'Multi-Region Instrument', 100, 64, false]
+    ];
+    const arc = 45.95;
+    const channels = rows.map(function (r, i) {
+      return {
+        num: i + 1,
+        program: r[0],
+        name: r[1],
+        volume: r[2],
+        pan: r[3],
+        fade: r[4] ? '1' : '0.42',
+        volDash: (r[2] / 127 * arc).toFixed(1) + ' 100',
+        panAngle: (-135 + r[3] / 127 * 270).toFixed(1),
+        rowBg: i === 0 ? '#2e2e2e' : (i % 2 ? '#212121' : '#1c1c1c'),
+        marker: i === 0 ? accent : 'transparent',
+        chColour: i === 0 ? '#ffffff' : '#7f7f7f'
+      };
+    });
+    const reverb = [
+      { label: 'Size', dash: (0.42 * arc).toFixed(1) + ' 100' },
+      { label: 'Damp', dash: (0.30 * arc).toFixed(1) + ' 100' },
+      { label: 'Width', dash: (0.80 * arc).toFixed(1) + ' 100' },
+      { label: 'Level', dash: (0.55 * arc).toFixed(1) + ' 100' }
+    ];
+
+    // MidiKeyboardComponent geometry: C-2 (note 0) to C7 (note 108). White keys
+    // tile the width; black keys are half-height and straddle the seam between
+    // them. Held notes take JUCE's translucent yellow key-down overlay.
+    const isBlack = { 1: 1, 3: 1, 6: 1, 8: 1, 10: 1 };
+    const held = { 40: 1, 45: 1, 47: 1, 52: 1, 56: 1, 59: 1, 64: 1, 68: 1 };
+    const whiteW = 920 / 64;
+    const blackW = 8.4;
+    const whiteKeys = [];
+    const blackKeys = [];
+    let whiteIx = 0;
+    for (let note = 0; note <= 108; note++) {
+      if (isBlack[note % 12]) {
+        blackKeys.push({
+          left: (whiteIx * whiteW - blackW / 2).toFixed(2) + 'px',
+          width: blackW + 'px',
+          fill: held[note] ? '#8a7d24' : '#1a1a1a'
+        });
+      } else {
+        whiteKeys.push({
+          left: (whiteIx * whiteW).toFixed(2) + 'px',
+          width: whiteW.toFixed(2) + 'px',
+          fill: held[note] ? '#d8d24a' : '#cfcfcf',
+          label: note % 12 === 0 ? 'C' + (note / 12 - 2) : ''
+        });
+        whiteIx++;
+      }
+    }
+    return { channels, reverb, whiteKeys, blackKeys };
+  }
+}
+</script>
+</body>
+</html>

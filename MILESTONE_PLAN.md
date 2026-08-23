@@ -2942,7 +2942,7 @@ rather than impressions:
 
 ## 9.1 Owner design review
 
-- [ ] Produce layout options before implementation, and have the owner choose.
+- [x] Produce layout options before implementation, and have the owner choose.
 
   OWNER DECISION (2026-08-23): the direction is a channel-rack row redesign with
   a single grey theme, **with latitude to redesign further** if the incremental
@@ -2956,6 +2956,32 @@ rather than impressions:
     with all 16 channels assigned, an error in the status bar, the minimum window
     size, and the maximum.
   - Record the chosen direction in the Decision log before implementation starts.
+
+  EVIDENCE (2026-08-23): four directions were drawn against real content from a
+  loaded VGMTrans DLS bank, with metrics lifted from `GuiConstants` and
+  `ChannelListComponent` rather than invented — a minimal-change rack row, a
+  mixer rack, a list-plus-detail split, and a console with per-row activity
+  meters. The owner chose the **mixer rack** and gave three corrections, all
+  applied: the keyboard now uses real `MidiKeyboardComponent` geometry instead of
+  flat stripes; every row group is separated by a 12px gap, so Solo no longer
+  collides with the instrument name; and the accent choice moved out of the
+  canvas chrome into a settings popover behind a header gear, which also carries
+  version and engine facts and gives later settings somewhere to land.
+
+  The approved layout, the settings popover, and the three unchosen directions
+  are committed under [docs/design/](docs/design/README.md), which also records
+  what the layout specifies and what is still missing from it. The live canvas is
+  <https://claude.ai/code/artifact/c86db4a3-8c21-487d-93ec-d02f86605bc3>.
+
+  NOT started: implementation. This item covers the design decision only; 9.2,
+  9.3, and 9.4 remain open.
+
+- [ ] Bind the Juicy16 logo into the build as a binary resource.
+
+  The owner's wordmark is committed at `resources/juicy16-logo.png` and the
+  approved mockup uses it rather than a typeset stand-in. What remains is making
+  it a build input the header can draw, at the header's scale, on both plugin
+  formats.
 
 ## 9.2 Channel rack row
 
@@ -3286,6 +3312,8 @@ Record decisions that affect more than one task. Do not delete superseded decisi
 | 2026-08-23 | Reverb is global in Beta 1; per-channel sends and per-channel profiles come later | CC91 from the file still drives each channel's send, so the capability is not lost — only manual per-channel editing is deferred. Keeps the redesigned row to instrument, volume, and pan | Product owner | Approved |
 | 2026-08-23 | GS/XG reverb macro SysEx is ignored; the reverb is manual only | Owner's choice for predictability: a user who wants a particular space should not be overridden by the file on every replay. The consequence is that the automatic-playback principle governing Bank Select and Program Change does not extend to reverb. CC91 sends are unaffected | Product owner | Approved |
 | 2026-08-23 | A reverb profile may not be named after hardware it does not emulate | The Nintendo DS has no reverb hardware to model, so a "DS" profile would be a designed ambience wearing a hardware name. Names that imply emulation are reserved for profiles that emulate — the documented PlayStation SPU and SNES S-DSP algorithms | Product owner | Approved |
+| 2026-08-23 | The Beta 1 interface is the mixer-rack direction: per-channel volume and pan knobs on every row, mute/solo, and a 236px right-hand panel for master and reverb | Chosen by the owner from four drawn directions. It fixes the actual defect — that both controls edit only the selected channel — and gives reverb somewhere to live that does not require redrawing the window again when Phase 10 lands. Recorded in `docs/design/` so the decision survives this session | Product owner | Approved |
+| 2026-08-23 | Plugin settings live in a popover behind a header gear, starting with accent choice, engine facts, and version | The owner rejected a bare accent control in the chrome. A single settings surface also stops later options being bolted onto the header one at a time | Product owner | Approved |
 
 # Risk register
 
