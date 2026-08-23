@@ -7,6 +7,7 @@
 #include "../JuceLibraryCode/JuceHeader.h"
 #include "FluidSynthModel.h"
 #include "Theme.h"
+#include "GuiConstants.h"
 
 #if JUCE_MAC || JUCE_IOS
 //   #include <CoreFoundation/CoreFoundation.h>
@@ -44,7 +45,12 @@ public:
         const int buttonWidth{filenameComp.getHeight()};
         browseButton->setSize(buttonWidth, filenameComp.getHeight());
         browseButton->setTopRightPosition(filenameComp.getWidth(), 0);
-        filenameBox->setBounds(0, 0, browseButton->getX(), filenameComp.getHeight());
+        // Leave a gap between the field's border and the folder. Butted right up
+        // against it, the folder sat about 6px from the field and 15px from the
+        // settings button beside it, which is what read as uneven spacing.
+        filenameBox->setBounds(0, 0,
+                               browseButton->getX() - GuiConstants::innerPadding,
+                               filenameComp.getHeight());
     }
 };
 

@@ -14,31 +14,74 @@
 
 namespace {
 
-// A gear, drawn rather than shipped as a second asset: eight teeth around a
-// ring, matching the stroke weight of the approved header.
+// A gear, drawn rather than shipped as a second asset.
+//
+// Two attempts failed before this one, both instructive. A star polygon - eight
+// points joined straight to eight valleys - reads as an asterisk, because a gear
+// has flat-topped teeth, not spikes. Overlapping rounded-rectangle teeth on a
+// hub disc looked right until the even-odd rule needed for the bore cancelled
+// every overlap, detaching the teeth into petals.
+//
+// So the silhouette is ONE closed outline with no self-overlap: around the
+// circle, alternating between the root radius and the tooth radius with a short
+// flat top on each tooth. Even-odd then punches only the bore, because the bore
+// is the only subpath that overlaps anything.
 std::unique_ptr<juce::Drawable> makeGearDrawable(juce::Colour colour) {
-    juce::Path path;
-    constexpr int teeth{8};
-    constexpr float outer{10.0f};
-    constexpr float inner{7.2f};
-    for (int i = 0; i < teeth * 2; ++i) {
-        const float angle{juce::MathConstants<float>::twoPi * static_cast<float>(i)
-            / static_cast<float>(teeth * 2)};
-        const float radius{i % 2 == 0 ? outer : inner};
-        const juce::Point<float> point{std::sin(angle) * radius, -std::cos(angle) * radius};
+    // Six teeth, not eight: a STROKED gear has two outlines per tooth, and at
+    // header size seven of them left barely a pixel of gap between the flanks,
+    // which reads as fuzz rather than as teeth. Fewer, larger teeth survive
+    // the scale.
+    constexpr int teeth{6};
+    constexpr float outerRadius{10.4f};
+    constexpr float rootRadius{6.4f};
+    constexpr float boreRadius{3.1f};
+
+    const float step{juce::MathConstants<float>::twoPi / static_cast<float>(teeth)};
+    // Angular half-widths: the tooth is narrower than the gap it stands in, so
+    // the flanks slope outward the way a real tooth's do.
+    const float toothHalf{step * 0.21f};
+    const float rootHalf{step * 0.33f};
+
+    const auto pointAt{[](float radius, float angle) {
+        return juce::Point<float>{std::sin(angle) * radius, -std::cos(angle) * radius};
+    }};
+
+    juce::Path gear;
+    for (int i = 0; i < teeth; ++i) {
+        const float centre{step * static_cast<float>(i)};
+        const juce::Point<float> flankIn{pointAt(rootRadius, centre - rootHalf)};
         if (i == 0)
-            path.startNewSubPath(point);
+            gear.startNewSubPath(flankIn);
         else
-            path.lineTo(point);
+            gear.lineTo(flankIn);
+        gear.lineTo(pointAt(outerRadius, centre - toothHalf));
+        gear.lineTo(pointAt(outerRadius, centre + toothHalf));
+        gear.lineTo(pointAt(rootRadius, centre + rootHalf));
+        // Round the root between this tooth and the next, so the valleys are
+        // curved rather than a straight chord across the hub.
+        const float nextCentre{step * static_cast<float>(i + 1)};
+        gear.quadraticTo(pointAt(rootRadius * 1.04f, (centre + nextCentre) * 0.5f),
+                         pointAt(rootRadius, nextCentre - rootHalf));
     }
-    path.closeSubPath();
-    path.addEllipse(-3.4f, -3.4f, 6.8f, 6.8f);
-    path.setUsingNonZeroWinding(false);
-    path.applyTransform(juce::AffineTransform::translation(12.0f, 12.0f));
+    gear.closeSubPath();
+
+    gear.addEllipse(-boreRadius, -boreRadius, boreRadius * 2.0f, boreRadius * 2.0f);
+    gear.applyTransform(juce::AffineTransform::translation(12.0f, 12.0f));
 
     auto drawable{std::make_unique<juce::DrawablePath>()};
-    drawable->setPath(path);
-    drawable->setFill(colour);
+    drawable->setPath(gear);
+    // STROKED, not filled. The folder beside it in the same header is line art,
+    // and a solid gear next to a hollow folder is two icon families in one strip
+    // - which is what made the pair look wrong rather than either one alone.
+    // No even-odd rule is needed once it is stroked: the bore is simply a second
+    // circle, drawn rather than punched.
+    drawable->setFill(juce::Colours::transparentBlack);
+    drawable->setStrokeFill(colour);
+    // 1.8 units on the same 24-unit grid the folder is drawn on, so the two
+    // strokes match once both are scaled into the header.
+    drawable->setStrokeType(juce::PathStrokeType{1.6f,
+                                                 juce::PathStrokeType::curved,
+                                                 juce::PathStrokeType::rounded});
     return drawable;
 }
 
@@ -213,6 +256,12 @@ JuicySFAudioProcessorEditor::JuicySFAudioProcessorEditor(
 
     settingsButton.setImages(
         makeGearDrawable(lookAndFeel.findColour(Juicy16::textLabelColourId)).get());
+    // DrawableButton::ImageFitted scales the path to FILL the button, so a gear
+    // whose outline spans 18.8 of its 24-unit grid rendered at the full 24px
+    // with a 2.3px stroke - visibly bigger and heavier than the 1.17px folder
+    // beside it. The indent brings it to a 12px icon, which puts both strokes at
+    // about 1.2px and both icons at the same visual weight.
+    settingsButton.setEdgeIndent(4);
     settingsButton.setName("Settings");
     settingsButton.setTitle("Settings");
     settingsButton.setDescription("Open Juicy16 settings");
@@ -229,6 +278,14 @@ JuicySFAudioProcessorEditor::JuicySFAudioProcessorEditor(
     statusLabel.setDescription("Juicy16 version and latest sound-bank load result");
     statusLabel.setMinimumHorizontalScale(0.7f);
     addAndMakeVisible(statusLabel);
+
+    // Every child is added by now, so tell the whole tree the LookAndFeel is in
+    // place. setLookAndFeel() above fired sendLookAndFeelChange() when NONE of
+    // these were children yet - JUCE does not re-send it when a child is added
+    // later - so any component that resolves its colours in lookAndFeelChanged()
+    // never heard about the palette. That is what left "No bank loaded" drawing
+    // in the black that a missing ColourId falls back to.
+    sendLookAndFeelChange();
 
     // keyboard: light up for MIDI on any channel, but send notes on the channel
     // selected in the list, so clicking a row lets you audition its instrument.
@@ -374,12 +431,17 @@ void JuicySFAudioProcessorEditor::resized()
                            * static_cast<float>(logo.getWidth())
                            / static_cast<float>(logo.getHeight()))
         : 0};
-    header.removeFromLeft(logoWidth + GuiConstants::padding);
+    // The wordmark is a different KIND of thing from the field beside it, so it
+    // needs more than the window's own margin between them or the two read as
+    // one run-on group.
+    header.removeFromLeft(logoWidth + GuiConstants::padding + GuiConstants::innerPadding);
     Rectangle<int> headerRow{header.withSizeKeepingCentre(
         header.getWidth(), GuiConstants::filePickerHeight)};
     settingsButton.setBounds(
         headerRow.removeFromRight(GuiConstants::settingsButtonWidth));
-    headerRow.removeFromRight(GuiConstants::innerPadding);
+    // Small, because both buttons already carry their own icon inset: the gap
+    // the eye sees is this plus roughly five pixels from each side.
+    headerRow.removeFromRight(2);
     filePicker.setBounds(headerRow);
 
     statusLabel.setBounds(r.removeFromBottom(GuiConstants::statusBarHeight)

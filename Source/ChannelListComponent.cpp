@@ -69,7 +69,12 @@ void ChannelListComponent::PatchCell::setRow(int newRow) {
 }
 
 void ChannelListComponent::PatchCell::resized() {
-    combo.setBounds(getLocalBounds().reduced(0, 2));
+    // Half the group gap on each side. Every row cell insets itself the same
+    // way, so two adjacent cells produce a full groupGap between their contents
+    // without any cell needing to know what sits beside it. Without it the
+    // instrument dropdown butted straight against the solo button - 0px on one
+    // side of the mute/solo pair and 8px on the other.
+    combo.setBounds(getLocalBounds().reduced(GuiConstants::groupGap / 2, 2));
 }
 
 //==============================================================================
@@ -127,7 +132,7 @@ void ChannelListComponent::MuteSoloCell::setRow(int newRow) {
 }
 
 void ChannelListComponent::MuteSoloCell::resized() {
-    Rectangle<int> r{getLocalBounds().reduced(0, 4)};
+    Rectangle<int> r{getLocalBounds().reduced(GuiConstants::groupGap / 2, 4)};
     const int gap{4};
     const int width{(r.getWidth() - gap) / 2};
     mute.setBounds(r.removeFromLeft(width));
@@ -182,7 +187,7 @@ void ChannelListComponent::MixerCell::setRow(int newRow) {
 }
 
 void ChannelListComponent::MixerCell::resized() {
-    knob.setBounds(getLocalBounds().reduced(2, 3));
+    knob.setBounds(getLocalBounds().reduced(GuiConstants::groupGap / 2, 3));
 }
 
 //==============================================================================

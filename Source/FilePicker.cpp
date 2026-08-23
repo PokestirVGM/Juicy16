@@ -24,29 +24,45 @@ void FolderIconButton::paintButton(Graphics& g, bool isMouseOverButton, bool isB
     else if (isMouseOverButton)
         colour = colour.withAlpha(0.8f);
 
-    // square icon area, inset from the button bounds
-    const float side{juce::jmin(static_cast<float>(getWidth()), static_cast<float>(getHeight()))};
-    juce::Rectangle<float> b{juce::Rectangle<float>{side, side}
-        .withCentre(getLocalBounds().toFloat().getCentre())
-        .reduced(side * 0.22f)};
-
-    const float tabWidth{b.getWidth() * 0.5f};
-    const float tabHeight{b.getHeight() * 0.22f};
-    const float bodyTop{b.getY() + tabHeight};
-
-    // single-outline folder silhouette (tab flush with the top-left corner,
-    // stepping down to the body): unfilled line art, not a filled icon.
+    // The folder from the approved header design, drawn to its own geometry
+    // rather than approximated.
+    //
+    // The previous attempt put the tab's step on the RIGHT of a square outline,
+    // which reads as a dog-eared page rather than a folder: a folder's tab sits
+    // at the top LEFT and the back edge steps UP to meet it. It is also wider
+    // than it is tall - a 1:1 outline reads as a document.
+    //
+    // Traced in the design's own 24x24 coordinates and scaled to the button, so
+    // the proportions hold at any size. Corner rounds are quadratics rather than
+    // true arcs, which is indistinguishable at a 14px icon.
     juce::Path folder;
-    folder.startNewSubPath(b.getX(), b.getBottom());
-    folder.lineTo(b.getX(), b.getY());
-    folder.lineTo(b.getX() + tabWidth, b.getY());
-    folder.lineTo(b.getX() + tabWidth, bodyTop);
-    folder.lineTo(b.getRight(), bodyTop);
-    folder.lineTo(b.getRight(), b.getBottom());
+    folder.startNewSubPath(3.0f, 7.0f);
+    folder.quadraticTo(3.0f, 5.0f, 5.0f, 5.0f);   // top-left round
+    folder.lineTo(9.0f, 5.0f);                     // tab top
+    folder.lineTo(11.0f, 7.0f);                    // tab shoulder, sloped
+    folder.lineTo(19.0f, 7.0f);                    // body top
+    folder.quadraticTo(21.0f, 7.0f, 21.0f, 9.0f);  // top-right round
+    folder.lineTo(21.0f, 17.0f);
+    folder.quadraticTo(21.0f, 19.0f, 19.0f, 19.0f);
+    folder.lineTo(5.0f, 19.0f);
+    folder.quadraticTo(3.0f, 19.0f, 3.0f, 17.0f);
     folder.closeSubPath();
 
+    // Scale the whole 24-unit grid - not the path's own bounds - to a 14px icon
+    // box, so the stroke lands at the design's weight (2 units at 14/24 scale is
+    // 1.17px) instead of being computed from whatever the outline happens to
+    // span. Sizing from the bounds is what made the first version look heavy.
+    const auto bounds{getLocalBounds().toFloat()};
+    const float box{juce::jmin(14.0f, juce::jmin(bounds.getWidth(), bounds.getHeight()))};
+    const float scale{box / 24.0f};
+    folder.applyTransform(
+        juce::AffineTransform::scale(scale).translated(
+            bounds.getCentreX() - box * 0.5f, bounds.getCentreY() - box * 0.5f));
+
     g.setColour(colour);
-    g.strokePath(folder, juce::PathStrokeType(1.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    g.strokePath(folder, juce::PathStrokeType{2.0f * scale,
+                                              juce::PathStrokeType::curved,
+                                              juce::PathStrokeType::rounded});
 }
 
 FilePicker::FilePicker(

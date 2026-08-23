@@ -139,6 +139,26 @@ false premise and uncovered a real bug. See "The reverb was never audible" below
     between it and the reverb. The three sections now stack from the top.
   - Rows, mute/solo buttons and row knobs were cramped; row height went 26 → 28
     and the columns widened to match.
+  - **Row groups had no consistent gap.** The instrument dropdown butted
+    straight against the solo button — 0px on one side of the mute/solo pair and
+    8px on the other. Every row cell now insets itself by half the group gap, so
+    two adjacent cells produce a full 12px between their contents without any
+    cell knowing what sits beside it. The header wordmark also sat too close to
+    the bank field.
+  - **The folder and settings icons were two different icon families.** The
+    folder was a hollow outline whose tab notch sat on the wrong side, reading as
+    a dog-eared page; the gear was a solid fill, and `DrawableButton::ImageFitted`
+    scaled it to fill the whole button, giving it a 2.3px stroke beside the
+    folder's 1.17px. Both are now stroked line art traced on the same 24-unit
+    grid at matching weight, and the gear has six teeth rather than eight —
+    a stroked gear has two outlines per tooth, and eight of them left barely a
+    pixel between the flanks at header size.
+  - **"No bank loaded" was drawing in black, not grey.** `lookAndFeelChanged()`
+    never fired for the right-hand panel: the editor installs its LookAndFeel as
+    the first statement of its constructor, before the panel is added as a child,
+    and JUCE does not re-send a look-and-feel change to a child added afterwards.
+    The editor now sends one explicitly once every child is in place, which also
+    protects any component added later.
 - **The reverb was never audible, and now is.** FluidSynth's reverb has always
   been running — `synth.reverb.active` defaults to on — but Juicy16 asked for
   audio with `fluid_synth_process(synth, n, 0, nullptr, 2, out)`, which renders

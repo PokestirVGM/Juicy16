@@ -55,8 +55,8 @@ struct GuiConstants {
     inline static const int channelRowHeight = 28;
     inline static const int numMidiChannels = 16;
     inline static const int channelNumberWidth = 34;
-    inline static const int muteSoloWidth = 54;
-    inline static const int mixerCellWidth = 74;
+    inline static const int muteSoloWidth = 60;
+    inline static const int mixerCellWidth = 80;
     inline static const int minInstrumentWidth = 140;
     // The knob inside a mixer cell, and the value readout beside it.
     inline static const int rowKnobSize = 22;
