@@ -82,6 +82,61 @@ int FluidSynthModel::defaultParamValue(const String& parameterID) {
     return programChangeParams.contains(parameterID) ? 0 : 64;
 }
 
+// Beta 1's profiles. Naming rule, binding on every future profile: a profile may
+// not be named after hardware it does not emulate. Neither of these emulates
+// anything - they are designed settings over FluidSynth's own FDN reverb - so
+// neither carries a console or hardware name. "Custom" is not a preset; it is
+// what the selection reads as once the user has moved a control.
+// Chosen by measurement on a real VGMTrans rip (SEQ_BGM_C_03, DLS and SF2) at
+// CC91 = 80, a representative game-rip send, on 2026-08-23. Change against dry:
+//
+//   FluidSynth's inherited 0.50/0.30/0.80/0.70   +1.64 dB   (the swamped end)
+//   Universal              0.45/0.35/0.85/0.55   +0.92 dB
+//   Soft                   0.20/0.60/1.00/0.55   +0.47 dB
+//
+// Universal is a present but not dominant space, a little over half the wetness
+// FluidSynth's own defaults produce. Soft is half of Universal again, with a much
+// smaller room and full width: the owner's brief was width without a long tail.
+// Neither clips, and both leave the peak where dry material left it.
+const FluidSynthModel::ReverbProfile FluidSynthModel::reverbProfiles[]{
+    // size  damp  width level
+    {"Universal", {0.45f, 0.35f, 0.85f, 0.55f}},
+    // OPEN: the owner proposed "SNS" for this profile. It ships as "Soft"
+    // because the naming rule is binding — a profile may not be named after
+    // hardware it does not emulate, and this one is designed rather than
+    // modelled. If "SNS" means SNES the name belongs to the S-DSP echo profile
+    // in 10.3, which would be a real emulation. Owner decision still required.
+    {"Soft",      {0.20f, 0.60f, 1.00f, 0.55f}},
+    {"Custom",    {0.45f, 0.35f, 0.85f, 0.55f}},
+};
+
+int FluidSynthModel::numReverbProfiles() {
+    return static_cast<int>(sizeof(reverbProfiles) / sizeof(reverbProfiles[0]));
+}
+
+int FluidSynthModel::customReverbProfileIndex() {
+    return numReverbProfiles() - 1;
+}
+
+juce::StringArray FluidSynthModel::reverbProfileNames() {
+    juce::StringArray names;
+    for (int i = 0; i < numReverbProfiles(); ++i)
+        names.add(reverbProfiles[i].name);
+    return names;
+}
+
+String FluidSynthModel::reverbParamId(int reverbParam) {
+    switch (reverbParam) {
+        case reverbSize:  return "reverbSize";
+        case reverbDamp:  return "reverbDamp";
+        case reverbWidth: return "reverbWidth";
+        case reverbLevel: return "reverbLevel";
+        default: break;
+    }
+    jassertfalse;
+    return {};
+}
+
 String FluidSynthModel::mixerParamId(int ccIndex, int chZeroBased) {
     jassert(ccIndex >= 0 && ccIndex < kNumMixerCcs);
     return (ccIndexOrder[ccIndex] == VOLUME_MSB ? "volCh" : "panCh")
@@ -179,6 +234,12 @@ FluidSynthModel::FluidSynthModel(
     valueTreeState.addParameterListener("bank", this);
     valueTreeState.addParameterListener("preset", this);
     valueTreeState.addParameterListener("outputLevel", this);
+    valueTreeState.addParameterListener("reverbOn", this);
+    valueTreeState.addParameterListener("reverbProfile", this);
+    for (int i = 0; i < numReverbParams; ++i) {
+        reverbTarget[i].store(reverbProfiles[0].values[i], std::memory_order_relaxed);
+        valueTreeState.addParameterListener(reverbParamId(i), this);
+    }
     for (int ch = 0; ch < kNumChannels; ch++) {
         valueTreeState.addParameterListener(progParamId(ch), this);
         for (int idx = 0; idx < kNumMixerCcs; idx++)
@@ -204,6 +265,10 @@ FluidSynthModel::~FluidSynthModel() {
     valueTreeState.removeParameterListener("bank", this);
     valueTreeState.removeParameterListener("preset", this);
     valueTreeState.removeParameterListener("outputLevel", this);
+    valueTreeState.removeParameterListener("reverbOn", this);
+    valueTreeState.removeParameterListener("reverbProfile", this);
+    for (int i = 0; i < numReverbParams; ++i)
+        valueTreeState.removeParameterListener(reverbParamId(i), this);
     valueTreeState.state.removeListener(this);
 }
 
@@ -268,6 +333,17 @@ void FluidSynthModel::createSynth() {
     // after rendering with smoothing, rather than by moving this.
     fluid_synth_set_gain(synth.get(), 0.2f);
 
+    // Chorus off, deliberately. Now that the effects bus is mixed into the
+    // output (see renderSamples), leaving FluidSynth's `synth.chorus.active`
+    // default alone would un-mute a chorus nobody chose, on every rip — the
+    // exact class of unchosen default this phase exists to remove. Chorus stays
+    // off until it has parameters of its own. CC93 still reaches the engine.
+    fluid_synth_chorus_on(synth.get(), -1, 0);
+
+    // The reverb belongs to the synth, so a (re)created synth starts from the
+    // parameters rather than from FluidSynth's own defaults.
+    resetReverbToParameters();
+
     // No modulators are installed here any more.
     //
     // Juicy16 used to add its own CC71-79 -> filter/volume-envelope modulators,
@@ -314,8 +390,18 @@ void FluidSynthModel::prepareToPlay(double sampleRate, int samplesPerBlock) {
     outputLevelSmoother.reset(sampleRate, 0.02);
     outputLevelSmoother.setCurrentAndTargetValue(
         outputLevelGain.load(std::memory_order_relaxed));
+    // The reverb settings glide over the same 20 ms, but per block rather than
+    // per sample: FluidSynth takes a setting, not a signal.
+    for (int i = 0; i < numReverbParams; ++i)
+        reverbSmoother[i].reset(sampleRate, 0.02);
+    resetReverbToParameters();
     // pre-allocate the mono-downmix scratch off the audio thread
     stereoScratch.setSize(2, jmax(64, samplesPerBlock), false, false, true);
+    // ...and the effects bus the reverb is mixed from. Sized for a whole block
+    // so the common path renders in one call; renderSamples chunks against this
+    // capacity, so a host that ignores its own maximum block size still cannot
+    // overrun it or allocate on the audio thread.
+    effectsScratch.setSize(2, jmax(64, samplesPerBlock), false, false, true);
     // ...and the oversampling FIFO, which holds one block's worth of internal
     // samples plus the interpolator's read-ahead and whatever the previous block
     // left behind.
@@ -433,6 +519,44 @@ void FluidSynthModel::parameterChanged(const String& parameterID, float /*newVal
         if (auto* p{dynamic_cast<juce::AudioParameterFloat*>(
                 valueTreeState.getParameter(parameterID))})
             setOutputLevelDb(p->get());
+        return;
+    }
+    // Reverb. Like outputLevel, these may arrive on the audio thread from host
+    // automation, so they only store an atomic; processBlock does the work.
+    if (parameterID == "reverbOn") {
+        if (auto* p{dynamic_cast<juce::AudioParameterBool*>(
+                valueTreeState.getParameter(parameterID))})
+            reverbEnabledTarget.store(p->get(), std::memory_order_relaxed);
+        return;
+    }
+    if (parameterID == "reverbProfile") {
+        if (applyingReverbProfile)
+            return;
+        int profile{0};
+        if (auto* p{dynamic_cast<juce::AudioParameterChoice*>(
+                valueTreeState.getParameter(parameterID))})
+            profile = p->getIndex();
+        // Selecting a profile MOVES the visible controls. Writing four
+        // parameters is a message-thread job, so hand it over rather than doing
+        // it wherever the host happened to call us.
+        if (profile != customReverbProfileIndex()) {
+            pendingReverbProfile.store(profile, std::memory_order_release);
+            triggerAsyncUpdate();
+        }
+        return;
+    }
+    for (int i = 0; i < numReverbParams; ++i) {
+        if (parameterID != reverbParamId(i))
+            continue;
+        if (auto* p{dynamic_cast<juce::AudioParameterFloat*>(
+                valueTreeState.getParameter(parameterID))})
+            reverbTarget[i].store(p->get(), std::memory_order_relaxed);
+        // A control moved by hand means the selection is no longer any named
+        // profile - unless we are the ones moving it to apply one.
+        if (!applyingReverbProfile) {
+            pendingReverbCustom.store(true, std::memory_order_release);
+            triggerAsyncUpdate();
+        }
         return;
     }
     if (mirroringParameters)
@@ -616,6 +740,30 @@ bool FluidSynthModel::setChannelProgram(int chan, int bank, int preset) {
 }
 
 void FluidSynthModel::handleAsyncUpdate() {
+    // Reverb profile reconciliation. Selecting a profile writes the four
+    // parameters; editing one of them writes the selection back to Custom. Both
+    // directions run here so neither happens on whichever thread the host chose,
+    // and applyingReverbProfile keeps them from chasing each other.
+    if (const int profile{pendingReverbProfile.exchange(-1, std::memory_order_acquire)};
+        profile >= 0 && profile < customReverbProfileIndex()) {
+        const juce::ScopedValueSetter<bool> guard{applyingReverbProfile, true};
+        for (int i = 0; i < numReverbParams; ++i) {
+            const float value{reverbProfiles[profile].values[i]};
+            reverbTarget[i].store(value, std::memory_order_relaxed);
+            if (auto* p{dynamic_cast<juce::AudioParameterFloat*>(
+                    valueTreeState.getParameter(reverbParamId(i)))})
+                *p = value;
+        }
+        pendingReverbCustom.store(false, std::memory_order_release);
+    }
+    if (pendingReverbCustom.exchange(false, std::memory_order_acquire)) {
+        const juce::ScopedValueSetter<bool> guard{applyingReverbProfile, true};
+        if (auto* p{dynamic_cast<juce::AudioParameterChoice*>(
+                valueTreeState.getParameter("reverbProfile"))};
+            p != nullptr && p->getIndex() != customReverbProfileIndex())
+            *p = customReverbProfileIndex();
+    }
+
     // consume per-channel program changes and sound-CC changes captured on the
     // audio thread; all ValueTree/parameter writes happen here, on the message thread.
     const unsigned int pcMask{midiProgramDirtyMask.exchange(0, std::memory_order_acquire)};
@@ -807,6 +955,86 @@ bool FluidSynthModel::isChannelSilenced(int channelToRead) const {
 
 unsigned int FluidSynthModel::getSilencedMask() const {
     return silencedMask.load(std::memory_order_acquire);
+}
+
+void FluidSynthModel::applyReverbFromAudioThread(int numSamples) {
+    fluid_synth_t* const synthesizer{synth.get()};
+    if (synthesizer == nullptr)
+        return;
+
+    // Bypass is the reverb unit switched off, not its level taken to zero: an
+    // inactive unit is not processed at all, so nothing keeps computing a tail
+    // that nobody can hear.
+    const bool enabled{reverbEnabledTarget.load(std::memory_order_relaxed)};
+    if (!reverbEverApplied || enabled != reverbEnabledApplied) {
+        fluid_synth_reverb_on(synthesizer, -1, enabled ? 1 : 0);
+        reverbEnabledApplied = enabled;
+    }
+
+    for (int i = 0; i < numReverbParams; ++i) {
+        reverbSmoother[i].setTargetValue(reverbTarget[i].load(std::memory_order_relaxed));
+        // One value per block rather than per sample: FluidSynth's reverb takes a
+        // setting, not a signal, and recomputing its coefficients per sample
+        // would be both impossible through this API and pointless. The smoother
+        // is what stops a host's automation jump becoming one audible step.
+        reverbSmoother[i].skip(numSamples);
+        const float value{reverbSmoother[i].getCurrentValue()};
+        // Only write a setting that actually moved. A game rip that never
+        // automates reverb must not pay four coefficient recomputations a block.
+        if (reverbEverApplied && std::abs(value - reverbApplied[i]) < 1.0e-4f)
+            continue;
+        switch (i) {
+            case reverbSize:
+                fluid_synth_set_reverb_group_roomsize(synthesizer, -1, value); break;
+            case reverbDamp:
+                fluid_synth_set_reverb_group_damp(synthesizer, -1, value); break;
+            case reverbWidth:
+                fluid_synth_set_reverb_group_width(synthesizer, -1, value); break;
+            case reverbLevel:
+                fluid_synth_set_reverb_group_level(synthesizer, -1, value); break;
+            default: break;
+        }
+        reverbApplied[i] = value;
+    }
+    reverbEverApplied = true;
+}
+
+void FluidSynthModel::resetReverbToParameters() {
+    if (auto* p{dynamic_cast<juce::AudioParameterBool*>(
+            valueTreeState.getParameter("reverbOn"))})
+        reverbEnabledTarget.store(p->get(), std::memory_order_relaxed);
+    for (int i = 0; i < numReverbParams; ++i) {
+        float value{reverbProfiles[0].values[i]};
+        if (auto* p{dynamic_cast<juce::AudioParameterFloat*>(
+                valueTreeState.getParameter(reverbParamId(i)))})
+            value = p->get();
+        reverbTarget[i].store(value, std::memory_order_relaxed);
+        // Jump rather than glide: this runs when the synth is (re)created or the
+        // sample rate changes, where there is no previous value to glide from.
+        reverbSmoother[i].setCurrentAndTargetValue(value);
+    }
+    reverbEverApplied = false;
+}
+
+bool FluidSynthModel::isReverbEnabled() const {
+    return reverbEnabledTarget.load(std::memory_order_relaxed);
+}
+
+bool FluidSynthModel::getReverbSetting(int reverbParam, double& value) const {
+    if (synth == nullptr || reverbParam < 0 || reverbParam >= numReverbParams)
+        return false;
+    switch (reverbParam) {
+        case reverbSize:
+            return fluid_synth_get_reverb_group_roomsize(synth.get(), 0, &value) == FLUID_OK;
+        case reverbDamp:
+            return fluid_synth_get_reverb_group_damp(synth.get(), 0, &value) == FLUID_OK;
+        case reverbWidth:
+            return fluid_synth_get_reverb_group_width(synth.get(), 0, &value) == FLUID_OK;
+        case reverbLevel:
+            return fluid_synth_get_reverb_group_level(synth.get(), 0, &value) == FLUID_OK;
+        default: break;
+    }
+    return false;
 }
 
 bool FluidSynthModel::getControllerValue(int channelToRead, int controller, int& value) const {
@@ -1495,34 +1723,75 @@ void FluidSynthModel::dispatchMidiEvent(const MidiMessage& m, int samplePosition
         }
 }
 
+// The one place FluidSynth is asked for audio.
+//
+// It is called with an EFFECTS bus and the effects are mixed in here. That is a
+// bug fix, not a refinement: `fluid_synth_process(synth, n, 0, nullptr, 2, out)`
+// — what this used to call — renders the dry voices into `out` and DISCARDS the
+// reverb and chorus buses. Measured against FluidSynth directly on 2026-08-23
+// with reverb on, level 1.0, room 0.9 and CC91=127: the tail energy after
+// note-off was 0.0000046 through `nfx=0` and 7.467 through `write_float`, which
+// mixes the effects in. So Juicy16's reverb has never been audible, and the
+// premise this phase started from — that generic reverb defaults were being
+// applied to every rip — was wrong in the way that matters. They were being
+// computed and thrown away.
+//
+// Requesting `nfx=2` gives one stereo effects bus carrying reverb AND chorus.
+// Chorus is switched off in createSynth rather than silently un-muted here: an
+// unchosen default is exactly what this phase exists to stop, and chorus has its
+// own parameters to design before it can be turned on deliberately.
 void FluidSynthModel::renderSamples(AudioBuffer<float>& buffer, int startSample, int numSamples) {
     if (numSamples <= 0)
         return;
 
     const int numChannels{buffer.getNumChannels()};
+    const int scratchCapacity{effectsScratch.getNumSamples()};
+    if (scratchCapacity <= 0)
+        return;
+
     if (numChannels >= 2) {
-        float* outputs[] { buffer.getWritePointer(0, startSample),
-                           buffer.getWritePointer(1, startSample) };
-        fluid_synth_process(synth.get(), numSamples, 0, nullptr, 2, outputs);
+        for (int rendered = 0; rendered < numSamples;) {
+            const int chunk{juce::jmin(numSamples - rendered, scratchCapacity)};
+            const int at{startSample + rendered};
+            float* outputs[] { buffer.getWritePointer(0, at),
+                               buffer.getWritePointer(1, at) };
+            renderWithEffects(outputs, chunk);
+            rendered += chunk;
+        }
         return;
     }
 
     if (numChannels == 1) {
-        const int scratchCapacity{stereoScratch.getNumSamples()};
-        jassert(scratchCapacity > 0);
+        const int monoCapacity{juce::jmin(scratchCapacity, stereoScratch.getNumSamples())};
+        jassert(monoCapacity > 0);
         for (int rendered = 0; rendered < numSamples;) {
-            const int chunk{juce::jmin(numSamples - rendered, scratchCapacity)};
+            const int chunk{juce::jmin(numSamples - rendered, monoCapacity)};
             stereoScratch.clear(0, 0, chunk);
             stereoScratch.clear(1, 0, chunk);
-            fluid_synth_process(
-                synth.get(), chunk, 0, nullptr, 2,
-                const_cast<float**>(stereoScratch.getArrayOfWritePointers()));
+            renderWithEffects(
+                const_cast<float**>(stereoScratch.getArrayOfWritePointers()), chunk);
             buffer.copyFrom(0, startSample + rendered, stereoScratch, 0, 0, chunk);
             buffer.addFrom(0, startSample + rendered, stereoScratch, 1, 0, chunk);
             buffer.applyGain(0, startSample + rendered, chunk, 0.5f);
             rendered += chunk;
         }
     }
+}
+
+// Renders `numSamples` of dry audio into `outputs` and adds the effects bus on
+// top. `numSamples` must not exceed the preallocated effects scratch.
+void FluidSynthModel::renderWithEffects(float* const* outputs, int numSamples) {
+    jassert(numSamples <= effectsScratch.getNumSamples());
+    effectsScratch.clear(0, 0, numSamples);
+    effectsScratch.clear(1, 0, numSamples);
+    float* effects[] { effectsScratch.getWritePointer(0),
+                       effectsScratch.getWritePointer(1) };
+    fluid_synth_process(synth.get(), numSamples, 2, effects, 2,
+                        const_cast<float**>(outputs));
+    // fluid_synth_process ADDS into its buffers rather than overwriting them, so
+    // both the dry and the wet sides accumulate the same way here.
+    juce::FloatVectorOperations::add(outputs[0], effects[0], numSamples);
+    juce::FloatVectorOperations::add(outputs[1], effects[1], numSamples);
 }
 
 void FluidSynthModel::renderIntoFifo(int startSample, int numSamples) {
@@ -1532,9 +1801,16 @@ void FluidSynthModel::renderIntoFifo(int startSample, int numSamples) {
     // the region has to start clean; it still holds the previous block's audio.
     oversampleFifo.clear(0, startSample, numSamples);
     oversampleFifo.clear(1, startSample, numSamples);
-    float* outputs[] { oversampleFifo.getWritePointer(0, startSample),
-                       oversampleFifo.getWritePointer(1, startSample) };
-    fluid_synth_process(synth.get(), numSamples, 0, nullptr, 2, outputs);
+    const int capacity{effectsScratch.getNumSamples()};
+    if (capacity <= 0)
+        return;
+    for (int rendered = 0; rendered < numSamples;) {
+        const int chunk{juce::jmin(numSamples - rendered, capacity)};
+        float* outputs[] { oversampleFifo.getWritePointer(0, startSample + rendered),
+                           oversampleFifo.getWritePointer(1, startSample + rendered) };
+        renderWithEffects(outputs, chunk);
+        rendered += chunk;
+    }
 }
 
 void FluidSynthModel::renderThroughOversampler(
@@ -1614,6 +1890,10 @@ void FluidSynthModel::processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiM
     }
 
     const int numSamples{buffer.getNumSamples()};
+
+    // Reverb settings first, so a note rendered in this block is heard through
+    // the reverb this block was asked for rather than the previous one's.
+    applyReverbFromAudioThread(numSamples);
 
     // MidiBuffer is timestamp ordered. Render the audio before each event, apply all
     // events at that timestamp in buffer order, then continue. This preserves Bank

@@ -114,6 +114,40 @@ public:
     // processing; FluidSynth voice pointers are sampled and consumed internally.
     bool getVoiceStateCounts(int channel, VoiceStateCounts& counts) const;
 
+    // ---- Reverb ------------------------------------------------------------
+    //
+    // A control surface over the reverb FluidSynth was already running. Its
+    // `synth.reverb.active` defaults to on and Juicy16 had never touched it, so
+    // until now every rip was played through generic defaults chosen by nobody
+    // for this product. No new DSP and no new dependency: these map onto
+    // fluid_synth_reverb_on and fluid_synth_set_reverb_group_*.
+    //
+    // Per-channel CC91 sends are untouched and still reach the engine at their
+    // own timestamps; these controls set the reverb those sends feed.
+    enum ReverbParam { reverbSize, reverbDamp, reverbWidth, reverbLevel,
+                       numReverbParams };
+
+    // A profile is a named set of values over the parameters above. Selecting
+    // one MOVES the visible controls rather than hiding anything from the user
+    // or from host automation, and editing a control moves the selection to
+    // Custom. The structure has to admit a later profile backed by a DIFFERENT
+    // algorithm without changing the parameter ids Beta 1 freezes - that is the
+    // whole reason to define it now rather than after the freeze.
+    struct ReverbProfile {
+        const char* name;
+        float values[numReverbParams];
+    };
+    static const ReverbProfile reverbProfiles[];
+    static int numReverbProfiles();
+    // Index of the trailing "Custom" entry, which has no fixed values.
+    static int customReverbProfileIndex();
+    static juce::StringArray reverbProfileNames();
+    static String reverbParamId(int reverbParam);
+
+    // Read-only engine view, for the offline harness.
+    bool isReverbEnabled() const;
+    bool getReverbSetting(int reverbParam, double& value) const;
+
     // Master output level in dB, applied after rendering with smoothing so a
     // host automating it cannot produce a step discontinuity. FluidSynth's own
     // gain stays at its documented default; this is the user-facing trim.
@@ -292,6 +326,33 @@ private:
     // SysEx restoration reads only these atomics, so it cannot race a newer MIDI
     // event by consulting stale message-thread ValueTrees.
     std::atomic<int> engineCc[kNumChannels][kNumMixerCcs];
+    // Reverb. Targets are written from the message thread or a host automation
+    // thread; the smoothers and the applied state live on the audio thread only,
+    // exactly like outputLevel.
+    std::atomic<bool> reverbEnabledTarget{true};
+    std::atomic<float> reverbTarget[numReverbParams];
+    bool reverbEnabledApplied{false};
+    bool reverbEverApplied{false};
+    float reverbApplied[numReverbParams]{};
+    juce::SmoothedValue<float> reverbSmoother[numReverbParams];
+    // Set when a profile selection or a manual edit needs the OTHER parameters
+    // reconciled on the message thread; -1 = nothing pending.
+    std::atomic<int> pendingReverbProfile{-1};
+    std::atomic<bool> pendingReverbCustom{false};
+    // True while the model is writing reverb parameters to reflect a profile, so
+    // those writes do not bounce the selection straight back to Custom.
+    bool applyingReverbProfile{false};
+    // Audio thread: push any changed reverb setting into FluidSynth. Called once
+    // per block before rendering, so an automated parameter moves per block
+    // rather than stepping mid-block.
+    void applyReverbFromAudioThread(int numSamples);
+    // Renders dry audio into `outputs` and mixes FluidSynth's effects bus on top.
+    void renderWithEffects(float* const* outputs, int numSamples);
+    // Preallocated stereo effects bus. Without it the reverb is discarded.
+    AudioBuffer<float> effectsScratch;
+    // Message thread: (re)seed the engine and the smoothers from the parameters.
+    void resetReverbToParameters();
+
     // Mute/solo. Written from the message thread or a host automation thread and
     // read on the audio thread for every note-on, so the derived mask is stored
     // rather than recomputed per event.

@@ -51,7 +51,7 @@ are visible at once — nothing needs a row selected first. Selecting a row only
 chooses which channel the on-screen keyboard auditions.
 
 The panel on the right holds what is global rather than per channel: the master
-output trim, and a summary of the loaded bank. The header carries the bank picker
+output trim, the reverb, and a summary of the loaded bank. The header carries the bank picker
 and a settings button; settings holds the accent colour and the build details
 worth quoting in a bug report (version, FluidSynth version, plugin format, sample
 rate).
@@ -69,6 +69,25 @@ Two things to know about the row controls:
 
 Every one of those controls is a host parameter, so a host's automation and
 controller-link menus reach all 16 channels.
+
+### The reverb, and one thing that will surprise you
+
+Juicy16 discarded FluidSynth's effects buses until 0.5.1-alpha.7, so its reverb
+was never audible. It is now mixed in. **A project you made with an earlier build
+will sound different** if its MIDI sends CC91 — that is the file being played as
+written, but please do not report it as a defect.
+
+- You set the reverb: enable, a profile (Universal or Soft), and size, damping,
+  width and level. Selecting a profile moves all four controls; editing any of
+  them selects Custom.
+- The MIDI file sets how much of each channel goes into it, through CC91. It
+  cannot change your settings — GS and XG reverb SysEx is deliberately ignored.
+- **A rip that never sends CC91 gets no reverb**, whatever the controls say.
+  Nothing is being sent to it. Please check the file before reporting silence.
+- Chorus is switched off. CC93 still reaches the engine but drives nothing yet.
+
+Nobody has listened to these profiles on real rips yet — they were chosen by
+measurement. Reports on how they actually sound are exactly what is wanted.
 
 ## Supported workflow
 

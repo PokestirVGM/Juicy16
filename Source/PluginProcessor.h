@@ -74,7 +74,7 @@ public:
     MidiKeyboardState keyboardState;
 
 private:
-    static constexpr int currentStateVersion{5};
+    static constexpr int currentStateVersion{6};
     void initialiseSynth();
 
     AudioProcessorValueTreeState valueTreeState;

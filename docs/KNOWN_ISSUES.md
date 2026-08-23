@@ -1,6 +1,31 @@
 # Beta 1 known issues and unverified areas
 
-This file describes the unreleased `0.5.1-alpha.6` development state. It must be regenerated for the exact frozen candidate.
+This file describes the unreleased `0.5.1-alpha.7` development state. It must be regenerated for the exact frozen candidate.
+
+## Reverb
+
+- **Old projects will sound different.** Juicy16 discarded FluidSynth's effects
+  buses until 0.5.1-alpha.7, so its reverb was never audible. It is now mixed in,
+  and a project whose MIDI sends CC91 will have reverb where it previously had
+  none. That is the file being played as written, but it is an audible change to
+  existing work.
+- **A MIDI file cannot change your reverb settings.** GS and XG reverb macro
+  SysEx is deliberately ignored, so a rip asking for a hall gets whatever profile
+  you selected. Report a rip that sounds wrong in a way the manual controls
+  cannot fix.
+- **A rip that never sends CC91 gets no reverb**, whatever the controls say —
+  nothing is being sent to the reverb. This is not a defect. `SEQ_BGM_C_03` in
+  the test corpus is such a file.
+- **Chorus does nothing.** It was discarded by the same bug and is now switched
+  off explicitly rather than un-muted with defaults nobody chose. CC93 still
+  reaches the engine. Chorus will get controls of its own in a later release.
+- **Nobody has listened to the reverb yet.** Its defaults were chosen by
+  measurement against dry material, not by ear. Tester reports on how the
+  profiles actually sound on real rips are especially useful.
+- **The performance envelope has not been re-agreed** for a build that mixes an
+  extra stereo bus per block. The baseline test passes, but the figure it passes
+  against predates the reverb.
+
 
 ## Stop-ship/open gates
 

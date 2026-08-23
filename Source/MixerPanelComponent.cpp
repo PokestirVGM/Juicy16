@@ -7,6 +7,8 @@ constexpr int kMasterKnobSize{40};
 constexpr int kHeadingHeight{14};
 constexpr int kBankNameHeight{16};
 constexpr int kBankDetailHeight{18};
+constexpr int kProfileHeight{24};
+constexpr int kReverbKnobSize{34};
 
 // The panel's section headings: small, letterspaced, quiet.
 void styleHeading(Label& label, const String& text) {
@@ -72,6 +74,76 @@ MixerPanelComponent::MixerPanelComponent(
 
     outputLevelSliderAttachment =
         make_unique<SliderAttachment>(state, "outputLevel", outputLevelSlider);
+
+    // ---- Reverb -----------------------------------------------------------
+    styleHeading(reverbHeading, "Reverb");
+    addAndMakeVisible(reverbHeading);
+
+    reverbEnable.setName("Reverb enabled");
+    reverbEnable.setTitle("Reverb enabled");
+    reverbEnable.setDescription("Enable or bypass the reverb");
+    reverbEnable.setHelpText(
+        "Bypassing the reverb removes it entirely rather than turning it down.");
+    reverbEnable.setTooltip(reverbEnable.getHelpText());
+    reverbEnable.setWantsKeyboardFocus(true);
+    addAndMakeVisible(reverbEnable);
+    reverbEnableAttachment =
+        make_unique<AudioProcessorValueTreeState::ButtonAttachment>(
+            state, "reverbOn", reverbEnable);
+
+    reverbProfile.setName("Reverb profile");
+    reverbProfile.setTitle("Reverb profile");
+    reverbProfile.setDescription("Named set of reverb settings");
+    reverbProfile.setHelpText(
+        "Selecting a profile moves the four controls below; editing any of them "
+        "selects Custom.");
+    reverbProfile.setTooltip(reverbProfile.getHelpText());
+    reverbProfile.setWantsKeyboardFocus(true);
+    reverbProfile.addItemList(FluidSynthModel::reverbProfileNames(), 1);
+    addAndMakeVisible(reverbProfile);
+    reverbProfileAttachment =
+        make_unique<AudioProcessorValueTreeState::ComboBoxAttachment>(
+            state, "reverbProfile", reverbProfile);
+
+    {
+        const char* captions[]{"Size", "Damp", "Width", "Level"};
+        const char* help[]{
+            "How large the reverberant space is.",
+            "How quickly the tail loses its high frequencies.",
+            "How wide the reverb sits across the stereo field.",
+            "How much reverb the channel sends produce.",
+        };
+        for (int i = 0; i < FluidSynthModel::numReverbParams; ++i) {
+            auto knob{make_unique<Slider>()};
+            knob->setSliderStyle(Slider::RotaryHorizontalVerticalDrag);
+            knob->setTextBoxStyle(Slider::NoTextBox, true, 0, 0);
+            knob->setRange(0.0, 1.0, 0.001);
+            const String name{String{"Reverb "} + String(captions[i]).toLowerCase()};
+            knob->setName(name);
+            knob->setTitle(name);
+            knob->setDescription(name);
+            knob->setHelpText(help[i]);
+            knob->setTooltip(help[i]);
+            knob->setWantsKeyboardFocus(true);
+            addAndMakeVisible(*knob);
+            reverbAttachments.add(new SliderAttachment(
+                state, FluidSynthModel::reverbParamId(i), *knob));
+            reverbKnobs.add(std::move(knob));
+
+            auto caption{make_unique<Label>()};
+            caption->setText(captions[i], NotificationType::dontSendNotification);
+            caption->setFont(Font{juce::FontOptions{GuiConstants::labelFontHeight}});
+            caption->setColour(Label::textColourId,
+                               findColour(Juicy16::textLabelColourId));
+            caption->setJustificationType(Justification::centred);
+            caption->setInterceptsMouseClicks(false, false);
+            // The knob is the accessible control; its caption would only be
+            // announced twice.
+            caption->setAccessible(false);
+            addAndMakeVisible(*caption);
+            reverbLabels.add(std::move(caption));
+        }
+    }
 
     styleHeading(bankHeading, "Bank");
     addAndMakeVisible(bankHeading);
@@ -154,6 +226,7 @@ void MixerPanelComponent::paint(Graphics& g) {
     g.fillRect(0, 0, 1, getHeight()); // divider from the rack
     g.setColour(lookAndFeel.findColour(Juicy16::subtleBorderColourId));
     g.fillRect(1, masterDividerY, getWidth() - 1, 1);
+    g.fillRect(1, reverbDividerY, getWidth() - 1, 1);
     g.fillRect(1, bankDividerY, getWidth() - 1, 1);
 }
 
@@ -174,8 +247,31 @@ void MixerPanelComponent::resized() {
         static_cast<int>(GuiConstants::masterValueFontHeight) + 4));
     outputLevelUnit.setBounds(knobRow.removeFromTop(kHeadingHeight));
 
-    // The bank summary sits at the foot of the panel; whatever is left between
-    // the two is where the reverb section lands in Phase 10.
+    // Reverb sits under the master block: the enable and profile, then the four
+    // engine controls in one row of knobs with captions under them.
+    Rectangle<int> reverb{r.removeFromTop(
+        GuiConstants::padding * 2 + kHeadingHeight + GuiConstants::innerPadding
+        + kProfileHeight + GuiConstants::groupGap + kReverbKnobSize + kHeadingHeight)};
+    reverbDividerY = reverb.getBottom();
+    reverb.reduce(GuiConstants::padding + 4, GuiConstants::padding);
+    Rectangle<int> reverbTop{reverb.removeFromTop(kHeadingHeight)};
+    // The enable sits on the heading's own line, as the approved layout draws it.
+    reverbEnable.setBounds(reverbTop.removeFromRight(32));
+    reverbHeading.setBounds(reverbTop);
+    reverb.removeFromTop(GuiConstants::innerPadding);
+    reverbProfile.setBounds(reverb.removeFromTop(kProfileHeight));
+    reverb.removeFromTop(GuiConstants::groupGap);
+    Rectangle<int> reverbKnobRow{reverb.removeFromTop(kReverbKnobSize + kHeadingHeight)};
+    const int cell{reverbKnobRow.getWidth() / juce::jmax(1, reverbKnobs.size())};
+    for (int i = 0; i < reverbKnobs.size(); ++i) {
+        Rectangle<int> column{reverbKnobRow.removeFromLeft(cell)};
+        reverbKnobs[i]->setBounds(
+            column.removeFromTop(kReverbKnobSize)
+                .withSizeKeepingCentre(kReverbKnobSize, kReverbKnobSize));
+        reverbLabels[i]->setBounds(column);
+    }
+
+    // The bank summary sits at the foot of the panel.
     Rectangle<int> bank{r.removeFromBottom(
         GuiConstants::padding * 2 + kHeadingHeight + kBankNameHeight
         + kBankDetailHeight + 8)};

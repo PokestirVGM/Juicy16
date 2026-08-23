@@ -77,6 +77,13 @@ public:
                               bool shouldDrawButtonAsDown) override;
     juce::Font getTextButtonFont(juce::TextButton&, int buttonHeight) override;
 
+    // A pill switch rather than JUCE's tick box: an unlabelled tick box beside a
+    // section heading reads as an empty square, which is exactly what the
+    // approved layout avoided by drawing a switch.
+    void drawToggleButton(juce::Graphics&, juce::ToggleButton&,
+                          bool shouldDrawButtonAsHighlighted,
+                          bool shouldDrawButtonAsDown) override;
+
     void drawTableHeaderBackground(juce::Graphics&, juce::TableHeaderComponent&) override;
     void drawTableHeaderColumn(juce::Graphics&, juce::TableHeaderComponent&,
                                const juce::String& columnName, int columnId,

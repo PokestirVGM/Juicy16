@@ -202,7 +202,9 @@ juce::AudioParameterBool* findBoolParameter(JuicySFAudioProcessor& processor,
 // contract violation; the ORDER encoded here is the contract.
 std::vector<juce::String> beta1ParameterIds()
 {
-    std::vector<juce::String> ids{"bank", "preset", "outputLevel"};
+    std::vector<juce::String> ids{"bank", "preset", "outputLevel",
+                                  "reverbOn", "reverbProfile", "reverbSize",
+                                  "reverbDamp", "reverbWidth", "reverbLevel"};
     for (const char* prefix : {"volCh", "panCh", "muteCh", "soloCh"})
         for (int channel = 1; channel <= 16; ++channel)
             ids.push_back(juce::String{prefix} + juce::String(channel));
@@ -786,6 +788,14 @@ int main(int argc, char** argv)
 
     auto& model{processor.getFluidSynthModel()};
     juce::AudioBuffer<float> audio{2, blockSize};
+
+    // The conformance assertions below measure the DRY path: sample-accurate
+    // event placement, silence before an event, exact block boundaries. A reverb
+    // tail crossing those boundaries is correct behaviour and would make every
+    // one of them meaningless, so this processor runs bypassed. The reverb has
+    // its own section, on its own processor, which asserts that the tail exists.
+    if (auto* reverbOn{findBoolParameter(processor, "reverbOn")})
+        *reverbOn = false;
 
     {
         const auto expectedParameterIds{beta1ParameterIds()};
@@ -2270,6 +2280,273 @@ int main(int argc, char** argv)
                   && restoredExact,
               "volume and pan remain timestamp-, engine-, knob-, channel-, and state-exact on all 16 channels, without selecting a row");
     }
+    std::printf("== reverb ==\n");
+    {
+        JuicySFAudioProcessor verb;
+        verb.prepareToPlay(48000.0, blockSize);
+        const auto verbState{makeState(argv[1])};
+        verb.setStateInformation(
+            verbState.getData(), static_cast<int>(verbState.getSize()));
+        auto& verbModel{verb.getFluidSynthModel()};
+        juce::AudioBuffer<float> verbAudio{2, blockSize};
+
+        const auto setFloat{[&](const char* id, float value) {
+            for (auto* parameter : verb.getParameters())
+                if (auto* f{dynamic_cast<juce::AudioParameterFloat*>(parameter)};
+                    f != nullptr && f->paramID == id)
+                    *f = value;
+        }};
+
+        // One note with a reverb send, rendered well past its own decay: what
+        // remains in the tail is reverb or nothing.
+        const auto tailEnergy{[&](bool on, int send) {
+            if (auto* p{findBoolParameter(verb, "reverbOn")}) *p = on;
+            juce::MidiBuffer quiet;
+            addAllSoundOff(quiet);
+            render(verb, verbAudio, quiet);
+            for (int block = 0; block < 12; ++block) {
+                juce::MidiBuffer empty;
+                render(verb, verbAudio, empty);
+            }
+            juce::MidiBuffer note;
+            note.addEvent(juce::MidiMessage::controllerEvent(1, 91, send), 0);
+            note.addEvent(juce::MidiMessage::programChange(1, 0), 1);
+            note.addEvent(
+                juce::MidiMessage::noteOn(1, 60, static_cast<juce::uint8>(110)), 2);
+            render(verb, verbAudio, note);
+            juce::MidiBuffer off;
+            off.addEvent(juce::MidiMessage::noteOff(1, 60), 0);
+            render(verb, verbAudio, off);
+            double energy{0.0};
+            for (int block = 0; block < 40; ++block) {
+                juce::MidiBuffer empty;
+                render(verb, verbAudio, empty);
+                // Skip the first blocks: that is the note's own release, which
+                // is present with or without reverb.
+                if (block < 8)
+                    continue;
+                for (int ch = 0; ch < 2; ++ch)
+                    for (int i = 0; i < blockSize; ++i) {
+                        const float v{verbAudio.getSample(ch, i)};
+                        energy += static_cast<double>(v) * v;
+                    }
+            }
+            return energy;
+        }};
+
+        const double wet{tailEnergy(true, 100)};
+        const double dry{tailEnergy(false, 100)};
+        std::printf("    tail energy: reverb on %.8f  bypassed %.8f\n", wet, dry);
+        check(wet > dry * 4.0 && wet > 1.0e-6,
+              "the reverb is audible: a sent note leaves a tail that bypassing removes");
+
+        // The acceptance criterion is that bypass is genuinely silent rather than
+        // level zero with a tail still computing. An inactive reverb unit is not
+        // processed at all, so bypassed output must be EXACTLY the dry signal,
+        // not merely close to it.
+        const double dryNoSend{tailEnergy(false, 0)};
+        check(std::abs(dry - dryNoSend) <= 1.0e-12,
+              "bypassed output is identical to a signal that was never sent to the reverb");
+
+        // Every parameter has to do something, or it is decoration.
+        if (auto* p{findBoolParameter(verb, "reverbOn")}) *p = true;
+        setFloat("reverbLevel", 0.9f);
+        const double loud{tailEnergy(true, 100)};
+        setFloat("reverbLevel", 0.15f);
+        const double quiet{tailEnergy(true, 100)};
+        setFloat("reverbLevel", 0.55f);
+        setFloat("reverbSize", 0.9f);
+        const double big{tailEnergy(true, 100)};
+        setFloat("reverbSize", 0.1f);
+        const double small{tailEnergy(true, 100)};
+        setFloat("reverbSize", 0.45f);
+        setFloat("reverbDamp", 0.0f);
+        const double bright{tailEnergy(true, 100)};
+        setFloat("reverbDamp", 1.0f);
+        const double dark{tailEnergy(true, 100)};
+        setFloat("reverbDamp", 0.35f);
+        std::printf("    level %.6f/%.6f  size %.6f/%.6f  damp %.6f/%.6f\n",
+                    loud, quiet, big, small, bright, dark);
+        check(loud > quiet * 1.5 && big > small * 1.5 && bright > dark * 1.05,
+              "level, room size and damping each change the tail in the expected direction");
+
+        // Width is a stereo property, so it is measured as one: a wide setting
+        // must put more energy in the L-R difference than a mono one.
+        const auto sideEnergy{[&](float width) {
+            setFloat("reverbWidth", width);
+            juce::MidiBuffer quiet2;
+            addAllSoundOff(quiet2);
+            render(verb, verbAudio, quiet2);
+            for (int block = 0; block < 12; ++block) {
+                juce::MidiBuffer empty;
+                render(verb, verbAudio, empty);
+            }
+            juce::MidiBuffer note;
+            note.addEvent(juce::MidiMessage::controllerEvent(1, 91, 127), 0);
+            note.addEvent(
+                juce::MidiMessage::noteOn(1, 60, static_cast<juce::uint8>(110)), 2);
+            render(verb, verbAudio, note);
+            juce::MidiBuffer off;
+            off.addEvent(juce::MidiMessage::noteOff(1, 60), 0);
+            render(verb, verbAudio, off);
+            double side{0.0};
+            for (int block = 0; block < 40; ++block) {
+                juce::MidiBuffer empty;
+                render(verb, verbAudio, empty);
+                if (block < 8)
+                    continue;
+                for (int i = 0; i < blockSize; ++i) {
+                    const double d{verbAudio.getSample(0, i) - verbAudio.getSample(1, i)};
+                    side += d * d;
+                }
+            }
+            return side;
+        }};
+        const double wide{sideEnergy(1.0f)};
+        const double mono{sideEnergy(0.0f)};
+        setFloat("reverbWidth", 0.85f);
+        std::printf("    width side energy: wide %.8f  mono %.8f\n", wide, mono);
+        check(wide > mono * 2.0,
+              "stereo width widens the reverb rather than only changing its level");
+
+        // Profiles move the visible controls; editing a control moves the
+        // selection to Custom. Nothing is hidden from the user or from the host.
+        auto* profile{dynamic_cast<juce::AudioParameterChoice*>(
+            [&]() -> juce::AudioProcessorParameter* {
+                for (auto* parameter : verb.getParameters())
+                    if (auto* c{dynamic_cast<juce::AudioProcessorParameterWithID*>(parameter)};
+                        c != nullptr && c->paramID == "reverbProfile")
+                        return parameter;
+                return nullptr;
+            }())};
+        bool profilesMoveControls{profile != nullptr};
+        if (profile != nullptr) {
+            for (int index = 0; index < FluidSynthModel::customReverbProfileIndex();
+                 ++index) {
+                // Land on Custom first. Setting a parameter to the value it
+                // already holds notifies nobody, so selecting a profile that is
+                // already selected would test nothing.
+                *profile = FluidSynthModel::customReverbProfileIndex();
+                verbModel.handleUpdateNowIfNeeded();
+                *profile = index;
+                verbModel.handleUpdateNowIfNeeded();
+                for (int i = 0; i < FluidSynthModel::numReverbParams; ++i) {
+                    const auto id{FluidSynthModel::reverbParamId(i)};
+                    float value{-1.0f};
+                    for (auto* parameter : verb.getParameters())
+                        if (auto* f{dynamic_cast<juce::AudioParameterFloat*>(parameter)};
+                            f != nullptr && f->paramID == id)
+                            value = f->get();
+                    profilesMoveControls = profilesMoveControls
+                        && std::abs(value - FluidSynthModel::reverbProfiles[index].values[i])
+                               < 1.0e-3f;
+                }
+                profilesMoveControls = profilesMoveControls && profile->getIndex() == index;
+            }
+            // Editing any control leaves the named profile behind.
+            setFloat("reverbSize", 0.77f);
+            verbModel.handleUpdateNowIfNeeded();
+            profilesMoveControls = profilesMoveControls
+                && profile->getIndex() == FluidSynthModel::customReverbProfileIndex();
+        }
+        check(profilesMoveControls,
+              "selecting a profile moves every reverb control, and editing one selects Custom");
+
+        // Automation must not step at the smallest block size a host can ask for.
+        {
+            JuicySFAudioProcessor sweep;
+            sweep.prepareToPlay(48000.0, 32);
+            const auto sweepState{makeState(argv[1])};
+            sweep.setStateInformation(
+                sweepState.getData(), static_cast<int>(sweepState.getSize()));
+            juce::AudioBuffer<float> sweepAudio{2, 32};
+            juce::MidiBuffer start;
+            start.addEvent(juce::MidiMessage::controllerEvent(1, 91, 127), 0);
+            start.addEvent(juce::MidiMessage::programChange(1, 0), 1);
+            start.addEvent(
+                juce::MidiMessage::noteOn(1, 60, static_cast<juce::uint8>(110)), 2);
+            render(sweep, sweepAudio, start);
+            juce::AudioParameterFloat* level{nullptr};
+            for (auto* parameter : sweep.getParameters())
+                if (auto* f{dynamic_cast<juce::AudioParameterFloat*>(parameter)};
+                    f != nullptr && f->paramID == "reverbLevel")
+                    level = f;
+            float previous{sweepAudio.getSample(0, 31)};
+            float largestStep{0.0f};
+            for (int block = 0; block < 400; ++block) {
+                if (level != nullptr)
+                    // A hostile automation ramp: full range in 400 blocks of 32
+                    // samples, which is a quarter of a second.
+                    *level = static_cast<float>(block) / 399.0f;
+                juce::MidiBuffer empty;
+                render(sweep, sweepAudio, empty);
+                for (int i = 0; i < 32; ++i) {
+                    const float v{sweepAudio.getSample(0, i)};
+                    largestStep = juce::jmax(largestStep, std::abs(v - previous));
+                    previous = v;
+                }
+            }
+            std::printf("    largest sample-to-sample step under a full level ramp: %.6f\n",
+                        largestStep);
+            // A click is a discontinuity, not a slope. Sustained material at this
+            // level moves far less than this between adjacent samples.
+            check(largestStep < 0.05f,
+                  "automating reverb level across its full range at a 32-sample block size is click-free");
+        }
+
+        // Round-trip, and the per-channel CC91 path the reverb feeds on.
+        setFloat("reverbSize", 0.33f);
+        setFloat("reverbLevel", 0.71f);
+        if (auto* p{findBoolParameter(verb, "reverbOn")}) *p = false;
+        if (profile != nullptr) verbModel.handleUpdateNowIfNeeded();
+        juce::MemoryBlock savedVerb;
+        verb.getStateInformation(savedVerb);
+        JuicySFAudioProcessor restoredVerb;
+        restoredVerb.prepareToPlay(48000.0, blockSize);
+        restoredVerb.setStateInformation(
+            savedVerb.getData(), static_cast<int>(savedVerb.getSize()));
+        const auto restoredFloat{[&](const char* id) {
+            for (auto* parameter : restoredVerb.getParameters())
+                if (auto* f{dynamic_cast<juce::AudioParameterFloat*>(parameter)};
+                    f != nullptr && f->paramID == id)
+                    return f->get();
+            return -1.0f;
+        }};
+        const auto* restoredOn{findBoolParameter(restoredVerb, "reverbOn")};
+        double engineSize{-1.0};
+        juce::AudioBuffer<float> restoredAudio{2, blockSize};
+        juce::MidiBuffer empty;
+        render(restoredVerb, restoredAudio, empty);
+        restoredVerb.getFluidSynthModel().getReverbSetting(
+            FluidSynthModel::reverbSize, engineSize);
+        check(std::abs(restoredFloat("reverbSize") - 0.33f) < 1.0e-3f
+                  && std::abs(restoredFloat("reverbLevel") - 0.71f) < 1.0e-3f
+                  && restoredOn != nullptr && !restoredOn->get()
+                  && std::abs(engineSize - 0.33) < 1.0e-3,
+              "reverb settings round-trip through saved state and reach the engine on reload");
+
+        // The non-negotiable part: CC91 is per channel, comes from the file, and
+        // must still arrive at its own timestamp.
+        juce::MidiBuffer sends;
+        for (int channel = 0; channel < 16; ++channel)
+            sends.addEvent(
+                juce::MidiMessage::controllerEvent(channel + 1, 91, 3 + channel * 5),
+                17 + channel);
+        render(restoredVerb, restoredAudio, sends);
+        bool sendsExact{true};
+        for (int channel = 0; channel < 16; ++channel) {
+            int value{-1}, dispatched{-1}, sample{-1};
+            sendsExact = sendsExact
+                && restoredVerb.getFluidSynthModel().getControllerValue(channel, 91, value)
+                && value == 3 + channel * 5
+                && restoredVerb.getFluidSynthModel().getLastDispatchedController(
+                    channel, 91, dispatched, sample)
+                && dispatched == 3 + channel * 5 && sample == 17 + channel;
+        }
+        check(sendsExact,
+              "per-channel CC91 reverb sends still reach the engine at their own timestamps on all 16 channels");
+    }
+
     std::printf("== mute and solo ==\n");
     {
         // A fresh processor: the mixer block above leaves channels at scattered
@@ -2931,11 +3208,11 @@ int main(int argc, char** argv)
                     allChannelProperties = allChannelProperties
                         && ch->hasAttribute(property);
         check(xml != nullptr && xml->hasTagName("MYPLUGINSETTINGS")
-                  && xml->getIntAttribute("stateVersion", -1) == 5
+                  && xml->getIntAttribute("stateVersion", -1) == 6
                   && allParams && allChannelProperties
                   && font != nullptr && font->hasAttribute("path")
                   && font->hasAttribute("bookmark"),
-              "Beta 1 state writer preserves the frozen schema-5 envelope");
+              "Beta 1 state writer preserves the frozen schema-6 envelope");
     }
     {
         model.setChannelProgram(1, 0, 4);
@@ -3164,17 +3441,49 @@ int main(int argc, char** argv)
         const auto* rewrittenParams{
             rewrittenXml != nullptr ? rewrittenXml->getChildByName("params") : nullptr};
         check(rewrittenXml != nullptr
-                  && rewrittenXml->getIntAttribute("stateVersion", -1) == 5
+                  && rewrittenXml->getIntAttribute("stateVersion", -1) == 6
                   && rewrittenParams != nullptr
                   && !rewrittenParams->hasAttribute("volume")
                   && !rewrittenParams->hasAttribute("pan")
                   && rewrittenParams->hasAttribute("volCh1")
                   && rewrittenParams->hasAttribute("soloCh16"),
-              "re-saving a migrated project writes schema 5 and drops the retired volume/pan parameters");
+              "re-saving a migrated project writes schema 6 and drops the retired volume/pan parameters");
+
+        // v5 -> v6: a save written before the reverb existed opens on the
+        // Universal profile with the reverb enabled, which is the deliberate
+        // default rather than FluidSynth's inherited one.
+        {
+            juce::XmlElement preReverb{"MYPLUGINSETTINGS"};
+            preReverb.setAttribute("stateVersion", 5);
+            auto* preParams{preReverb.createNewChildElement("params")};
+            preParams->setAttribute("volCh1", 0.5);
+            auto* preFont{preReverb.createNewChildElement("soundFont")};
+            preFont->setAttribute("path", argv[1]);
+            preFont->setAttribute("bookmark", "");
+            juce::MemoryBlock preState;
+            juce::AudioProcessor::copyXmlToBinary(preReverb, preState);
+
+            JuicySFAudioProcessor opened;
+            opened.prepareToPlay(48000.0, blockSize);
+            opened.setStateInformation(
+                preState.getData(), static_cast<int>(preState.getSize()));
+            juce::AudioBuffer<float> openedAudio{2, blockSize};
+            juce::MidiBuffer none;
+            render(opened, openedAudio, none);
+            const auto* on{findBoolParameter(opened, "reverbOn")};
+            double engineLevel{-1.0};
+            opened.getFluidSynthModel().getReverbSetting(
+                FluidSynthModel::reverbLevel, engineLevel);
+            check(on != nullptr && on->get()
+                      && std::abs(engineLevel
+                          - FluidSynthModel::reverbProfiles[0]
+                              .values[FluidSynthModel::reverbLevel]) < 1.0e-3,
+                  "a save written before the reverb existed opens on the Universal profile and reaches the engine");
+        }
 
         // A save from a FUTURE schema is still refused rather than half-applied.
         juce::XmlElement future{"MYPLUGINSETTINGS"};
-        future.setAttribute("stateVersion", 6);
+        future.setAttribute("stateVersion", 7);
         juce::MemoryBlock futureState;
         juce::AudioProcessor::copyXmlToBinary(future, futureState);
         migrated.setStateInformation(
@@ -3626,13 +3935,19 @@ int main(int argc, char** argv)
             bool requireSliderRole;
             bool requireTableRole;
         };
-        constexpr std::array<ExpectedAccessibleComponent, 6> expected{{
+        constexpr std::array<ExpectedAccessibleComponent, 12> expected{{
             {"Sound bank file", false, false},
             {"MIDI channel assignments", false, true},
             {"Output level", true, false},
             {"MIDI Keyboard", false, false},
             {"Version and bank load status", false, false},
             {"Settings", false, false},
+            {"Loaded bank", false, false},
+            {"Reverb enabled", false, false},
+            {"Reverb profile", false, false},
+            {"Reverb size", true, false},
+            {"Reverb damp", true, false},
+            {"Reverb level", true, false},
         }};
         bool accessibleMetadata{editor != nullptr};
         for (const auto& item : expected) {
@@ -3684,6 +3999,24 @@ int main(int argc, char** argv)
             && channelTableForFocus(*editor)->getWantsKeyboardFocus()};
         check(focusRouting,
               "the editor and the channel table take keyboard focus while the on-screen keyboard declines it");
+
+        // The reverb section is a control surface, so every part of it has to be
+        // reachable without a mouse, not only drawn.
+        bool reverbReachable{editor != nullptr};
+        for (const char* name : {"Reverb enabled", "Reverb profile", "Reverb size",
+                                 "Reverb damp", "Reverb width", "Reverb level"}) {
+            auto* control{editor != nullptr ? findNamedComponent(*editor, name) : nullptr};
+            const bool valid{control != nullptr
+                && control->isAccessible()
+                && control->getTitle().isNotEmpty()
+                && control->getDescription().isNotEmpty()
+                && control->getWantsKeyboardFocus()};
+            if (!valid)
+                std::printf("    reverb control missing or unreachable: %s\n", name);
+            reverbReachable = reverbReachable && valid;
+        }
+        check(reverbReachable,
+              "the reverb enable, profile and all four engine controls are named and keyboard-reachable");
 
         bool slidersReachable{editor != nullptr};
         for (const char* name : {"Output level"}) {

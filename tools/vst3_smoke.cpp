@@ -72,8 +72,14 @@ static constexpr Vst::ParamID expectedProgramParamIds[16]{
 // here. Order: bank, preset, outputLevel, then volCh1..16, panCh1..16,
 // muteCh1..16, soloCh1..16. All of these live in the ROOT unit; only the 16
 // progChN parameters live in the channel units.
-static constexpr Vst::ParamID expectedRootParamIds[67]{
+// reverbOn. Named because the timing scenarios below have to bypass the reverb
+// to measure the dry path they are actually about.
+static constexpr Vst::ParamID kReverbOnParamId = 0x703BC751;
+static constexpr Vst::ParamID expectedRootParamIds[73]{
     0x002E063C, 0x4594E2DF, 0x4DCA0B03,
+    // reverbOn, reverbProfile, reverbSize, reverbDamp, reverbWidth, reverbLevel
+    0x703BC751, 0x5D46E777, 0x506904F3,
+    0x506213D2, 0x3CEFA714, 0x3C5314D2,
     // volCh1..volCh16
     0x4FAA2A99, 0x4FAA2A9A, 0x4FAA2A9B, 0x4FAA2A9C,
     0x4FAA2A9D, 0x4FAA2A9E, 0x4FAA2A9F, 0x4FAA2AA0,
@@ -937,7 +943,7 @@ int main (int argc, char** argv) {
         // programCount-1 (127), not 0 (continuous). Regression-guard for isDiscrete().
         CHECK (steppedParams == 16, "all 16 channel program params report stepCount 127");
         CHECK (frozenProgramIds, "all 16 Beta 1 VST3 program ParamIDs are unchanged");
-        CHECK (frozenRootIds, "all 67 Beta 1 root-unit VST3 ParamIDs are present");
+        CHECK (frozenRootIds, "all 73 Beta 1 root-unit VST3 ParamIDs are present");
         CHECK (rootParamsInRootUnit,
                "every non-program parameter reports the root unit, so no parameter names a unit outside the frozen 17");
 
@@ -1128,6 +1134,12 @@ int main (int argc, char** argv) {
         processData.numSamples = 512;
         processData.numOutputs = 1;
         processData.outputs = &output;
+        // Bypass the reverb for this scenario. It measures the DRY path -
+        // sample-accurate event placement and exact silence before the first
+        // event - and a reverb tail crossing a block boundary is correct
+        // behaviour that would make the silence assertion meaningless. The
+        // reverb's own behaviour is asserted in the engine suite.
+        inputChanges.addPoint(kReverbOnParamId, 0, 0.0);
         processData.inputParameterChanges = &inputChanges;
         processData.inputEvents = &inputEvents;
         Vst::ProcessContext playingContext{};

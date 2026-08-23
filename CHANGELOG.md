@@ -2,11 +2,38 @@
 
 ## 0.5.1-alpha.7 — unreleased
 
-Phase 9 of the Beta 1 plan: the interface redesign the owner approved on
-2026-08-23, implemented.
+Phases 9 and 10 of the Beta 1 plan: the interface redesign the owner approved on
+2026-08-23, and the reverb control surface — which turned out to start from a
+false premise and uncovered a real bug. See "The reverb was never audible" below.
 
 ### Added
 
+- **Reverb controls** (Phase 10): enable, a profile selector, and the four engine
+  parameters — size, damping, width and level — in the right-hand panel. No new
+  DSP and no new dependency: they map onto `fluid_synth_reverb_on` and
+  `fluid_synth_set_reverb_group_*`.
+
+  Bypass removes the reverb unit rather than turning its level down, so nothing
+  keeps computing a tail; bypassed output is bit-identical to a signal that was
+  never sent to the reverb. Automating any parameter is click-free at a
+  32-sample block size (largest sample-to-sample step under a full-range level
+  ramp: 0.0046). Settings are smoothed per block over 20 ms, and only a setting
+  that actually moved is written, so a rip that never automates reverb pays
+  nothing.
+
+  Two profiles ship, chosen by measurement on a real VGMTrans rip at CC91 = 80
+  against the same material dry: **Universal** (0.45/0.35/0.85/0.55, +0.92 dB
+  RMS) and **Soft** (0.20/0.60/1.00/0.55, +0.47 dB — a much smaller room at full
+  width, per the owner's "width without a long tail" brief). FluidSynth's own
+  inherited values would have been +1.64 dB. Editing any control selects Custom.
+  A profile may not be named after hardware it does not emulate, so neither
+  carries a console name; the proposed "SNS" is still an open owner decision and
+  is held back in case it means SNES, which belongs to a real S-DSP profile.
+
+  Per-channel CC91 sends are untouched and still reach the engine at their own
+  timestamps; they are what feeds the reverb these controls set. A rip that never
+  sends CC91 gets no reverb whatever the settings say — `SEQ_BGM_C_03` in the
+  test corpus sends none.
 - **Every channel row owns its own volume, pan, mute and solo.** The defect this
   phase exists to fix was that volume and pan edited only the *selected* channel
   — in a plugin whose whole purpose is 16 channels at once, 15 of them were
@@ -54,29 +81,49 @@ Phase 9 of the Beta 1 plan: the interface redesign the owner approved on
   50px wide, so "Master" rendered as "M..." and the value as `0.0...`.
   `TablesComponent` (a pass-through wrapper) and `MyColours` (whose only job was
   reaching into the stock scheme) went with it.
-- **Parameter set: 21 to 83.** `volume` and `pan` are retired in favour of
+- **Chorus is switched off explicitly.** It was being discarded by the same bug.
+  Turning the effects bus on would have un-muted a chorus nobody chose, on every
+  rip — the exact class of unchosen default this work exists to remove. CC93
+  still reaches the engine; the chorus stays off until it has controls of its own.
+- **Parameter set: 21 to 89.** `volume` and `pan` are retired in favour of
   `volCh1`-`volCh16` and `panCh1`-`panCh16`, plus `muteCh1`-`muteCh16` and
-  `soloCh1`-`soloCh16`. They are real host parameters rather than editor state,
+  `soloCh1`-`soloCh16`, plus six reverb parameters. The mixer ones are real host
+  parameters rather than editor state,
   so a host can automate any channel and a right-click on a knob offers the
   host's own automation and controller-link menu.
 
-  None of the 64 is in a parameter group. JUCE derives a VST3 `unitId` from a
+  None of the 70 new parameters is in a parameter group. JUCE derives a VST3 `unitId` from a
   parameter's group and the vendored wrapper serves a fixed 17-unit structure
   that hosts cache before the component connection exists — a group would have
   published parameters pointing at an 18th unit the host was never told about.
   Ungrouped, they report the root unit, and the 16 `progChN` ParamIDs and all 16
   channel unit IDs are **unchanged**, so existing sessions' program automation is
   intact. `vst3_smoke` asserts both halves.
-- **State schema 4 to 5.** A version 4 save is migrated from its per-channel
+- **State schema 4 to 6.** A version 4 save is migrated from its per-channel
   records rather than from the two retired parameters: `channelPrograms` already
   stored every channel's volume and pan, so each channel's saved values become
   that channel's own parameter and reach the engine as before. Mute and solo do
-  not exist in a version 4 save and arrive off. Pinned by a regression that
-  writes a version 4 envelope, reads it back, and asserts all 16 channels on both
-  the parameters and the engine.
+  not exist in a version 4 save and arrive off. A version 5 save has no reverb
+  attributes and opens on the Universal profile. Both pinned by regressions that
+  write the older envelope and read it back.
 
 ### Fixed
 
+- **The reverb was never audible, and now is.** FluidSynth's reverb has always
+  been running — `synth.reverb.active` defaults to on — but Juicy16 asked for
+  audio with `fluid_synth_process(synth, n, 0, nullptr, 2, out)`, which renders
+  the dry voices and **discards the reverb and chorus buses**. Measured against
+  FluidSynth directly with reverb on, level 1.0, room 0.9 and CC91=127: tail
+  energy after note-off was 0.0000046 through that call and 7.467 through
+  `write_float`, which mixes the effects in. The effects bus is now requested and
+  mixed, so a file that asks for reverb gets it.
+
+  This is why Phase 10 started from a false premise. The plan said generic reverb
+  defaults were being applied to every rip; they were being computed and thrown
+  away.
+
+  **This changes how existing projects sound**, in the direction of playing the
+  file as written.
 - A row's value readout was 22px, so a volume of 100 rendered as "...". Found by
   looking at the running plugin, not at the layout.
 - The bank summary's second line was cut off by the panel's bottom edge.

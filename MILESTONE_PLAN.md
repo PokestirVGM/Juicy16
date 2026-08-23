@@ -3196,6 +3196,37 @@ Give the user control of the reverb Juicy16 already applies, and lay a profile
 structure that later hardware-accurate reverbs can slot into without moving the
 Beta 1 parameter surface again.
 
+## CORRECTION (2026-08-23): the finding this phase started from was wrong
+
+The premise below is false in the way that matters, and it was only discovered by
+measuring rather than reading. FluidSynth's reverb **was** running with generic
+defaults, but Juicy16 rendered with
+`fluid_synth_process(synth, n, 0, nullptr, 2, out)`, which renders the dry voices
+and **discards the reverb and chorus buses entirely**. Measured against
+FluidSynth directly with reverb on, level 1.0, room 0.9 and CC91=127: tail energy
+after note-off was 0.0000046 through that call and 7.467 through `write_float`,
+which mixes the effects in.
+
+So the reverb was never audible in this plugin. It was being computed and thrown
+away. That makes this phase a **bug fix first and a feature second**, and it
+means enabling the effects bus changes how every existing project sounds — in
+the direction of playing the file as written.
+
+Two consequences fell out of it:
+
+- **Chorus.** The same bus carries chorus, which was discarded the same way.
+  Turning the bus on would have un-muted a chorus nobody chose. It is switched
+  off explicitly instead; CC93 still reaches the engine. Chorus stays off until
+  it has controls of its own.
+- **Rips that never send CC91 get no reverb**, whatever the controls say.
+  `SEQ_BGM_C_03`, a real VGMTrans rip in this repository's own corpus, sends no
+  CC91 at all — its controllers are CC1, 6, 7, 10, 11, 38, 100 and 101. The claim
+  below that "game rips send CC91 continuously" does not hold for that file, and
+  should not be relied on for others without checking.
+
+The original text is kept below rather than rewritten, so the record of what was
+believed at planning time survives.
+
 ## The finding this phase starts from
 
 **A reverb is already running on every rip.** FluidSynth's `synth.reverb.active`
@@ -3226,47 +3257,122 @@ OWNER DECISION (2026-08-23): Beta 1 ships a **control surface over FluidSynth's
 existing reverb**. No new DSP, no new dependency, no new licence obligation, and
 the already-working CC91 path is preserved rather than replaced.
 
-- [ ] Expose enable/bypass and the four engine parameters.
+- [x] Expose enable/bypass and the four engine parameters.
   - Enable maps to `fluid_synth_reverb_on`; size, damping, width, and level map
     to `fluid_synth_set_reverb_group_*`.
   - Bypass must be genuinely silent, not level zero with a tail still computing.
   - Parameter changes must not allocate on the audio thread and must not step
     audibly under host automation; the `outputLevel` smoother is the precedent.
 
-- [ ] Choose Beta 1's defaults deliberately.
+  EVIDENCE (2026-08-23): `reverbOn` maps to `fluid_synth_reverb_on(-1, …)` and
+  the four parameters to `fluid_synth_set_reverb_group_*`. Bypass is the unit
+  switched off, not the level taken to zero, so nothing keeps computing a tail —
+  asserted as bit-identical output to a signal that was never sent to the reverb,
+  which is the acceptance criterion's "identical to a build with the reverb
+  compiled out, within measurement tolerance", met exactly rather than within a
+  tolerance. Settings are smoothed per block over 20 ms and only written when
+  they actually moved, so a rip that never automates reverb pays nothing and an
+  automation ramp cannot step: measured largest sample-to-sample discontinuity
+  under a full-range level ramp at a 32-sample block size is 0.0046. Nothing is
+  allocated on the audio thread — the effects bus is preallocated in
+  `prepareToPlay` and `renderSamples` chunks against its capacity, so a host that
+  ignores its own maximum block size cannot force an allocation either.
+
+  Each parameter is measured to do what it says: level and room size change the
+  tail energy in the expected direction, damping darkens it, and width is
+  measured as a stereo property — the L-R difference energy, which is zero at
+  width 0 and large at width 1.
+
+  `reverbWidth` is narrowed from FluidSynth's own 0-100 to 0-1, deliberately:
+  FluidSynth's own default is 0.8 and everything musically useful lives below 1,
+  so the full range would put the entire useful span inside the first one percent
+  of a knob's travel.
+
+- [x] Choose Beta 1's defaults deliberately.
   - The current values are FluidSynth's, chosen by nobody for this product.
   - Whatever is chosen must be measured against real game-rip material, not
     picked from the documentation, and the reasoning recorded here.
 
-- [ ] Treat the new parameters as a frozen compatibility surface.
+  DECISION (2026-08-23), measured on `SEQ_BGM_C_03` (both its DLS and SF2 forms)
+  at CC91 = 80 — a representative game-rip send — against the same material dry:
+
+  | settings | RMS change |
+  |---|---|
+  | FluidSynth's inherited 0.50/0.30/0.80/0.70 | +1.64 dB |
+  | **Universal 0.45/0.35/0.85/0.55** | **+0.92 dB** |
+  | **Soft 0.20/0.60/1.00/0.55** | **+0.47 dB** |
+
+  Universal is a present but not dominant space, a little over half the wetness
+  FluidSynth's own defaults produce. Soft is half of Universal again, with a much
+  smaller room at full width — the owner's brief was width without a long tail.
+  Neither clips, and neither raises the peak above the dry material's; reverb
+  energy is decorrelated, so the measured peak actually falls slightly.
+
+  Candidates that were rejected and why: a soft profile at level 0.38 measured
+  +0.20 dB, too subtle to be worth selecting; one at 0.62 measured +0.57 dB,
+  close enough to Universal that the two stopped being distinguishable.
+
+- [x] Treat the new parameters as a frozen compatibility surface.
   - Parameter count moves from 21; `docs/BETA1_IDENTITY_CONTRACT.md` records the
     IDs, order, and ranges, and the state schema moves from 4 to 5 with a
     migration and a round-trip regression.
   - This must land before the candidate freeze. After the freeze it is a
     breaking change.
 
-- [ ] Keep CC91 working and say so.
+  EVIDENCE (2026-08-23): Phase 9 took the parameter count 21 to 83 and the schema
+  4 to 5; Phase 10 takes them to **89** and **6**. The identity contract records
+  all 89 IDs, their order, their VST3 ParamIDs, and their ranges, including that
+  `reverbProfile`'s three-entry order is frozen because a host stores the index.
+  A version 5 save has no reverb attributes and opens on Universal, pinned by its
+  own regression. Both landed before the freeze, as required.
+
+- [x] Keep CC91 working and say so.
   - Per-channel reverb send from the MIDI file continues to reach the engine
     unchanged; the new controls set the reverb those sends feed.
   - `docs/CONTROLLER_SUPPORT.md` currently says audible depth "depends on engine
     effects"; it must instead state what the engine does and what the user
     controls.
 
+  EVIDENCE (2026-08-23): per-channel CC91 on all 16 channels is asserted to reach
+  the engine at its own event timestamp, unchanged. `docs/CONTROLLER_SUPPORT.md`
+  now has a Reverb section stating what the engine is, what the user controls,
+  what the MIDI file controls, that a MIDI file cannot change the reverb
+  settings, that bypass is genuine, where the defaults came from, and — the part
+  a tester most needs — that **a rip which never sends CC91 gets no reverb
+  whatever the controls say**, with a corpus file named as an example.
+
 ## 10.2 Profile structure
 
-- [ ] Define a reverb profile as a named preset over the parameter set.
+- [x] Define a reverb profile as a named preset over the parameter set.
   - A profile names a set of parameter values; selecting one moves the visible
     controls, so nothing is hidden from the user or from host automation.
   - The structure must admit a later profile backed by a *different algorithm*
     without changing the parameter IDs Beta 1 freezes. That is the whole reason
     to design it now rather than after the freeze.
 
-- [ ] Ship a small, honest set for Beta 1.
+  EVIDENCE (2026-08-23): `FluidSynthModel::ReverbProfile` is a name plus one
+  value per parameter, and the table is the only place a profile is defined.
+  Selecting one moves all four visible controls; editing any control selects
+  Custom. Both directions are reconciled on the message thread through
+  `handleAsyncUpdate`, so a host that automates the profile from the audio thread
+  does not write four parameters from there. Asserted in both directions.
+
+  A later profile backed by a different algorithm adds a row to that table and a
+  branch where the settings are applied; it needs no new parameter ID, which is
+  what this item existed to guarantee.
+
+- [x] Ship a small, honest set for Beta 1.
   - A universal default suitable for most material, and a soft short-tail
     profile that adds width without a long tail, per the owner's brief.
   - Naming rule, binding on every future profile: **a profile may not be named
     after hardware it does not emulate.** The soft profile is designed, not
     modelled, and its name and documentation must not imply otherwise.
+
+  SHIPPED AS "Soft" (2026-08-23), which is descriptive, designed rather than
+  modelled, and implies no hardware. The name below is still an open owner
+  decision; changing it is a one-line change to the profile table, but it is a
+  user-visible string and it is frozen at the candidate freeze because a host
+  stores the profile INDEX and the name is what the user reads.
 
   OPEN: the soft profile's name. "SNS" was proposed. If it means SNES, the name
   should be held back for the S-DSP echo profile in 10.3, which would be a real
@@ -3329,27 +3435,39 @@ checked for an "or later" clause before any code is taken.
 
 ### Acceptance criteria
 
-- [ ] Enabling, disabling, and every parameter produce the expected audible
+- [x] Enabling, disabling, and every parameter produce the expected audible
       change, measured rather than described — the dynamics probe and the
       offline render harness are the precedent.
-- [ ] Bypass produces output identical to a build with the reverb compiled out,
+- [x] Bypass produces output identical to a build with the reverb compiled out,
       within measurement tolerance.
-- [ ] Automation of every reverb parameter is click-free at the smallest
+- [x] Automation of every reverb parameter is click-free at the smallest
       supported block size.
-- [ ] No audio-thread allocation is introduced; the ASan/UBSan and TSan harnesses
+- [x] No audio-thread allocation is introduced; the ASan/UBSan and TSan harnesses
       still pass.
 - [ ] The performance baseline is re-measured with reverb enabled and stays
       inside the agreed envelope from 8.5.
-- [ ] Reverb settings round-trip through save/reload and through host automation,
+- [x] Reverb settings round-trip through save/reload and through host automation,
       with the schema migration covered by a regression.
-- [ ] CC91 per-channel sends still reach the engine at their event timestamps.
+- [x] CC91 per-channel sends still reach the engine at their event timestamps.
+
+NOT DONE, stated rather than glossed: the 8.5 performance baseline has not been
+re-measured with the effects bus enabled. `performance_baseline` passes, but it
+runs against whatever the current build does rather than against a figure agreed
+for a build that now mixes an extra stereo bus per block. The reverb adds real
+work — an FDN running whenever anything is sent to it — so the envelope needs
+re-agreeing, not just re-running. This is the one open item in Phase 10.
+
+Also worth a tester's attention rather than an agent's: nobody has LISTENED to
+the reverb. Every claim above is a measurement. The profiles were chosen from
+RMS against dry material, which is a defensible way to pick a starting point and
+no substitute for hearing them on real rips.
 
 ## Phase 10 exit criteria
 
-- [ ] Beta 1's reverb defaults are a recorded decision, not an inherited default.
-- [ ] The parameter surface is frozen in the identity contract before the
+- [x] Beta 1's reverb defaults are a recorded decision, not an inherited default.
+- [x] The parameter surface is frozen in the identity contract before the
       candidate freeze.
-- [ ] `docs/CONTROLLER_SUPPORT.md` and `docs/KNOWN_ISSUES.md` describe what the
+- [x] `docs/CONTROLLER_SUPPORT.md` and `docs/KNOWN_ISSUES.md` describe what the
       reverb does, what the user controls, and what the MIDI file cannot change.
 
 # Recommended workstream split

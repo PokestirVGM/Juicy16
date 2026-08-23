@@ -47,6 +47,16 @@ private:
     Label outputLevelUnit;
     unique_ptr<SliderAttachment> outputLevelSliderAttachment;
 
+    Label reverbHeading;
+    juce::ToggleButton reverbEnable;
+    unique_ptr<AudioProcessorValueTreeState::ButtonAttachment> reverbEnableAttachment;
+    juce::ComboBox reverbProfile;
+    unique_ptr<AudioProcessorValueTreeState::ComboBoxAttachment> reverbProfileAttachment;
+    // size, damping, width, level - one knob and one caption each
+    juce::OwnedArray<Slider> reverbKnobs;
+    juce::OwnedArray<Label> reverbLabels;
+    juce::OwnedArray<SliderAttachment> reverbAttachments;
+
     Label bankHeading;
     Label bankName;
     Label bankDetail;
@@ -55,6 +65,7 @@ private:
     // paint() so both agree without a second layout pass.
     int masterDividerY{0};
     int bankDividerY{0};
+    int reverbDividerY{0};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MixerPanelComponent)
 };

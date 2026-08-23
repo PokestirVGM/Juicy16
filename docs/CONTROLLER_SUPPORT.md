@@ -75,7 +75,7 @@ Pitch bend itself is not a paired 7-bit CC and retains its complete 14-bit range
 | CC64 | FluidSynth sustain pedal. Releasing it damps voices held by sustain. |
 | CC66 | FluidSynth sostenuto pedal. It captures voices already active when the pedal is pressed. |
 | CC67 | Delivered as the soft-pedal controller; audible behavior depends on bank modulators. |
-| CC91/93 | Reverb and chorus sends are delivered; audible depth depends on engine effects and bank/program behavior. |
+| CC91/93 | Per-channel reverb and chorus sends, delivered exactly. CC91 feeds the reverb described below. CC93 reaches the engine but the chorus is switched off, so it does nothing audible — see below. |
 | CC98/99, CC100/101, CC6/38 | FluidSynth NRPN/RPN selection and Data Entry. RPN 0,0 bend range and RPN Null are regression-tested. |
 | CC120 | All Sound Off immediately silences the addressed channel. |
 | CC121 | Reset All Controllers resets switches, expression, RPN/NRPN selection, pressure, and pitch wheel. FluidSynth intentionally preserves bank, volume, pan, effects sends, sound controls CC70–79, and the configured bend range. |
@@ -149,6 +149,70 @@ an incoming Program Change overrides a manually picked instrument. CC121
 preserves both, as the MIDI spec requires, and Juicy16's GM/GS/XG reset handling
 reapplies the latest per-channel values so the editor, saved state, and engine
 stay converged.
+
+## Reverb
+
+Juicy16 has a reverb, and until 0.5.1-alpha.7 you could not hear it.
+
+FluidSynth's reverb was always running — `synth.reverb.active` defaults to on —
+but the plugin asked FluidSynth for audio in a way that **discarded the effects
+buses**. Measured against FluidSynth directly on 2026-08-23 with reverb on, level
+1.0, room 0.9 and CC91=127, the tail energy after note-off was 0.0000046 through
+the call Juicy16 used and 7.467 through one that mixes the effects in. The
+effects bus is now mixed into the output, so material that asks for reverb gets
+it.
+
+**This changes how existing projects sound.** A rip that sends CC91 will now have
+reverb where it previously had none. That is the file being played as written,
+but it is an audible change and worth knowing before you reopen old work.
+
+| Control | Parameter | Range | Universal | Soft |
+|---|---|---|---|---|
+| Enable | `reverbOn` | on/off | on | on |
+| Profile | `reverbProfile` | Universal / Soft / Custom | — | — |
+| Size | `reverbSize` | 0–1 | 0.45 | 0.20 |
+| Damp | `reverbDamp` | 0–1 | 0.35 | 0.60 |
+| Width | `reverbWidth` | 0–1 | 0.85 | 1.00 |
+| Level | `reverbLevel` | 0–1 | 0.55 | 0.55 |
+
+- **What the engine does.** FluidSynth 2.5.5's reverb is jjceresa's FDN late
+  reverb, which replaced Freeverb in 2.0. Juicy16 adds no DSP of its own; these
+  controls set that reverb.
+- **What you control, and what the MIDI file controls.** You set the reverb.
+  The file sets how much of each channel goes into it, through CC91, at that
+  event's own timestamp. **A MIDI file cannot change your reverb settings** —
+  GS and XG reverb macro SysEx is deliberately ignored, so a rip asking for a
+  hall gets whatever profile you selected. That is a scope decision, recorded in
+  the milestone plan; tell us if a rip sounds wrong in a way the manual controls
+  cannot fix.
+- **A rip that never sends CC91 gets no reverb**, whatever these controls say.
+  That is not a defect: nothing is being sent to the reverb. `SEQ_BGM_C_03`, a
+  real VGMTrans rip in the test corpus, sends no CC91 at all.
+- **Bypass is genuine.** Turning the reverb off removes the unit rather than
+  turning its level down, so nothing keeps computing a tail. Bypassed output is
+  bit-identical to a signal that was never sent to the reverb, which is asserted
+  rather than assumed.
+- **Profiles move the controls.** Selecting one sets all four visible values;
+  editing any of them selects Custom. Nothing is hidden from you or from host
+  automation.
+- **Width is narrowed on purpose.** FluidSynth accepts 0–100 there, but its own
+  default is 0.8 and everything useful lives below 1. The full range would put
+  the entire useful span inside the first one percent of the knob.
+
+### Where the defaults came from
+
+Measured on a real VGMTrans rip at CC91 = 80, against the same material dry:
+FluidSynth's inherited `0.50/0.30/0.80/0.70` adds **+1.64 dB** RMS, Universal
+adds **+0.92 dB**, and Soft adds **+0.47 dB**. Universal is a present but not
+dominant space; Soft is a much smaller room at full width — width without a long
+tail. Neither clips, and neither raises the peak above the dry material's.
+
+### Chorus is off
+
+FluidSynth's chorus was being discarded by the same bug. Rather than un-mute a
+chorus nobody chose the moment the effects bus started working, it is switched
+off explicitly. CC93 still reaches the engine and is still delivered exactly; it
+simply has nothing to drive until the chorus gets controls of its own.
 
 ## Mute and solo are not MIDI controllers
 

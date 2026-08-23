@@ -154,6 +154,10 @@ void PluginLookAndFeel::applyTokens() {
     setColour(juce::TooltipWindow::textColourId,         kTextPrimary);
     setColour(juce::TooltipWindow::outlineColourId,      kBorder);
 
+    setColour(juce::ToggleButton::textColourId,          kTextPrimary);
+    setColour(juce::ToggleButton::tickColourId,          kAccent);
+    setColour(juce::ToggleButton::tickDisabledColourId,  kControlBorder);
+
     setColour(juce::GroupComponent::outlineColourId,     kSubtleBorder);
     setColour(juce::GroupComponent::textColourId,        kTextLabel);
 
@@ -313,6 +317,50 @@ juce::Font PluginLookAndFeel::getTextButtonFont(juce::TextButton&, int buttonHei
     return juce::Font{juce::FontOptions{
         juce::jmin(GuiConstants::bodyFontHeight,
                    static_cast<float>(buttonHeight) * 0.68f)}};
+}
+
+void PluginLookAndFeel::drawToggleButton(juce::Graphics& g,
+                                         juce::ToggleButton& button,
+                                         bool shouldDrawButtonAsHighlighted,
+                                         bool /*shouldDrawButtonAsDown*/) {
+    const auto area{button.getLocalBounds().toFloat()};
+    // The switch keeps the mockup's 26x14 proportions whatever room it is given,
+    // and any label text sits to its left.
+    const float height{juce::jmin(area.getHeight(), 16.0f)};
+    const float width{height * 26.0f / 14.0f};
+    const auto track{juce::Rectangle<float>{width, height}
+        .withCentre({area.getRight() - width * 0.5f, area.getCentreY()})};
+
+    const bool on{button.getToggleState()};
+    juce::Colour fill{on ? button.findColour(juce::ToggleButton::tickColourId)
+                         : findColour(controlBackgroundColourId)};
+    if (shouldDrawButtonAsHighlighted)
+        fill = fill.brighter(0.12f);
+    g.setColour(fill);
+    g.fillRoundedRectangle(track, height * 0.5f);
+    if (!on) {
+        g.setColour(findColour(controlBorderColourId));
+        g.drawRoundedRectangle(track.reduced(0.5f), height * 0.5f, 1.0f);
+    }
+    if (button.hasKeyboardFocus(false)) {
+        g.setColour(findColour(accentColourId));
+        g.drawRoundedRectangle(track.expanded(2.0f), (height + 4.0f) * 0.5f, 1.0f);
+    }
+
+    const float inset{height * 0.15f};
+    const float knobSize{height - inset * 2.0f};
+    g.setColour(on ? findColour(windowBackgroundColourId)
+                   : findColour(textLabelColourId));
+    g.fillEllipse(on ? track.getRight() - inset - knobSize : track.getX() + inset,
+                  track.getY() + inset, knobSize, knobSize);
+
+    if (button.getButtonText().isNotEmpty()) {
+        g.setColour(button.findColour(juce::ToggleButton::textColourId));
+        g.setFont(juce::Font{juce::FontOptions{GuiConstants::bodyFontHeight}});
+        g.drawText(button.getButtonText(),
+                   area.withTrimmedRight(width + GuiConstants::innerPadding).toNearestInt(),
+                   juce::Justification::centredLeft, true);
+    }
 }
 
 void PluginLookAndFeel::drawTableHeaderBackground(juce::Graphics& g,

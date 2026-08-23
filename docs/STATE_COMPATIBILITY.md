@@ -1,6 +1,13 @@
 # Beta state compatibility policy
 
-Juicy16 Beta 1 writes state schema version 5. Beta 2 and the first stable release must continue to read version 5 unless a stop-ship defect makes that unsafe. The automated suite must retain the older-version migration and version 5 round-trip cases for as long as those versions are supported.
+Juicy16 Beta 1 writes state schema version 6. Beta 2 and the first stable release must continue to read version 6 unless a stop-ship defect makes that unsafe. The automated suite must retain the older-version migration and version 6 round-trip cases for as long as those versions are supported.
+
+Version 6 added the reverb control surface: `reverbOn`, `reverbProfile`, and the
+four engine parameters. A version 5 save has none of them, so it opens with the
+reverb enabled on the Universal profile — a deliberate default, recorded in
+[CONTROLLER_SUPPORT.md](CONTROLLER_SUPPORT.md), rather than FluidSynth's
+inherited one. Pinned by a regression that writes a version 5 envelope and
+asserts the profile reaches the engine on reload.
 
 Version 5 made volume and pan per channel. Where version 4 had a single
 `volume`/`pan` parameter pair describing whichever channel the editor had

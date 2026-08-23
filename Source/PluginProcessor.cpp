@@ -132,6 +132,44 @@ AudioProcessorValueTreeState::ParameterLayout JuicySFAudioProcessor::createParam
         0.0f,
         juce::AudioParameterFloatAttributes{}.withLabel("Out")));
 
+    // Reverb. FluidSynth has always been running one - `synth.reverb.active`
+    // defaults to on and Juicy16 never touched it - so until Beta 1 every rip was
+    // played through generic defaults chosen by nobody for this product. These
+    // are a control surface over that existing reverb: no new DSP, no new
+    // dependency, no new licence obligation. Per-channel CC91 sends still reach
+    // the engine at their own timestamps and feed the reverb these controls set.
+    layout.add(make_unique<juce::AudioParameterBool>(
+        juce::ParameterID{"reverbOn", 1}, "reverb enabled", true,
+        juce::AudioParameterBoolAttributes{}.withLabel("Reverb")));
+    layout.add(make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{"reverbProfile", 1}, "reverb profile",
+        FluidSynthModel::reverbProfileNames(), 0,
+        juce::AudioParameterChoiceAttributes{}.withLabel("Profile")));
+    {
+        const auto reverbParam = [](const String& id, const String& name,
+                                    float defaultValue, const String& label) {
+            return make_unique<juce::AudioParameterFloat>(
+                juce::ParameterID{id, 1}, name,
+                juce::NormalisableRange<float>{0.0f, 1.0f, 0.001f}, defaultValue,
+                juce::AudioParameterFloatAttributes{}.withLabel(label));
+        };
+        const auto* universal{&FluidSynthModel::reverbProfiles[0]};
+        // Size, damping and level take FluidSynth's own 0-1 ranges. WIDTH DOES
+        // NOT: FluidSynth accepts 0-100 there, but its own default is 0.8 and
+        // everything musically useful lives below 1, so the full range would put
+        // the entire useful span inside the first one percent of a knob's
+        // travel. Narrowed to 0-1 deliberately; nothing reachable is lost.
+        layout.add(
+            reverbParam("reverbSize", "reverb room size",
+                        universal->values[FluidSynthModel::reverbSize], "Size"),
+            reverbParam("reverbDamp", "reverb damping",
+                        universal->values[FluidSynthModel::reverbDamp], "Damp"),
+            reverbParam("reverbWidth", "reverb stereo width",
+                        universal->values[FluidSynthModel::reverbWidth], "Width"),
+            reverbParam("reverbLevel", "reverb level",
+                        universal->values[FluidSynthModel::reverbLevel], "Level"));
+    }
+
     // Per-channel mixer parameters: volume (CC7), pan (CC10), mute, and solo, one
     // of each for all 16 channels. Real host parameters rather than editor-only
     // state, so a host can automate any channel and a right-click on a knob
@@ -356,6 +394,10 @@ void JuicySFAudioProcessor::getStateInformation (MemoryBlock& destData)
 
     // Create an outer XML element..
     XmlElement xml{"MYPLUGINSETTINGS"};
+    // v6: the reverb gained a control surface - reverbOn, reverbProfile, and the
+    // four engine parameters. A v5 save has none of them and opens on the
+    // Universal profile, which is a deliberate default rather than an inherited
+    // one; see docs/CONTROLLER_SUPPORT.md.
     // v5: volume and pan became per-channel parameters (volCh1..panCh16) and mute
     // and solo were added, so the two selected-channel `volume`/`pan` parameters
     // are gone and each channelPrograms node carries mute and solo as well.
