@@ -297,8 +297,29 @@ int main(int argc, char** argv)
             ++namedProgramParameters;
         }
     }
-    check(parameters.size() == 21 && namedProgramParameters == 16,
-          "the AU publishes 21 parameters including one program parameter per MIDI channel");
+    // 3 global (bank, preset, outputLevel) + 64 per-channel mixer + 16 program.
+    check(parameters.size() == 83 && namedProgramParameters == 16,
+          "the AU publishes 83 parameters including one program parameter per MIDI channel");
+
+    // Every channel's mixer controls are host-visible in AU too, by name, which
+    // is what a host's automation list enumerates.
+    int namedMixerParameters{0};
+    for (const auto identifier : parameters) {
+        const auto name{parameterName(unit, identifier)};
+        for (const char* prefix : {"volume (CC7) for MIDI channel ",
+                                   "pan (CC10) for MIDI channel ",
+                                   "mute MIDI channel ",
+                                   "solo MIDI channel "}) {
+            const std::string expected{prefix};
+            if (name.rfind(expected, 0) != 0)
+                continue;
+            const int channel{std::atoi(name.c_str() + expected.size())};
+            if (channel >= 1 && channel <= 16)
+                ++namedMixerParameters;
+        }
+    }
+    check(namedMixerParameters == 64,
+          "the AU publishes volume, pan, mute and solo for each of the 16 MIDI channels");
 
     double sampleTime{0.0};
 

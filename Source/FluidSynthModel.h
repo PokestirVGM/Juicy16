@@ -30,6 +30,23 @@ public:
     void prepareToPlay(double sampleRate, int samplesPerBlock);
 
     void setControllerValue(int controller, int value);
+    // Same, addressed to a specific channel rather than the selected one. Used by
+    // the per-channel volCh/panCh parameters, which every row's knob drives.
+    void setChannelControllerValue(int channel, int controller, int value);
+
+    // Per-channel mute/solo. While any channel is soloed, every channel that is
+    // not soloed is silenced; otherwise the muted channels are. A silenced
+    // channel drops incoming note-ons and is sent all-notes-off at the moment it
+    // becomes silenced, so held notes release rather than hang. Note-offs, CCs,
+    // program changes, and bend are never dropped, so channel state stays correct
+    // and unmuting resumes mid-song without a resync.
+    bool isChannelSilenced(int channel) const;
+    unsigned int getSilencedMask() const;
+
+    // Push channelPrograms' saved mixer values into the volCh/panCh/muteCh/soloCh
+    // parameters. Used after restoring state written before those parameters
+    // existed, where the per-channel tree is the only record of them.
+    void syncMixerParamsFromState();
 
     // push the currently-selected channel's saved program into the params/UI
     // (used after restoring plugin state)
@@ -126,18 +143,25 @@ public:
     void valueTreeParentChanged (ValueTree&) override {}
     void valueTreeRedirected (ValueTree&) override {}
 
-    // default value for a per-channel parameter: sound controllers are neutral at 64
-    // (MIDI/GS convention), bank/preset default to 0. Shared with PluginProcessor.
+    // default value for a per-channel property: volume is the GM default 100, pan
+    // is centre 64, mute and solo are off, bank/preset default to 0. Shared with
+    // PluginProcessor so the state writer and reader agree.
     static int defaultParamValue(const String& parameterID);
+
+    // Per-channel mixer parameter ids ("volCh1".."panCh16", "muteCh1".."soloCh16";
+    // 0-based channel in, 1-based name out). ccIndex indexes ccIndexOrder.
+    static String mixerParamId(int ccIndex, int chZeroBased);
+    static String muteParamId(int chZeroBased);
+    static String soloParamId(int chZeroBased);
 
     // per-channel program parameter ids ("progCh1".."progCh16", 0-based channel in,
     // 1-based name out) and the reverse mapping (-1 if not a program param).
     static String progParamId(int chZeroBased);
     static int progParamChannel(const String& parameterID);
 
-    // Every parameter stored independently per MIDI channel. Public so the state
-    // writer and reader in PluginProcessor share one definition of the per-channel
-    // schema instead of repeating it and drifting.
+    // Every property stored independently per MIDI channel, in channelPrograms.
+    // Public so the state writer and reader in PluginProcessor share one
+    // definition of the per-channel schema instead of repeating it and drifting.
     static const StringArray perChannelParams;
 
 private:
@@ -149,7 +173,6 @@ private:
     static thread_local bool mirroringParameters;
 
     void loadSelectedChannel(int newChannel);
-    void saveParamToChannel(const String& parameterID, int value);
     void dispatchMidiEvent(const MidiMessage& message, int samplePosition);
     // Audio thread. Takes the payload between 0xF0 and 0xF7 so processBlock can
     // dispatch from the MidiBuffer directly, without MidiMessage's heap copy.
@@ -269,6 +292,16 @@ private:
     // SysEx restoration reads only these atomics, so it cannot race a newer MIDI
     // event by consulting stale message-thread ValueTrees.
     std::atomic<int> engineCc[kNumChannels][kNumMixerCcs];
+    // Mute/solo. Written from the message thread or a host automation thread and
+    // read on the audio thread for every note-on, so the derived mask is stored
+    // rather than recomputed per event.
+    std::atomic<unsigned int> muteMask{0};
+    std::atomic<unsigned int> soloMask{0};
+    std::atomic<unsigned int> silencedMask{0};
+    static unsigned int deriveSilencedMask(unsigned int mutes, unsigned int solos);
+    // Recompute silencedMask and send all-notes-off to channels that just became
+    // silenced. Safe on the audio thread: no allocation, no locks of our own.
+    void refreshSilencedMask();
     // Master trim. Written from the message thread or a host automation thread,
     // read on the audio thread; the smoother lives on the audio thread only.
     std::atomic<float> outputLevelGain{1.0f};
@@ -285,12 +318,20 @@ private:
     std::atomic<int> lastKeyPressureValue[kNumChannels][128];
     std::atomic<int> lastKeyPressureSample[kNumChannels][128];
     static const fluid_midi_control_change ccIndexOrder[kNumMixerCcs];
+    // Per-channel parameter IDs. One parser for every "<prefix><1..16>" family,
+    // allocation-free because parameterChanged may run on the audio thread.
+    enum class ChannelParamKind { none, volume, pan, mute, solo };
+    static int channelSuffixOf(const String& parameterID,
+                               const char* prefix,
+                               int prefixLength);
+    static ChannelParamKind parseChannelParam(const String& parameterID,
+                                              int& chZeroBased);
     static int ccToIndex(int cc); // −1 if not one of ours
 
 
     // there's no bimap in the standard library!
-    static const map<fluid_midi_control_change, String> controllerToParam;
-    static const map<String, fluid_midi_control_change> paramToController;
+    static const map<fluid_midi_control_change, String> ccToChannelProperty;
+    static const map<String, fluid_midi_control_change> channelPropertyToCc;
 
     void refreshBanks();
     void createSynth();

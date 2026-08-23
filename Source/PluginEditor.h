@@ -1,9 +1,8 @@
 /*
   ==============================================================================
 
-    This file was auto-generated!
-
-    It contains the basic framework code for a JUCE plugin editor.
+    The Juicy16 editor: a header strip, the 16-channel rack, the global panel,
+    the audition keyboard, and a status bar.
 
   ==============================================================================
 */
@@ -12,10 +11,11 @@
 
 #include "../JuceLibraryCode/JuceHeader.h"
 #include "PluginProcessor.h"
-#include "TablesComponent.h"
+#include "ChannelListComponent.h"
 #include "SurjectiveMidiKeyboardComponent.h"
 #include "FilePicker.h"
-#include "SlidersComponent.h"
+#include "MixerPanelComponent.h"
+#include "Theme.h"
 
 using juce::SurjectiveMidiKeyboardComponent;
 
@@ -53,21 +53,32 @@ private:
     inline void valueTreeRedirected (ValueTree&) override {}
     void syncKeyboardChannel();
     void syncStatusLabel();
+    void showSettings();
+    void applyAccentFromState();
 
+    JuicySFAudioProcessor& processor;
     AudioProcessorValueTreeState& valueTreeState;
+
+    // Owned by the editor and installed as the default LookAndFeel for its whole
+    // component tree, so a control added later inherits the theme by default.
+    Juicy16::PluginLookAndFeel lookAndFeel;
 
     // these are used to persist the UI's size - the values are stored along with the
     // filter's other parameters, and the UI component will update them when it gets
     // resized.
     Value lastUIWidth, lastUIHeight;
 
+    // The owner's wordmark, decoded from the compiled-in binary resource.
+    juce::Image logo;
+
     SurjectiveMidiKeyboardComponent midiKeyboard;
-    TablesComponent tablesComponent;
+    ChannelListComponent channelRack;
     FilePicker filePicker;
-    SlidersComponent slidersComponent;
+    MixerPanelComponent mixerPanel;
+    juce::DrawableButton settingsButton;
 
     // status bar: build version plus the latest bank-load result
-    Label statusLabel;
+    juce::Label statusLabel;
 
     bool focusInitialized{false};
 

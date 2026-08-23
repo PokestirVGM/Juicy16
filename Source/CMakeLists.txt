@@ -2,12 +2,11 @@ set(_juicysf_plugin_sources
     ChannelListComponent.cpp
     FilePicker.cpp
     FluidSynthModel.cpp
-    MyColours.cpp
+    MixerPanelComponent.cpp
     PluginEditor.cpp
     PluginProcessor.cpp
-    SlidersComponent.cpp
     SurjectiveMidiKeyboardComponent.cpp
-    TablesComponent.cpp
+    Theme.cpp
     VST3Multitimbral.cpp)
 
 target_sources(JuicySFPlugin PRIVATE ${_juicysf_plugin_sources})

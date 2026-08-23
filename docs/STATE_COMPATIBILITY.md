@@ -1,6 +1,20 @@
 # Beta state compatibility policy
 
-Juicy16 Beta 1 writes state schema version 4. Beta 2 and the first stable release must continue to read version 4 unless a stop-ship defect makes that unsafe. The automated suite must retain the older-version migration and version 4 round-trip cases for as long as those versions are supported.
+Juicy16 Beta 1 writes state schema version 5. Beta 2 and the first stable release must continue to read version 5 unless a stop-ship defect makes that unsafe. The automated suite must retain the older-version migration and version 5 round-trip cases for as long as those versions are supported.
+
+Version 5 made volume and pan per channel. Where version 4 had a single
+`volume`/`pan` parameter pair describing whichever channel the editor had
+selected, version 5 has `volCh1`-`volCh16` and `panCh1`-`panCh16`, and adds
+`muteCh1`-`muteCh16` and `soloCh1`-`soloCh16`. The retired `volume` and `pan`
+parameters are gone.
+
+A version 4 save is migrated from its per-channel records, not from those two
+parameters: `channelPrograms` already stored every channel's volume and pan, so
+each channel's saved values become that channel's own parameter and reach the
+engine as before. Mute and solo do not exist in a version 4 save and arrive off.
+Loading a version 4 project and re-saving it writes version 5. Pinned by a
+regression that writes a version 4 envelope, reads it back, and asserts all 16
+channels on both the parameters and the engine.
 
 Version 4 widened the `bank` parameter from 0-128 to 0-255, so that a drum
 channel's runtime bank — FluidSynth's 128 drum offset plus the Bank Select MSB,

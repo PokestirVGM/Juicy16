@@ -3,7 +3,7 @@
 #include "SyntheticSf2.h"
 #include "PatchList.h"
 #include "GuiConstants.h"
-#include "MyColours.h"
+#include "Theme.h"
 
 #include <array>
 #include <algorithm>
@@ -108,7 +108,7 @@ juce::Component* channelTableForFocus(juce::Component& editor)
 ChannelListComponent* channelListFor(juce::Component& editor)
 {
     return dynamic_cast<ChannelListComponent*>(
-        findNamedComponent(editor, "MIDI channel instrument list"));
+        findNamedComponent(editor, "MIDI channel rack"));
 }
 
 double relativeLuminance(juce::Colour colour)
@@ -185,6 +185,30 @@ juce::AudioParameterInt* findIntParameter(JuicySFAudioProcessor& processor,
             identified != nullptr && identified->paramID == id)
             return dynamic_cast<juce::AudioParameterInt*>(parameter);
     return nullptr;
+}
+
+juce::AudioParameterBool* findBoolParameter(JuicySFAudioProcessor& processor,
+                                            const juce::String& id)
+{
+    for (auto* parameter : processor.getParameters())
+        if (auto* identified{dynamic_cast<juce::AudioProcessorParameterWithID*>(parameter)};
+            identified != nullptr && identified->paramID == id)
+            return dynamic_cast<juce::AudioParameterBool*>(parameter);
+    return nullptr;
+}
+
+// The frozen Beta 1 parameter manifest, in order. Built rather than spelled out
+// because 83 identifiers written by hand is a typo waiting to be mistaken for a
+// contract violation; the ORDER encoded here is the contract.
+std::vector<juce::String> beta1ParameterIds()
+{
+    std::vector<juce::String> ids{"bank", "preset", "outputLevel"};
+    for (const char* prefix : {"volCh", "panCh", "muteCh", "soloCh"})
+        for (int channel = 1; channel <= 16; ++channel)
+            ids.push_back(juce::String{prefix} + juce::String(channel));
+    for (int channel = 1; channel <= 16; ++channel)
+        ids.push_back("progCh" + juce::String(channel));
+    return ids;
 }
 
 bool getSavedChannelProgram(JuicySFAudioProcessor& processor,
@@ -764,24 +788,36 @@ int main(int argc, char** argv)
     juce::AudioBuffer<float> audio{2, blockSize};
 
     {
-        const std::array<juce::String, 21> expectedParameterIds{
-            "bank", "preset", "volume", "pan", "outputLevel",
-            "progCh1", "progCh2", "progCh3", "progCh4",
-            "progCh5", "progCh6", "progCh7", "progCh8",
-            "progCh9", "progCh10", "progCh11", "progCh12",
-            "progCh13", "progCh14", "progCh15", "progCh16"
-        };
+        const auto expectedParameterIds{beta1ParameterIds()};
         const auto& parameters{processor.getParameters()};
-        bool parameterContract{parameters.size() == expectedParameterIds.size()};
+        bool parameterContract{parameters.size()
+            == static_cast<int>(expectedParameterIds.size())};
         for (std::size_t i = 0; parameterContract && i < expectedParameterIds.size(); ++i) {
             const auto* identified{
                 dynamic_cast<juce::AudioProcessorParameterWithID*>(parameters[static_cast<int>(i)])};
             parameterContract = identified != nullptr
                 && identified->paramID == expectedParameterIds[i]
                 && identified->getVersionHint() == 1;
+            if (!parameterContract)
+                std::printf("    parameter %d expected %s got %s\n",
+                            static_cast<int>(i),
+                            expectedParameterIds[i].toRawUTF8(),
+                            identified != nullptr ? identified->paramID.toRawUTF8() : "(none)");
         }
         check(parameterContract,
               "Beta 1 parameter IDs, order, count, and version hints are frozen");
+
+        // Every channel parameter is discoverable by its own id, which is what a
+        // host's automation and controller-link menus enumerate.
+        bool perChannelPresent{true};
+        for (int channel = 1; channel <= 16; ++channel)
+            perChannelPresent = perChannelPresent
+                && findIntParameter(processor, "volCh" + juce::String(channel)) != nullptr
+                && findIntParameter(processor, "panCh" + juce::String(channel)) != nullptr
+                && findBoolParameter(processor, "muteCh" + juce::String(channel)) != nullptr
+                && findBoolParameter(processor, "soloCh" + juce::String(channel)) != nullptr;
+        check(perChannelPresent,
+              "all 16 channels expose volume, pan, mute and solo as host-automatable parameters");
     }
 
     check(FluidSynthModel::progParamChannel("progCh1") == 0
@@ -2093,19 +2129,29 @@ int main(int argc, char** argv)
                 && fresh.getFluidSynthModel().getControllerValue(channel, 10, pan)
                 && pan == MidiConstants::centreValue;
         }
-        const auto* volumeParameter{findIntParameter(fresh, "volume")};
-        const auto* panParameter{findIntParameter(fresh, "pan")};
-        freshDefaults = freshDefaults
-            && volumeParameter != nullptr
-            && volumeParameter->get() == MidiConstants::defaultChannelVolume
-            && panParameter != nullptr
-            && panParameter->get() == MidiConstants::centreValue;
+        for (int channel = 1; channel <= 16; ++channel) {
+            const auto* volumeParameter{
+                findIntParameter(fresh, "volCh" + juce::String(channel))};
+            const auto* panParameter{
+                findIntParameter(fresh, "panCh" + juce::String(channel))};
+            const auto* muteParameter{
+                findBoolParameter(fresh, "muteCh" + juce::String(channel))};
+            const auto* soloParameter{
+                findBoolParameter(fresh, "soloCh" + juce::String(channel))};
+            freshDefaults = freshDefaults
+                && volumeParameter != nullptr
+                && volumeParameter->get() == MidiConstants::defaultChannelVolume
+                && panParameter != nullptr
+                && panParameter->get() == MidiConstants::centreValue
+                && muteParameter != nullptr && !muteParameter->get()
+                && soloParameter != nullptr && !soloParameter->get();
+        }
         check(freshDefaults,
-              "a fresh engine, its saved channel state, and the visible mixer parameters all start at the GM defaults (volume 100, pan centre)");
+              "a fresh engine, its saved channel state, and all 16 channels' mixer parameters start at the GM defaults (volume 100, pan centre, unmuted, unsoloed)");
     }
     {
         constexpr std::array<int, 2> mixerCcs{7, 10};
-        constexpr std::array<const char*, 2> mixerParams{"volume", "pan"};
+        constexpr std::array<const char*, 2> mixerPrefixes{"volCh", "panCh"};
         juce::MidiBuffer midi;
         for (int channel = 0; channel < 16; ++channel)
             for (std::size_t index = 0; index < mixerCcs.size(); ++index)
@@ -2133,15 +2179,21 @@ int main(int argc, char** argv)
             }
         }
 
-        bool selectedChannelMirrorsExact{true};
+        // Every channel owns its own parameter now, so all 16 must already read
+        // their own value with NO channel selected in particular. This is the
+        // defect Phase 9 exists to fix, asserted rather than described: before
+        // the redesign, 15 of 16 channels were invisible at any moment.
+        bool everyChannelMirrorsExact{true};
+        model.selectChannelForEditing(0);
         for (int channel = 0; channel < 16; ++channel) {
-            model.selectChannelForEditing(channel);
-            for (std::size_t index = 0; index < mixerParams.size(); ++index) {
+            for (std::size_t index = 0; index < mixerPrefixes.size(); ++index) {
                 const int expected{
                     (channel * 7 + static_cast<int>(index) * 13 + 1) % 128};
-                auto* parameter{findIntParameter(processor, mixerParams[index])};
+                auto* parameter{findIntParameter(
+                    processor,
+                    juce::String{mixerPrefixes[index]} + juce::String(channel + 1))};
                 int dispatched{-1}, sample{-1};
-                selectedChannelMirrorsExact = selectedChannelMirrorsExact
+                everyChannelMirrorsExact = everyChannelMirrorsExact
                     && parameter != nullptr && parameter->get() == expected
                     // Merely selecting a channel must not send a duplicate CC back
                     // to FluidSynth; the last raw MIDI diagnostic remains unchanged.
@@ -2151,25 +2203,28 @@ int main(int argc, char** argv)
             }
         }
 
-        model.selectChannelForEditing(0);
-        const auto* selectedVolume{findIntParameter(processor, "volume")};
-        const int selectedBefore{selectedVolume != nullptr ? selectedVolume->get() : -1};
+        // A CC on an unselected channel moves that channel's own knob, and no
+        // other channel's.
+        const auto* channel16Volume{findIntParameter(processor, "volCh16")};
+        const auto* channel1Volume{findIntParameter(processor, "volCh1")};
+        const int channel1Before{channel1Volume != nullptr ? channel1Volume->get() : -1};
         juce::MidiBuffer unselectedMidi;
         unselectedMidi.addEvent(juce::MidiMessage::controllerEvent(16, 7, 127), 333);
         render(processor, audio, unselectedMidi);
         model.handleUpdateNowIfNeeded();
-        const bool unselectedDidNotMoveSlider{
-            selectedVolume != nullptr && selectedVolume->get() == selectedBefore};
-        model.selectChannelForEditing(15);
-        const bool selectingRevealsLatest{
-            selectedVolume != nullptr && selectedVolume->get() == 127};
+        const bool unselectedChannelMovedItsOwnKnob{
+            channel16Volume != nullptr && channel16Volume->get() == 127
+            && channel1Volume != nullptr && channel1Volume->get() == channel1Before};
 
         // The non-negotiable rule, the same one Program Change follows: a value
         // set in the editor is only a starting point. The next CC7 on that channel
         // overrides it, and the visible parameter follows the MIDI rather than the
         // other way round.
-        model.selectChannelForEditing(3);
-        model.setControllerValue(7, 20);
+        // Set channel 4's volume the way the row's knob does: through its own
+        // parameter, with no channel selected in particular.
+        auto* channel4Volume{findIntParameter(processor, "volCh4")};
+        if (channel4Volume != nullptr)
+            *channel4Volume = 20;
         int afterManual{-1};
         const bool manualApplied{model.getControllerValue(3, 7, afterManual)
                                  && afterManual == 20};
@@ -2178,13 +2233,12 @@ int main(int argc, char** argv)
         render(processor, audio, overrideMidi);
         model.handleUpdateNowIfNeeded();
         int afterMidi{-1};
-        const auto* volumeParameter{findIntParameter(processor, "volume")};
         const bool midiWins{model.getControllerValue(3, 7, afterMidi)
                             && afterMidi == 96
-                            && volumeParameter != nullptr
-                            && volumeParameter->get() == 96};
+                            && channel4Volume != nullptr
+                            && channel4Volume->get() == 96};
         check(manualApplied && midiWins,
-              "incoming CC7 overrides a value set in the editor, and the visible parameter follows the MIDI");
+              "a knob sets its own channel's volume, and an incoming CC7 on that channel then overrides it");
 
         juce::MemoryBlock saved;
         processor.getStateInformation(saved);
@@ -2194,7 +2248,6 @@ int main(int argc, char** argv)
         bool restoredExact{true};
         auto& restoredModel{restored.getFluidSynthModel()};
         for (int channel = 0; channel < 16; ++channel) {
-            restoredModel.selectChannelForEditing(channel);
             for (std::size_t index = 0; index < mixerCcs.size(); ++index) {
                 int actual{-1};
                 int expected{(channel * 7 + static_cast<int>(index) * 13 + 1) % 128};
@@ -2202,7 +2255,9 @@ int main(int argc, char** argv)
                     expected = 127;
                 if (channel == 3 && mixerCcs[index] == 7)
                     expected = 96;
-                const auto* parameter{findIntParameter(restored, mixerParams[index])};
+                const auto* parameter{findIntParameter(
+                    restored,
+                    juce::String{mixerPrefixes[index]} + juce::String(channel + 1))};
                 restoredExact = restoredExact
                     && restoredModel.getControllerValue(
                         channel, mixerCcs[index], actual)
@@ -2210,11 +2265,158 @@ int main(int argc, char** argv)
                     && parameter != nullptr && parameter->get() == expected;
             }
         }
-        check(engineAndTimestampExact && selectedChannelMirrorsExact
-                  && unselectedDidNotMoveSlider && selectingRevealsLatest
+        check(engineAndTimestampExact && everyChannelMirrorsExact
+                  && unselectedChannelMovedItsOwnKnob
                   && restoredExact,
-              "volume and pan remain timestamp-, engine-, slider-, channel-, and state-exact on all 16 channels");
+              "volume and pan remain timestamp-, engine-, knob-, channel-, and state-exact on all 16 channels, without selecting a row");
     }
+    std::printf("== mute and solo ==\n");
+    {
+        // A fresh processor: the mixer block above leaves channels at scattered
+        // volumes, and "is this channel audible" has to mean the mute, not the
+        // volume it happens to be sitting at.
+        JuicySFAudioProcessor mixer;
+        mixer.prepareToPlay(48000.0, blockSize);
+        const auto mixerState{makeState(argv[1])};
+        mixer.setStateInformation(
+            mixerState.getData(), static_cast<int>(mixerState.getSize()));
+        auto& mixerModel{mixer.getFluidSynthModel()};
+        juce::AudioBuffer<float> mixerAudio{2, blockSize};
+
+        // Silence everything and let the buffer actually reach zero, so the next
+        // measurement is about the note it plays and not the release tail of the
+        // note before it. All Sound Off, not All Notes Off: this is measurement
+        // hygiene, and a release tail is exactly what must not survive it.
+        const auto settleToSilence{[&]() {
+            juce::MidiBuffer quiet;
+            addAllSoundOff(quiet);
+            render(mixer, mixerAudio, quiet);
+            juce::MidiBuffer empty;
+            for (int block = 0; block < 16; ++block) {
+                render(mixer, mixerAudio, empty);
+                if (magnitude(mixerAudio, 0, blockSize) <= audiblePresence)
+                    return;
+            }
+        }};
+
+        // One note on one channel, from silence, so the measurement is about that
+        // channel and nothing else.
+        const auto levelOnChannel{[&](int channel) {
+            settleToSilence();
+            juce::MidiBuffer note;
+            note.addEvent(juce::MidiMessage::programChange(channel + 1, 0), 0);
+            note.addEvent(
+                juce::MidiMessage::noteOn(channel + 1, 60, static_cast<juce::uint8>(110)), 1);
+            render(mixer, mixerAudio, note);
+            const float level{magnitude(mixerAudio, 1, blockSize - 1)};
+            settleToSilence();
+            return level;
+        }};
+
+        const auto setBool{[&](const char* prefix, int channel, bool value) {
+            if (auto* parameter{findBoolParameter(
+                    mixer, juce::String{prefix} + juce::String(channel + 1))})
+                *parameter = value;
+            mixerModel.handleUpdateNowIfNeeded();
+        }};
+
+        const bool audibleBeforeMute{levelOnChannel(2) > audiblePresence};
+        setBool("muteCh", 2, true);
+        const bool silentWhenMuted{levelOnChannel(2) <= audiblePresence};
+        const bool neighbourUnaffected{levelOnChannel(3) > audiblePresence};
+        check(audibleBeforeMute && silentWhenMuted && neighbourUnaffected,
+              "mute silences its own channel's notes and no other channel's");
+
+        // Solo overrides mute entirely while it is engaged: the soloed channel
+        // sounds even though channel 3 is still muted, and every other channel is
+        // silenced without being muted.
+        setBool("soloCh", 5, true);
+        const bool soloedSounds{levelOnChannel(5) > audiblePresence};
+        const bool unsoloedSilent{levelOnChannel(3) <= audiblePresence
+                                  && levelOnChannel(2) <= audiblePresence};
+        setBool("soloCh", 5, false);
+        // Clearing the last solo restores exactly the mute picture left behind.
+        const bool muteRestored{levelOnChannel(2) <= audiblePresence
+                                && levelOnChannel(3) > audiblePresence};
+        check(soloedSounds && unsoloedSilent && muteRestored,
+              "solo silences every channel that is not soloed, and clearing it restores the previous mutes");
+
+        // Muting mid-note must release the notes already sounding rather than
+        // leaving them ringing until their own note-off.
+        setBool("muteCh", 2, false);
+        settleToSilence();
+        juce::MidiBuffer held;
+        held.addEvent(juce::MidiMessage::programChange(3, 0), 0);
+        held.addEvent(juce::MidiMessage::noteOn(3, 60, static_cast<juce::uint8>(110)), 1);
+        render(mixer, mixerAudio, held);
+        const bool ringing{magnitude(mixerAudio, 1, blockSize - 1) > audiblePresence};
+        setBool("muteCh", 2, true);
+        float decayed{1.0f};
+        juce::MidiBuffer silence;
+        for (int block = 0; block < 96; ++block) {
+            render(mixer, mixerAudio, silence);
+            decayed = magnitude(mixerAudio, 0, blockSize);
+            if (decayed <= audiblePresence)
+                break;
+        }
+        check(ringing && decayed <= audiblePresence,
+              "muting a channel mid-note releases the notes already sounding instead of leaving them to ring");
+
+        // A muted channel is silenced, not disconnected: everything except
+        // note-ons still reaches the engine, so unmuting mid-song needs no
+        // resync and the file's own volume survives being muted.
+        juce::MidiBuffer whileMuted;
+        whileMuted.addEvent(juce::MidiMessage::controllerEvent(3, 7, 42), 0);
+        whileMuted.addEvent(juce::MidiMessage::programChange(3, 19), 1);
+        whileMuted.addEvent(juce::MidiMessage::pitchWheel(3, 12000), 2);
+        render(mixer, mixerAudio, whileMuted);
+        mixerModel.handleUpdateNowIfNeeded();
+        int mutedVolume{-1}, mutedBank{-1}, mutedPreset{-1}, mutedBend{-1};
+        const auto* mutedVolumeParameter{findIntParameter(mixer, "volCh3")};
+        const bool stateStillTracked{
+            mixerModel.getControllerValue(2, 7, mutedVolume) && mutedVolume == 42
+            && mutedVolumeParameter != nullptr && mutedVolumeParameter->get() == 42
+            && mixerModel.getChannelProgram(2, mutedBank, mutedPreset)
+            && mutedPreset == 19
+            && mixerModel.getPitchBend(2, mutedBend) && mutedBend == 12000};
+        setBool("muteCh", 2, false);
+        const bool audibleAgain{levelOnChannel(2) > audiblePresence};
+        check(stateStillTracked && audibleAgain,
+              "a muted channel still receives CCs, program changes and bend, so unmuting resumes mid-song without a resync");
+
+        // Mute and solo are the plugin's own: no MIDI message may set them.
+        setBool("muteCh", 2, true);
+        settleToSilence();
+        juce::MidiBuffer resets;
+        resets.addEvent(juce::MidiMessage::controllerEvent(3, 121, 0), 0);
+        resets.addEvent(juce::MidiMessage::controllerEvent(3, 120, 0), 1);
+        const juce::uint8 gmReset[]{0x7E, 0x7F, 0x09, 0x01};
+        resets.addEvent(juce::MidiMessage::createSysExMessage(gmReset, sizeof(gmReset)), 2);
+        render(mixer, mixerAudio, resets);
+        mixerModel.handleUpdateNowIfNeeded();
+        const auto* muteAfterReset{findBoolParameter(mixer, "muteCh3")};
+        check(muteAfterReset != nullptr && muteAfterReset->get()
+                  && mixerModel.isChannelSilenced(2),
+              "controller resets and GM/GS/XG reset SysEx do not clear mute or solo");
+
+        // Round-trip.
+        setBool("soloCh", 8, true);
+        juce::MemoryBlock savedMixer;
+        mixer.getStateInformation(savedMixer);
+        JuicySFAudioProcessor restoredMixer;
+        restoredMixer.prepareToPlay(48000.0, blockSize);
+        restoredMixer.setStateInformation(
+            savedMixer.getData(), static_cast<int>(savedMixer.getSize()));
+        const auto* restoredMute{findBoolParameter(restoredMixer, "muteCh3")};
+        const auto* restoredSolo{findBoolParameter(restoredMixer, "soloCh9")};
+        check(restoredMute != nullptr && restoredMute->get()
+                  && restoredSolo != nullptr && restoredSolo->get()
+                  // Solo is engaged, so channel 9 sounds and channel 3 does not.
+                  && restoredMixer.getFluidSynthModel().isChannelSilenced(2)
+                  && !restoredMixer.getFluidSynthModel().isChannelSilenced(8),
+              "mute and solo round-trip through saved state and rebuild the engine's silenced set");
+    }
+
     {
         // MIDI CC121 deliberately follows FluidSynth/MIDI reset semantics: it
         // releases pedals and resets expression/RPN selection/pitch wheel, while
@@ -2244,9 +2446,8 @@ int main(int argc, char** argv)
             return model.getControllerValue(channel, cc, actual) && actual == expected;
         };
         int bend{-1}, bendRange{-1};
-        model.selectChannelForEditing(channel);
-        const auto* volume{findIntParameter(processor, "volume")};
-        const auto* pan{findIntParameter(processor, "pan")};
+        const auto* volume{findIntParameter(processor, "volCh5")};
+        const auto* pan{findIntParameter(processor, "panCh5")};
         check(controllerEquals(1, 0)
                   && controllerEquals(11, 127)
                   && controllerEquals(64, 0)
@@ -2261,7 +2462,7 @@ int main(int argc, char** argv)
                   && model.getPitchBend(channel, bend) && bend == 8192
                   && model.getPitchWheelSensitivity(channel, bendRange) && bendRange == 12
                   // CC7 and CC10 survive Reset All Controllers per the MIDI
-                  // spec, so the mirrored mixer parameters must survive with them.
+                  // spec, so channel 5's own mixer parameters must survive too.
                   && volume != nullptr && volume->get() == 77
                   && pan != nullptr && pan->get() == 33,
               "Reset All Controllers releases switches and resets expression/RPN/bend while preserving MIDI-defined persistent controls");
@@ -2719,20 +2920,22 @@ int main(int argc, char** argv)
             xml != nullptr ? xml->getChildByName("channelPrograms") : nullptr};
         const auto* font{xml != nullptr ? xml->getChildByName("soundFont") : nullptr};
         bool allParams{params != nullptr};
-        for (const auto& id : std::array<juce::String, 21>{
-                 "bank", "preset", "volume", "pan", "outputLevel",
-                 "progCh1", "progCh2", "progCh3", "progCh4",
-                 "progCh5", "progCh6", "progCh7", "progCh8",
-                 "progCh9", "progCh10", "progCh11", "progCh12",
-                 "progCh13", "progCh14", "progCh15", "progCh16"})
+        for (const auto& id : beta1ParameterIds())
             allParams = allParams && params->hasAttribute(id);
+        // Every per-channel node carries the full schema-5 property set.
+        bool allChannelProperties{channels != nullptr
+            && channels->getNumChildElements() == 16};
+        if (channels != nullptr)
+            for (auto* ch : channels->getChildIterator())
+                for (const juce::String& property : FluidSynthModel::perChannelParams)
+                    allChannelProperties = allChannelProperties
+                        && ch->hasAttribute(property);
         check(xml != nullptr && xml->hasTagName("MYPLUGINSETTINGS")
-                  && xml->getIntAttribute("stateVersion", -1) == 4
-                  && allParams && channels != nullptr
-                  && channels->getNumChildElements() == 16
+                  && xml->getIntAttribute("stateVersion", -1) == 5
+                  && allParams && allChannelProperties
                   && font != nullptr && font->hasAttribute("path")
                   && font->hasAttribute("bookmark"),
-              "Beta 1 state writer preserves the frozen schema-4 envelope");
+              "Beta 1 state writer preserves the frozen schema-5 envelope");
     }
     {
         model.setChannelProgram(1, 0, 4);
@@ -2894,6 +3097,93 @@ int main(int argc, char** argv)
         decoy.deleteFile();
     }
 #endif
+    {
+        // v4 -> v5 migration. A v4 save has per-channel volume and pan in
+        // channelPrograms and a single selected-channel `volume`/`pan` PARAMETER
+        // that no longer exists; it has no mute or solo at all. The per-channel
+        // tree is the only record that survives, so it is what the new
+        // parameters must be rebuilt from.
+        juce::XmlElement legacy{"MYPLUGINSETTINGS"};
+        legacy.setAttribute("stateVersion", 4);
+        auto* legacyParams{legacy.createNewChildElement("params")};
+        // The retired parameters, written normalised exactly as v4 wrote them.
+        legacyParams->setAttribute("volume", 0.25);
+        legacyParams->setAttribute("pan", 0.75);
+        legacyParams->setAttribute("outputLevel", 0.5);
+        auto* legacyChannels{legacy.createNewChildElement("channelPrograms")};
+        for (int channel = 0; channel < 16; ++channel) {
+            auto* ch{legacyChannels->createNewChildElement("ch")};
+            ch->setAttribute("num", channel);
+            ch->setAttribute("bank", channel == 9 ? 128 : 0);
+            ch->setAttribute("preset", channel);
+            ch->setAttribute("volume", 40 + channel);
+            ch->setAttribute("pan", 100 - channel);
+        }
+        auto* legacyFont{legacy.createNewChildElement("soundFont")};
+        legacyFont->setAttribute("path", argv[1]);
+        legacyFont->setAttribute("bookmark", "");
+        juce::MemoryBlock legacyState;
+        juce::AudioProcessor::copyXmlToBinary(legacy, legacyState);
+
+        JuicySFAudioProcessor migrated;
+        migrated.prepareToPlay(48000.0, blockSize);
+        migrated.setStateInformation(
+            legacyState.getData(), static_cast<int>(legacyState.getSize()));
+        auto& migratedModel{migrated.getFluidSynthModel()};
+
+        bool migratedExact{true};
+        for (int channel = 0; channel < 16; ++channel) {
+            const auto* volume{
+                findIntParameter(migrated, "volCh" + juce::String(channel + 1))};
+            const auto* pan{
+                findIntParameter(migrated, "panCh" + juce::String(channel + 1))};
+            const auto* mute{
+                findBoolParameter(migrated, "muteCh" + juce::String(channel + 1))};
+            const auto* solo{
+                findBoolParameter(migrated, "soloCh" + juce::String(channel + 1))};
+            int engineVolume{-1}, enginePan{-1};
+            migratedExact = migratedExact
+                && volume != nullptr && volume->get() == 40 + channel
+                && pan != nullptr && pan->get() == 100 - channel
+                // absent in v4, so they must arrive off rather than undefined
+                && mute != nullptr && !mute->get()
+                && solo != nullptr && !solo->get()
+                && migratedModel.getControllerValue(channel, 7, engineVolume)
+                && engineVolume == 40 + channel
+                && migratedModel.getControllerValue(channel, 10, enginePan)
+                && enginePan == 100 - channel;
+        }
+        check(migratedExact && migratedModel.getSilencedMask() == 0,
+              "a v4 save migrates to v5: every channel's volume and pan survive into its own parameter and the engine, and mute/solo arrive off");
+
+        // Saving it back writes v5, with the retired identifiers gone.
+        juce::MemoryBlock rewritten;
+        migrated.getStateInformation(rewritten);
+        const auto rewrittenXml{juce::AudioProcessor::getXmlFromBinary(
+            rewritten.getData(), static_cast<int>(rewritten.getSize()))};
+        const auto* rewrittenParams{
+            rewrittenXml != nullptr ? rewrittenXml->getChildByName("params") : nullptr};
+        check(rewrittenXml != nullptr
+                  && rewrittenXml->getIntAttribute("stateVersion", -1) == 5
+                  && rewrittenParams != nullptr
+                  && !rewrittenParams->hasAttribute("volume")
+                  && !rewrittenParams->hasAttribute("pan")
+                  && rewrittenParams->hasAttribute("volCh1")
+                  && rewrittenParams->hasAttribute("soloCh16"),
+              "re-saving a migrated project writes schema 5 and drops the retired volume/pan parameters");
+
+        // A save from a FUTURE schema is still refused rather than half-applied.
+        juce::XmlElement future{"MYPLUGINSETTINGS"};
+        future.setAttribute("stateVersion", 6);
+        juce::MemoryBlock futureState;
+        juce::AudioProcessor::copyXmlToBinary(future, futureState);
+        migrated.setStateInformation(
+            futureState.getData(), static_cast<int>(futureState.getSize()));
+        const auto* stillMigrated{findIntParameter(migrated, "volCh1")};
+        check(stillMigrated != nullptr && stillMigrated->get() == 40
+                  && migratedModel.getFontLoadStatus() == "error",
+              "a state written by a newer schema is refused with a visible error and leaves current state intact");
+    }
     {
         juce::XmlElement bounded{"MYPLUGINSETTINGS"};
         bounded.setAttribute("stateVersion", 3);
@@ -3249,40 +3539,82 @@ int main(int argc, char** argv)
 
     std::printf("== colour contrast ==\n");
     {
-        auto& lookAndFeel{juce::LookAndFeel::getDefaultLookAndFeel()};
-        const juce::Colour rowText{lookAndFeel.findColour(juce::ListBox::textColourId)};
-        const juce::Colour rowBackground{
-            lookAndFeel.findColour(juce::ListBox::backgroundColourId)};
-        const juce::Colour selectedRow{MyColours::getUIColourIfAvailable(
-            juce::LookAndFeel_V4::ColourScheme::UIColour::highlightedFill,
-            juce::Colours::steelblue)};
-        const juce::Colour selectedText{MyColours::getUIColourIfAvailable(
-            juce::LookAndFeel_V4::ColourScheme::UIColour::highlightedText,
-            juce::Colours::white)};
+        // 4.5:1 is the WCAG AA threshold for normal-size text; 3:1 is the
+        // threshold for a graphical element that carries meaning.
+        constexpr double minimumTextRatio{4.5};
+        constexpr double minimumGraphicRatio{3.0};
 
-        // 4.5:1 is the WCAG AA threshold for normal-size text.
-        constexpr double minimumRatio{4.5};
+        // Every text token, on every background it can be drawn on, in every
+        // accent the settings popover offers. This is the palette's contract:
+        // "no component draws a colour that did not come from the palette" is
+        // only worth something if the palette itself is legible.
+        struct NamedColour { const char* name; int colourId; };
+        constexpr std::array<NamedColour, 5> backgrounds{{
+            {"window",       Juicy16::windowBackgroundColourId},
+            {"panel",        Juicy16::panelBackgroundColourId},
+            {"row alternate", Juicy16::rowAlternateColourId},
+            {"row selected", Juicy16::rowSelectedColourId},
+            {"input",        Juicy16::inputBackgroundColourId},
+        }};
+        constexpr std::array<NamedColour, 4> textTokens{{
+            {"text primary", Juicy16::textPrimaryColourId},
+            {"text value",   Juicy16::textValueColourId},
+            {"text label",   Juicy16::textLabelColourId},
+            {"text error",   Juicy16::textErrorColourId},
+        }};
 
-        const double unselected{contrastRatio(rowText, rowBackground)};
-        const double selected{contrastRatio(selectedText, selectedRow)};
-        std::printf("    row text on unselected background: %.2f:1\n", unselected);
-        std::printf("    row text on selected background:   %.2f:1\n", selected);
-        check(unselected >= minimumRatio,
-              "channel-row text meets WCAG AA contrast on an unselected row");
-        check(selected >= minimumRatio,
-              "channel-row text meets WCAG AA contrast on the selected row");
+        bool everyTokenLegible{true};
+        bool everyAccentVisible{true};
+        for (const auto accent : {Juicy16::Accent::sage, Juicy16::Accent::amber,
+                                  Juicy16::Accent::terracotta, Juicy16::Accent::neutral}) {
+            Juicy16::PluginLookAndFeel lookAndFeel;
+            lookAndFeel.setAccent(accent);
+            for (const auto& background : backgrounds) {
+                const juce::Colour backgroundColour{
+                    lookAndFeel.findColour(background.colourId)};
+                for (const auto& token : textTokens) {
+                    // A label never sits on a selected row: the row's own text
+                    // uses the primary token there.
+                    if (background.colourId == Juicy16::rowSelectedColourId
+                        && token.colourId == Juicy16::textLabelColourId)
+                        continue;
+                    const double ratio{contrastRatio(
+                        lookAndFeel.findColour(token.colourId), backgroundColour)};
+                    if (ratio < minimumTextRatio) {
+                        std::printf("    FAIL %s on %s (%s accent): %.2f:1\n",
+                                    token.name, background.name,
+                                    Juicy16::accentName(accent).toRawUTF8(), ratio);
+                        everyTokenLegible = false;
+                    }
+                }
+                // The accent draws knob arcs and the selected-row marker.
+                const double accentRatio{contrastRatio(
+                    lookAndFeel.findColour(Juicy16::accentColourId), backgroundColour)};
+                if (accentRatio < minimumGraphicRatio) {
+                    std::printf("    FAIL %s accent on %s: %.2f:1\n",
+                                Juicy16::accentName(accent).toRawUTF8(),
+                                background.name, accentRatio);
+                    everyAccentVisible = false;
+                }
+            }
+        }
+        check(everyTokenLegible,
+              "every palette text token meets WCAG AA on every background it is drawn on, in all four accents");
+        check(everyAccentVisible,
+              "the accent meets the 3:1 non-text threshold on every background, in all four accents");
 
-        const juce::Colour statusBackground{
-            lookAndFeel.findColour(juce::ResizableWindow::backgroundColourId)};
-        const double normalStatus{
-            contrastRatio(juce::Colours::lightgrey, statusBackground)};
-        const double errorStatus{
-            contrastRatio(juce::Colours::salmon.brighter(0.25f), statusBackground)};
+        Juicy16::PluginLookAndFeel lookAndFeel;
+        const double normalStatus{contrastRatio(
+            lookAndFeel.findColour(Juicy16::textLabelColourId),
+            lookAndFeel.findColour(Juicy16::panelBackgroundColourId))};
+        const double errorStatus{contrastRatio(
+            lookAndFeel.findColour(Juicy16::textErrorColourId),
+            lookAndFeel.findColour(Juicy16::panelBackgroundColourId))};
         std::printf("    status label, normal: %.2f:1  error: %.2f:1\n",
                     normalStatus, errorStatus);
-        check(normalStatus >= minimumRatio,
+        check(normalStatus >= minimumTextRatio,
               "the status label meets WCAG AA contrast in its normal colour");
-        check(errorStatus >= minimumRatio,
+        check(errorStatus >= minimumTextRatio,
               "the status label meets WCAG AA contrast in its error colour");
     }
 
@@ -3294,14 +3626,13 @@ int main(int argc, char** argv)
             bool requireSliderRole;
             bool requireTableRole;
         };
-        constexpr std::array<ExpectedAccessibleComponent, 7> expected{{
+        constexpr std::array<ExpectedAccessibleComponent, 6> expected{{
             {"Sound bank file", false, false},
             {"MIDI channel assignments", false, true},
-            {"Channel volume (CC7)", true, false},
-            {"Pan (CC10)", true, false},
             {"Output level", true, false},
             {"MIDI Keyboard", false, false},
             {"Version and bank load status", false, false},
+            {"Settings", false, false},
         }};
         bool accessibleMetadata{editor != nullptr};
         for (const auto& item : expected) {
@@ -3355,13 +3686,47 @@ int main(int argc, char** argv)
               "the editor and the channel table take keyboard focus while the on-screen keyboard declines it");
 
         bool slidersReachable{editor != nullptr};
-        for (const char* name : {"Channel volume (CC7)", "Pan (CC10)", "Output level"}) {
+        for (const char* name : {"Output level"}) {
             auto* slider{editor != nullptr ? findNamedComponent(*editor, name) : nullptr};
             slidersReachable = slidersReachable
                 && slider != nullptr && slider->getWantsKeyboardFocus();
         }
         check(slidersReachable && bankPicker != nullptr,
-              "every mixer slider accepts keyboard focus so it is reachable without a mouse");
+              "the master trim accepts keyboard focus so it is reachable without a mouse");
+
+        // Phase 9's central claim, asserted on the built editor: every one of the
+        // 16 rows carries its own named, focusable volume, pan, mute and solo,
+        // reachable without selecting the row first. A row scrolled out of view
+        // has no cell component, so each row is scrolled in before it is checked -
+        // which is itself the assertion that every row IS reachable.
+        auto* rowRack{editor != nullptr
+            ? dynamic_cast<juce::TableListBox*>(
+                findNamedComponent(*editor, "MIDI channel assignments"))
+            : nullptr};
+        bool everyRowHasItsOwnControls{rowRack != nullptr};
+        if (auto* rack{rowRack}) {
+            for (int row = 0; row < 16 && everyRowHasItsOwnControls; ++row) {
+                rack->scrollToEnsureRowIsOnscreen(row);
+                const juce::String prefix{"MIDI channel " + juce::String(row + 1)};
+                for (const char* suffix : {" volume", " pan", " mute", " solo"}) {
+                    auto* control{findNamedComponent(*editor, prefix + suffix)};
+                    const bool valid{control != nullptr
+                        && control->isAccessible()
+                        && control->getTitle().isNotEmpty()
+                        && control->getDescription().isNotEmpty()
+                        && control->getWantsKeyboardFocus()};
+                    if (!valid)
+                        std::printf("    row control missing or unreachable: %s%s\n",
+                                    prefix.toRawUTF8(), suffix);
+                    everyRowHasItsOwnControls = everyRowHasItsOwnControls && valid;
+                }
+                auto* instrument{findNamedComponent(*editor, prefix + " instrument")};
+                everyRowHasItsOwnControls = everyRowHasItsOwnControls
+                    && instrument != nullptr && instrument->isAccessible();
+            }
+        }
+        check(everyRowHasItsOwnControls,
+              "all 16 rows carry their own named, keyboard-reachable instrument, volume, pan, mute and solo");
 
         auto* constrainer{editor != nullptr ? editor->getConstrainer() : nullptr};
         auto* channelTable{editor != nullptr
@@ -3379,7 +3744,7 @@ int main(int argc, char** argv)
         constexpr std::array<const char*, 5> essentialComponents{{
             "Sound bank file",
             "MIDI channel assignments",
-            "Channel volume (CC7)",
+            "Output level",
             "MIDI Keyboard",
             "Version and bank load status",
         }};
@@ -3509,8 +3874,8 @@ int main(int argc, char** argv)
         // focus. A control that declines focus is unreachable by tabbing no
         // matter what the host does.
         //
-        // Bank loading, all three mixer parameters, channel selection, and patch
-        // selection are all reachable.
+        // Bank loading, the master trim, every row's own mixer controls, channel
+        // selection, and patch selection are all reachable.
         bool focusableControls{editor != nullptr};
         bool channelSelectionByKeyboard{editor != nullptr};
         bool patchSelectionByKeyboard{editor != nullptr};
@@ -3523,9 +3888,10 @@ int main(int argc, char** argv)
                 auto* component{findNamedComponent(*editor, name)};
                 return component != nullptr && component->getWantsKeyboardFocus();
             }};
-            // Every exposed sound parameter, by its real accessible name.
-            for (const auto* name : {"Channel volume (CC7)", "Pan (CC10)",
-                                     "Output level"})
+            // Every exposed sound parameter, by its real accessible name. The
+            // per-channel controls are covered row by row in the accessibility
+            // block above; this is the plugin-wide one.
+            for (const auto* name : {"Output level"})
                 focusableControls = focusableControls && acceptsFocus(name);
 
             // Bank loading: the FilenameComponent itself is a container and does
@@ -3593,7 +3959,7 @@ int main(int argc, char** argv)
             }
         }
         check(focusableControls,
-              "bank loading and all three mixer parameters accept keyboard focus, so those workflows work without a mouse");
+              "bank loading and the master trim accept keyboard focus, so those workflows work without a mouse");
         check(channelSelectionByKeyboard,
               "the channel table accepts keyboard focus and arrow-key row changes drive the selected channel");
         check(patchSelectionByKeyboard,

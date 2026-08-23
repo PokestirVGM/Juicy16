@@ -3,7 +3,7 @@
 //
 
 #include "FilePicker.h"
-#include "MyColours.h"
+#include "Theme.h"
 #include "Util.h"
 
 // #ifdef __APPLE__
@@ -108,7 +108,7 @@ void FilePicker::resized() {
  */
 void FilePicker::paint(Graphics& g)
 {
-    g.fillAll(MyColours::getUIColourIfAvailable(LookAndFeel_V4::ColourScheme::UIColour::windowBackground, juce::Colours::lightgrey));
+    g.fillAll(getLookAndFeel().findColour(Juicy16::headerBackgroundColourId));
 }
 
 void FilePicker::filenameComponentChanged (FilenameComponent*) {

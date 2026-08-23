@@ -23,7 +23,7 @@ project(JUICY16 VERSION 0.5.1)
 # copy, so a stale one is worse than none. Editing this line now wins everywhere;
 # -DJUICYSF_PRERELEASE_LABEL=... on the command line still overrides it, and keeps
 # overriding it for that build directory until the cache entry is removed.
-set(JUICYSF_PRERELEASE_LABEL_DEFAULT "alpha.6")
+set(JUICYSF_PRERELEASE_LABEL_DEFAULT "alpha.7")
 if (NOT DEFINED JUICYSF_PRERELEASE_LABEL)
   set(JUICYSF_PRERELEASE_LABEL "${JUICYSF_PRERELEASE_LABEL_DEFAULT}")
 endif ()
@@ -630,7 +630,12 @@ message(STATUS "  Strict release validation: ${JUICYSF_RELEASE_VALIDATION}")
 # static library. These source files can be of any kind (wav data, images, fonts, icons etc.).
 # Conversion to binary-data will happen when your target is built.
 
-# juce_add_binary_data(AudioPluginData SOURCES ...)
+# The owner's wordmark, compiled into the plugin so the header can draw it in
+# every format without a bundle resource to find at runtime.
+juce_add_binary_data(Juicy16Assets SOURCES resources/juicy16-logo.png)
+# VST3 and AU are loadable modules, so everything linked into them must be
+# position-independent; a static library is not by default.
+set_target_properties(Juicy16Assets PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
 
 # `target_link_libraries` links libraries and JUCE modules to other libraries or executables. Here,
 # we're linking our executable target to the `juce::juce_audio_utils` module. Inter-module
@@ -640,7 +645,6 @@ message(STATUS "  Strict release validation: ${JUICYSF_RELEASE_VALIDATION}")
 
 target_link_libraries(JuicySFPlugin
     PRIVATE
-        # AudioPluginData           # If we'd created a binary data target, we'd link to it here
         juce::juce_audio_basics
         juce::juce_audio_devices
         juce::juce_audio_formats
@@ -656,6 +660,12 @@ target_link_libraries(JuicySFPlugin
         ${FLUIDSYNTH_TARGET}
         ${EXTRA_ARCH_FLUIDSYNTH_TARGET}
     PUBLIC
+        # PUBLIC, not PRIVATE: juce_add_binary_data attaches both
+        # JUCE_TARGET_HAS_BINARY_DATA and BinaryData.h's include directory as
+        # INTERFACE usage requirements, and JuceHeader.h includes BinaryData.h
+        # whenever that definition is set. The test and tool executables compile
+        # the same headers, so they need both or neither.
+        Juicy16Assets
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)

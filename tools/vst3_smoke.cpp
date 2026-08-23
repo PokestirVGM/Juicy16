@@ -67,12 +67,36 @@ static constexpr Vst::ParamID expectedProgramParamIds[16]{
     0x6D8E6EBA, 0x443F67BE, 0x443F67BF, 0x443F67C0,
     0x443F67C1, 0x443F67C2, 0x443F67C3, 0x443F67C4
 };
-// bank, preset, volume, pan, outputLevel. JUCE derives a VST3 ParamID by hashing
-// the parameter's string id, so these change whenever a global parameter is
-// renamed, added, or removed - which is exactly why they are frozen here.
-static constexpr Vst::ParamID expectedGlobalParamIds[5]{
-    0x002E063C, 0x4594E2DF, 0x4FAAE71A, 0x0001B09D, 0x4DCA0B03
+// JUCE derives a VST3 ParamID by hashing the parameter's string id, so these
+// change whenever a parameter is renamed - which is exactly why they are frozen
+// here. Order: bank, preset, outputLevel, then volCh1..16, panCh1..16,
+// muteCh1..16, soloCh1..16. All of these live in the ROOT unit; only the 16
+// progChN parameters live in the channel units.
+static constexpr Vst::ParamID expectedRootParamIds[67]{
+    0x002E063C, 0x4594E2DF, 0x4DCA0B03,
+    // volCh1..volCh16
+    0x4FAA2A99, 0x4FAA2A9A, 0x4FAA2A9B, 0x4FAA2A9C,
+    0x4FAA2A9D, 0x4FAA2A9E, 0x4FAA2A9F, 0x4FAA2AA0,
+    0x4FAA2AA1, 0x259B28B7, 0x259B28B8, 0x259B28B9,
+    0x259B28BA, 0x259B28BB, 0x259B28BC, 0x259B28BD,
+    // panCh1..panCh16
+    0x44A8B68F, 0x44A8B690, 0x44A8B691, 0x44A8B692,
+    0x44A8B693, 0x44A8B694, 0x44A8B695, 0x44A8B696,
+    0x44A8B697, 0x506E1B81, 0x506E1B82, 0x506E1B83,
+    0x506E1B84, 0x506E1B85, 0x506E1B86, 0x506E1B87,
+    // muteCh1..muteCh16
+    0x543FD393, 0x543FD394, 0x543FD395, 0x543FD396,
+    0x543FD397, 0x543FD398, 0x543FD399, 0x543FD39A,
+    0x543FD39B, 0x33BA9EFD, 0x33BA9EFE, 0x33BA9EFF,
+    0x33BA9F00, 0x33BA9F01, 0x33BA9F02, 0x33BA9F03,
+    // soloCh1..soloCh16
+    0x06FBF30D, 0x06FBF30E, 0x06FBF30F, 0x06FBF310,
+    0x06FBF311, 0x06FBF312, 0x06FBF313, 0x06FBF314,
+    0x06FBF315, 0x58826EC3, 0x58826EC4, 0x58826EC5,
+    0x58826EC6, 0x58826EC7, 0x58826EC8, 0x58826EC9
 };
+static constexpr int numRootParamIds =
+    (int) (sizeof (expectedRootParamIds) / sizeof (expectedRootParamIds[0]));
 static Vst::UnitID expectedUnitId (int chZero) {
     return expectedUnitIds[chZero];
 }
@@ -873,15 +897,23 @@ int main (int argc, char** argv) {
         // hosts treat it as the unit's program selector.
         int paramsInChannelUnits = 0, flaggedParams = 0, steppedParams = 0;
         bool frozenProgramIds = true;
-        bool frozenGlobalIds = true;
-        bool foundGlobalIds[5]{};
+        bool frozenRootIds = true;
+        bool rootParamsInRootUnit = true;
+        bool foundRootIds[numRootParamIds]{};
         const auto n = controller->getParameterCount();
         for (int32 i = 0; i < n; ++i) {
             Vst::ParameterInfo pi{};
             if (controller->getParameterInfo (i, pi) != kResultOk) continue;
-            for (int global = 0; global < 5; ++global)
-                if (pi.id == expectedGlobalParamIds[global])
-                    foundGlobalIds[global] = true;
+            for (int root = 0; root < numRootParamIds; ++root)
+                if (pi.id == expectedRootParamIds[root]) {
+                    foundRootIds[root] = true;
+                    // The wrapper serves a fixed 17-unit structure that hosts
+                    // cache before the component connection exists. A parameter
+                    // announcing any other unit would point at a unit the host
+                    // was never told about.
+                    if (pi.unitId != Vst::kRootUnitId)
+                        rootParamsInRootUnit = false;
+                }
             for (int ch = 0; ch < 16; ++ch)
                 if (pi.unitId == expectedUnitId (ch)) {
                     ++paramsInChannelUnits;
@@ -895,8 +927,8 @@ int main (int argc, char** argv) {
                     break;
                 }
         }
-        for (const bool found : foundGlobalIds)
-            frozenGlobalIds = frozenGlobalIds && found;
+        for (const bool found : foundRootIds)
+            frozenRootIds = frozenRootIds && found;
         printf ("  params inside channel units: %d (kIsProgramChange on %d, stepCount 127 on %d)\n",
                 paramsInChannelUnits, flaggedParams, steppedParams);
         CHECK (paramsInChannelUnits == 16, "exactly the 16 progChN params live in the channel units");
@@ -905,7 +937,9 @@ int main (int argc, char** argv) {
         // programCount-1 (127), not 0 (continuous). Regression-guard for isDiscrete().
         CHECK (steppedParams == 16, "all 16 channel program params report stepCount 127");
         CHECK (frozenProgramIds, "all 16 Beta 1 VST3 program ParamIDs are unchanged");
-        CHECK (frozenGlobalIds, "all 5 Beta 1 global VST3 ParamIDs are present");
+        CHECK (frozenRootIds, "all 67 Beta 1 root-unit VST3 ParamIDs are present");
+        CHECK (rootParamsInRootUnit,
+               "every non-program parameter reports the root unit, so no parameter names a unit outside the frozen 17");
 
         units->release();
     }

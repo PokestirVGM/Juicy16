@@ -1,0 +1,60 @@
+//
+// The right-hand panel: the plugin's global controls, kept apart from the
+// channel rack so they read as global rather than as a seventeenth channel.
+//
+// Master output trim lives here with room for its label and its value, which is
+// the defect Phase 9 records against the old 50px "Master" group box. The reverb
+// section (Phase 10) lands between master and the bank summary.
+//
+
+#pragma once
+
+#include "../JuceLibraryCode/JuceHeader.h"
+#include "FluidSynthModel.h"
+
+using namespace std;
+using SliderAttachment = AudioProcessorValueTreeState::SliderAttachment;
+
+class MixerPanelComponent : public Component,
+                            private ValueTree::Listener
+{
+public:
+    MixerPanelComponent(
+        AudioProcessorValueTreeState& state,
+        FluidSynthModel& model);
+    ~MixerPanelComponent() override;
+
+    void paint(Graphics&) override;
+    void resized() override;
+
+private:
+    void valueTreePropertyChanged(ValueTree&, const Identifier&) override;
+    void valueTreeChildAdded(ValueTree&, ValueTree&) override {}
+    void valueTreeChildRemoved(ValueTree&, ValueTree&, int) override {}
+    void valueTreeChildOrderChanged(ValueTree&, int, int) override {}
+    void valueTreeParentChanged(ValueTree&) override {}
+    void valueTreeRedirected(ValueTree&) override {}
+
+    void syncOutputLevelReadout();
+    void syncBankSummary();
+
+    AudioProcessorValueTreeState& valueTreeState;
+    FluidSynthModel& fluidSynthModel;
+
+    Label masterHeading;
+    Slider outputLevelSlider;
+    Label outputLevelValue;
+    Label outputLevelUnit;
+    unique_ptr<SliderAttachment> outputLevelSliderAttachment;
+
+    Label bankHeading;
+    Label bankName;
+    Label bankDetail;
+
+    // y of the divider under the master block, set in resized() and drawn in
+    // paint() so both agree without a second layout pass.
+    int masterDividerY{0};
+    int bankDividerY{0};
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MixerPanelComponent)
+};

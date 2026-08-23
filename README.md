@@ -42,12 +42,14 @@ Host routing is not hard-coded to FL Studio or Cubase. AU hosts can deliver norm
 
 ## Interface
 
-- The 16-row channel list selects a channel for editing and offers manual bank/preset selection.
-- Volume and pan edit the selected channel's CC7 and CC10. Incoming MIDI on that channel overrides what you set, exactly as a Program Change overrides a manually picked instrument.
-- Output level is a master trim in decibels for the whole plugin. It is not a MIDI controller, so nothing in a MIDI file moves it.
-- The keyboard auditions the selected channel and displays incoming note activity.
-- The status area reports the running version. Bank-load results are also stored in the model and exposed through the file control tooltip.
-- Everything works without a mouse where the host passes Tab through: arrows on the channel list select a channel, Return opens that row's instrument list, and arrows on a focused slider change its value. Screen-reader announcements are untested — see [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).
+- A 16-row rack, one row per MIDI channel. Each row owns that channel's mute, solo, instrument, volume and pan — all 16 visible and editable at once, with no row to select first.
+- Volume and pan are that row's CC7 and CC10. Incoming MIDI on that channel overrides what you set, exactly as a Program Change overrides a manually picked instrument.
+- Mute and solo are the plugin's own: nothing in a MIDI file changes them, and no reset clears them. A silenced channel drops new notes but still receives everything else, so unmuting mid-song needs no resync.
+- Every row control is a real host parameter, so a host's automation and controller-link menus reach all 16 channels.
+- The right-hand panel holds what is global: the master output trim in decibels, and the loaded bank. The trim is not a MIDI controller, so nothing in a MIDI file moves it.
+- The keyboard auditions the selected channel and displays incoming note activity. Selecting a row is only about which channel it plays.
+- The status bar reports the running version and the latest bank-load result. A gear in the header opens settings: accent colour, and the build details worth quoting in a bug report.
+- Everything works without a mouse where the host passes Tab through: arrows on the rack select a channel, Return opens that row's instrument list, arrows on a focused knob change its value, and Space toggles a focused mute or solo. Screen-reader announcements are untested — see [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).
 
 ## Building and testing
 

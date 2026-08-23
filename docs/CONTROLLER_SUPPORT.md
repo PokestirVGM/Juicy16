@@ -131,21 +131,41 @@ which is why this was ever a state-only problem.
 
 ## Exposed mixer controls
 
-Two editor sliders show the selected channel's volume and pan. They are plain
-MIDI controllers handled by FluidSynth's own default modulators — Juicy16 adds no
-modulator of its own.
+Every channel row carries its own volume and pan knob — all 16 visible at once,
+with no row to select first. They are plain MIDI controllers handled by
+FluidSynth's own default modulators; Juicy16 adds no modulator of its own.
 
-| CC | UI control | Effect | Default |
-|---:|---|---|---|
-| 7 | Vol | Channel volume | 100 |
-| 10 | Pan | Channel pan; 0 hard left, 64 centre, 127 hard right | 64 |
+| CC | UI control | Parameter | Effect | Default |
+|---:|---|---|---|---|
+| 7 | row Vol knob | `volCh1`-`volCh16` | Channel volume | 100 |
+| 10 | row Pan knob | `panCh1`-`panCh16` | Channel pan; 0 hard left, 64 centre, 127 hard right | 64 |
 
-Setting either slider is a starting point only. Incoming CC7/CC10 on that channel
-replaces the value at the event's timestamp and moves the slider, exactly as an
-incoming Program Change overrides a manually picked instrument. CC121 preserves
-both, as the MIDI spec requires, and Juicy16's GM/GS/XG reset handling reapplies
-the latest per-channel values so the editor, saved state, and engine stay
-converged.
+Each is a real host parameter, so a host can automate any channel and a
+right-click on a knob offers the host's own automation and controller-link menu.
+
+Setting a knob is a starting point only. Incoming CC7/CC10 on that channel
+replaces the value at the event's timestamp and moves that row's knob, exactly as
+an incoming Program Change overrides a manually picked instrument. CC121
+preserves both, as the MIDI spec requires, and Juicy16's GM/GS/XG reset handling
+reapplies the latest per-channel values so the editor, saved state, and engine
+stay converged.
+
+## Mute and solo are not MIDI controllers
+
+Each row also carries mute and solo (`muteCh1`-`muteCh16`, `soloCh1`-`soloCh16`).
+These are the plugin's own controls: **nothing in a MIDI file changes them**, and
+no controller reset or GM/GS/XG reset SysEx clears them.
+
+- A silenced channel drops incoming note-ons. It is not turned down, so the
+  file's own CC7 value survives being muted.
+- Everything else still reaches the engine while a channel is silenced —
+  note-offs, controllers, program changes, pitch bend — so unmuting mid-song
+  needs no resync.
+- Muting a channel that is already sounding sends it All Notes Off, so held notes
+  release naturally rather than ringing on or cutting off with a click.
+- While **any** channel is soloed, every channel that is not soloed is silenced
+  and mute is irrelevant. Clearing the last solo restores exactly the mute
+  picture that was there before.
 
 ### CC71-79 are forwarded but do nothing
 

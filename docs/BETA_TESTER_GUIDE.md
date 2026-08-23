@@ -42,6 +42,34 @@ The first canary should be experienced macOS AU/VST3 and Windows VST3 users who 
 
 The tester count, invitation channel, support hours, and withdrawal owner require owner approval before launch. The approved feedback address is `contact@pokestir.com`; email subjects must begin with `[Juicy16 VST]` so reports can be identified and routed.
 
+## The window
+
+The plugin is a 16-channel rack. Every row is one MIDI channel and owns
+everything belonging to that channel, left to right: the channel number, mute and
+solo, the instrument dropdown, and volume and pan knobs with their values. All 16
+are visible at once — nothing needs a row selected first. Selecting a row only
+chooses which channel the on-screen keyboard auditions.
+
+The panel on the right holds what is global rather than per channel: the master
+output trim, and a summary of the loaded bank. The header carries the bank picker
+and a settings button; settings holds the accent colour and the build details
+worth quoting in a bug report (version, FluidSynth version, plugin format, sample
+rate).
+
+Two things to know about the row controls:
+
+- **Volume and pan follow the MIDI file.** Setting a knob is a starting point.
+  The next CC7 or CC10 the file sends on that channel replaces it, at that
+  event's timestamp — the same rule the instrument dropdowns follow for Program
+  Change. This is intended; please do not report it as a defect.
+- **Mute and solo do not follow the MIDI file.** Nothing in a MIDI file changes
+  them, and no reset clears them. A muted channel stops sounding new notes but
+  still receives everything else, so unmuting mid-song picks up correctly. While
+  anything is soloed, everything not soloed is silent.
+
+Every one of those controls is a host parameter, so a host's automation and
+controller-link menus reach all 16 channels.
+
 ## Supported workflow
 
 1. Back up the project and any previously installed Juicy16 plugin.
@@ -59,13 +87,14 @@ The tester count, invitation channel, support hours, and withdrawal owner requir
 Every core workflow is reachable from the keyboard, so please report anything
 that is not — especially a host that swallows Tab before it reaches the editor.
 
-- Tab moves between the bank browse button, the 16-channel table, and the six
-  sound sliders.
-- On the channel table, up and down arrows select the MIDI channel the sliders
-  and status line follow.
+- Tab moves between the bank browse button, the settings button, the 16-channel
+  rack, each row's own controls, and the master trim.
+- On the channel rack, up and down arrows select the MIDI channel the audition
+  keyboard and status line follow.
 - Return on the selected row opens that channel's instrument list; arrows and
-  Return pick from it, and focus comes back to the table.
-- On a focused slider, arrows change the value.
+  Return pick from it, and focus comes back to the rack.
+- On a focused knob, arrows change the value; a knob's number can also be typed.
+- Mute and solo are ordinary buttons: Space or Return toggles the focused one.
 
 Screen-reader announcements are untested. Every control carries an accessible
 name, but nobody has yet run Juicy16 under VoiceOver or Narrator, so reports from

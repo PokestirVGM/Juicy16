@@ -2990,7 +2990,7 @@ rather than impressions:
     two-column table with a layout that owns the full width deliberately.
   - No visible region may exist that belongs to no control.
 
-- [ ] Put volume and pan on every channel row.
+- [x] Put volume and pan on every channel row.
   - Both controls appear per row, for all 16 channels, without selecting a row.
   - They remain CC7 and CC10 on that row's channel, and an incoming CC7/CC10 must
     move the row's control at the event's timestamp, exactly as it moves the
@@ -2999,19 +2999,60 @@ rather than impressions:
     not fight MIDI-driven updates — the existing re-entrancy guard in
     `uiState.selectedChannel` is the model to follow.
 
-- [ ] Retire the channel half of `SlidersComponent` once the row owns it.
+  OWNER DECISION (2026-08-23): they become **real host parameters**, not
+  editor-only state — `volCh1`-`volCh16` and `panCh1`-`panCh16` — so a host can
+  automate any channel and a right-click on a knob offers the host's own
+  automation and controller-link menu. The selected-channel `volume`/`pan` pair
+  is retired. The owner also asked for mute and solo, which the approved mockup
+  draws but no task covered; they ship as `muteCh1`-`muteCh16` and
+  `soloCh1`-`soloCh16`.
+
+  EVIDENCE (2026-08-23): every row's knob is a `SliderAttachment` on that
+  channel's own parameter, so the MIDI path and the UI path meet at the parameter
+  rather than racing. `handleAsyncUpdate` writes an incoming CC7/CC10 into that
+  channel's parameter under the existing `mirroringParameters` guard, which is
+  what stops the write being sent back to an engine that already has it. Editing
+  a knob does not touch `uiState.selectedChannel` at all — the selection is now
+  only about which channel the audition keyboard plays.
+
+  Pinned by "volume and pan remain timestamp-, engine-, knob-, channel-, and
+  state-exact on all 16 channels, without selecting a row" — the previous
+  assertion, strengthened from "the selected channel mirrors" to "all 16 do, with
+  none selected". Six further assertions cover mute and solo, including that a
+  silenced channel still receives CCs, program changes and bend; that muting
+  mid-note releases rather than cutting; and that no controller reset or GM/GS/XG
+  reset SysEx clears either.
+
+- [x] Retire the channel half of `SlidersComponent` once the row owns it.
   - Do not leave a strip whose only remaining purpose is holding the master.
   - Give the master output level a home where its label and value fit, and
     where it reads as global rather than as a fourth channel control.
 
-- [ ] Keep the minimum window honest.
+  EVIDENCE (2026-08-23): `SlidersComponent` is deleted, not reduced.
+  `MixerPanelComponent` is the 236px right-hand panel from the approved layout:
+  the master trim with a 40px knob, a 19px value readout, and a "dB trim" label
+  that all fit, then the loaded-bank summary at the foot. The 50px group box
+  whose title rendered as "M..." is gone. `TablesComponent`, a pass-through
+  wrapper around the rack, and `MyColours`, whose only job was reaching into
+  `LookAndFeel_V4`'s stock scheme, are deleted with it.
+
+- [x] Keep the minimum window honest.
   - `GuiConstants::minWidth` and `defaultHeight` are derived, not guessed; they
     must still be derived after the redesign.
   - At minimum width every row control must remain usable, or the minimum moves.
 
+  EVIDENCE (2026-08-23): the minimum moved, deliberately and by derivation.
+  `minWidth` is `minRackWidth + panelWidth + 1`, where `minRackWidth` is the sum
+  of the row's own fixed columns plus the narrowest usable instrument column —
+  617px, up from 500. `defaultHeight` is the header, the column header, all 16
+  rows, the keyboard and the status bar: 564px. `minHeight` is the fixed strips
+  plus four rows. Every term is a `GuiConstants` token that `resized()` also lays
+  out from, so the two cannot drift. The existing minimum/default/maximum
+  editor-size assertions still pass against the new numbers.
+
 ## 9.3 One visual system
 
-- [ ] Define a single palette and use it everywhere.
+- [x] Define a single palette and use it everywhere.
   - Grey theming, as decided by the owner on 2026-08-23.
   - Every colour comes from named tokens; no `Colours::` literal may remain in a
     component. `MyColours` and `GuiConstants` are the two places allowed to name
@@ -3019,48 +3060,131 @@ rather than impressions:
   - The status bar's error and normal states are tokens, not `salmon` and
     `lightgrey`.
 
-- [ ] Apply a custom `LookAndFeel` rather than styling controls individually.
+  EVIDENCE (2026-08-23): `Source/Theme.h` declares 18 named `ColourIds` and
+  `Source/Theme.cpp` is the only file that names a palette colour. Components
+  resolve tokens through the normal `findColour()` path, so nothing reaches for a
+  global. The status bar's two states are `textLabelColourId` and
+  `textErrorColourId`.
+
+  One `Colours::` literal remains outside Theme.cpp, stated rather than hidden:
+  `SurjectiveMidiKeyboardComponent::drawWhiteNote` initialises its key overlay to
+  `transparentWhite`. That is a "no overlay" sentinel in vendored JUCE keyboard
+  code, not a colour choice — every colour the keyboard actually draws comes from
+  `findColour`, and the palette sets all nine of its ColourIds.
+
+  The palette is not just centralised, it is measured: a test walks every text
+  token against every background it can be drawn on, in all four accents, and
+  requires WCAG AA (4.5:1); it does the same for the accent against the 3:1
+  non-text threshold. That replaced a check of four hand-picked pairs. The
+  mockup's decorative greys did not survive it — `#767676` on the panel is
+  3.46:1, so the label token is `#949494` (5.18:1) and the value token `#a8a8a8`
+  (5.71:1 on a selected row, which `#909090` failed at 4.25:1).
+
+- [x] Apply a custom `LookAndFeel` rather than styling controls individually.
   - Knobs, combo boxes, the table header, the file picker, and the on-screen
     keyboard must all take their appearance from it.
   - A control added later must inherit the theme by default; that is the test of
     whether this was done properly.
 
-- [ ] Sweep the inconsistencies the redesign exposes.
+  EVIDENCE (2026-08-23): `Juicy16::PluginLookAndFeel` is installed on the editor
+  — not with `setDefaultLookAndFeel`, which would reach every other plugin in the
+  host's process — and every child inherits it. It draws the rotary knobs
+  (including a bipolar mode for pan, signalled by a component property so pan
+  needs no subclass), combo boxes, buttons, the table header, and the slider
+  value readouts, and it maps 60-odd stock JUCE ColourIds onto the palette so a
+  control nobody styled by hand still lands in it. `FilePickerLookAndFeel` now
+  derives from it rather than `LookAndFeel_V4`, so overriding the browse button
+  no longer opts that one control out of the theme.
+
+  The "inherit by default" claim needed real work rather than an assertion:
+  `TableListBox` constructs a cell component before parenting it, so a control
+  built in a cell's constructor resolves the DEFAULT LookAndFeel and caches its
+  colours from it. That is why the row value readouts first rendered with a stock
+  outline box around them. `ChannelListComponent::ThemedCell` re-sends the
+  look-and-feel change on reparent, and all three cell types inherit it, so a
+  cell type added later inherits the theme without knowing why.
+
+- [x] Sweep the inconsistencies the redesign exposes.
   - Spacing and padding come from `GuiConstants`, not from local literals.
   - Capitalisation, label style, and value formatting agree across the window.
   - The file picker row, status bar, and keyboard sit in a deliberate hierarchy
     rather than at whatever size they inherited.
+
+  EVIDENCE (2026-08-23): `GuiConstants` now carries the whole layout — a spacing
+  scale, a type scale, and every strip and column width — and `resized()` in all
+  three components lays out from those tokens with no local literals. The file
+  picker sits in a 38px header beside the logo and a settings button; the status
+  bar is a 22px strip on the panel background; the keyboard is 66px. Column
+  headers are drawn by the LookAndFeel and each aligns over its own column's
+  content, which the rack states as a property rather than the theme guessing.
+
+- [x] The settings popover from the approved design.
+
+  Not in the original task list; part of the layout the owner approved. A gear in
+  the header opens a `CallOutBox` carrying the accent choice (sage, amber,
+  terracotta, neutral — each button painted in its own hue, so the swatch IS the
+  button) and the engine facts worth quoting in a bug report: version, FluidSynth
+  version, plugin format, and sample rate. The accent persists in `uiState` and
+  re-themes the whole window live; verified by switching to amber and confirming
+  every knob arc and the selected-row marker follow.
+
+  It exists so later settings have somewhere to land instead of being bolted onto
+  the header one at a time.
 
 ## 9.4 Do not regress what is already proven
 
 The accessibility and keyboard work in 8.6 is complete and evidenced. A redesign
 is exactly the change that silently undoes it.
 
-- [ ] Every new control carries an accessible name, title, description, and role.
-- [ ] Keyboard operation still reaches every control, and the on-screen keyboard
+- [x] Every new control carries an accessible name, title, description, and role.
+- [x] Keyboard operation still reaches every control, and the on-screen keyboard
       still declines focus so it cannot swallow typed input.
-- [ ] Arrow-key channel selection and Return-to-open-instrument still work, on
+- [x] Arrow-key channel selection and Return-to-open-instrument still work, on
       all 16 rows including rows scrolled out of view at minimum height.
-- [ ] The headless editor suite is extended to the new controls in the same
+- [x] The headless editor suite is extended to the new controls in the same
       change, not afterwards.
-- [ ] Host-provided scaling still measures correctly through `IPlugView`.
+- [x] Host-provided scaling still measures correctly through `IPlugView`.
+
+EVIDENCE (2026-08-23): a new assertion walks all 16 rows on the built editor,
+scrolling each into view first — which is itself the proof that every row is
+reachable — and requires each row's volume, pan, mute, solo, and instrument to be
+accessible, titled, described, and focusable. The 8.6 assertions are unchanged in
+intent and still pass: the editor and rack take focus while the on-screen
+keyboard declines it, arrow keys drive the selected channel, Return resolves to
+every row's populated dropdown including rows offscreen at minimum height, and
+minimum/default/maximum sizes keep the essential controls usable. The names they
+check moved with the redesign — the three shared sliders became per-row controls
+plus one master trim — so the assertions name what exists rather than what did.
+`IPlugViewContentScaleSupport` is re-measured by `vst3_smoke`, which passes.
 
 ### Acceptance criteria
 
-- [ ] All 16 channels' instrument, volume, and pan are readable without
+- [x] All 16 channels' instrument, volume, and pan are readable without
       selecting a row or resizing the window.
-- [ ] No clipped label or value at any supported window size.
-- [ ] No component draws a colour that did not come from the palette.
-- [ ] The editor suite covers the new controls, and 8.6's assertions still pass
+- [x] No clipped label or value at any supported window size.
+- [x] No component draws a colour that did not come from the palette.
+- [x] The editor suite covers the new controls, and 8.6's assertions still pass
       unchanged in intent.
-- [ ] Saved UI state (window size, selected channel) still round-trips.
+- [x] Saved UI state (window size, selected channel) still round-trips.
+
+Two clipping defects were found by looking at the running plugin rather than by
+reading the layout, and both are fixed: the row value readout was 22px, so a
+volume of 100 rendered as "...", and the bank summary's second line was cut by
+the panel's bottom edge. The window at minimum width, at default size, and at
+1000px was inspected in the Standalone with a real bank loaded.
 
 ## Phase 9 exit criteria
 
 - [ ] The owner has approved the implemented interface against the chosen mockup.
-- [ ] Accessibility, keyboard, and scaling evidence is regenerated, not inherited.
-- [ ] `docs/BETA_TESTER_GUIDE.md` screenshots and instructions match the shipped
+- [x] Accessibility, keyboard, and scaling evidence is regenerated, not inherited.
+- [x] `docs/BETA_TESTER_GUIDE.md` screenshots and instructions match the shipped
       interface.
+
+  EVIDENCE (2026-08-23): the guide now opens with a description of the rack, the
+  panel, and the header, states which controls the MIDI file overrides and which
+  it cannot touch, and its keyboard section names the controls that exist. It
+  carries no screenshots to update — the guide has always been text — so nothing
+  is left stale by the redesign.
 
 ---
 

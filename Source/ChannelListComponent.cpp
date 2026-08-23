@@ -1,11 +1,20 @@
 //
-// 16-channel instrument list (Fruity LSD-style), with a per-row patch dropdown.
+// The 16-channel rack: one row per MIDI channel, each owning that channel's
+// mute, solo, instrument, volume and pan.
 //
 
 #include "ChannelListComponent.h"
-#include "MyColours.h"
+#include "Theme.h"
 
 using namespace std;
+
+namespace {
+// Names read by screen readers and shown as tooltips. Built per row rather than
+// stored, because a cell component is recycled across rows as the table scrolls.
+String channelPrefix(int row) {
+    return String{"MIDI channel "} + String(row + 1);
+}
+} // namespace
 
 //==============================================================================
 // PatchCell: a ComboBox bound to one MIDI channel (table row).
@@ -13,7 +22,6 @@ using namespace std;
 ChannelListComponent::PatchCell::PatchCell(ChannelListComponent& ownerRef)
 : owner{ownerRef}
 {
-    combo.setColour(juce::ComboBox::outlineColourId, juce::Colours::transparentBlack);
     addAndMakeVisible(combo);
     // user picked a patch for this channel
     combo.onChange = [this] {
@@ -23,8 +31,7 @@ ChannelListComponent::PatchCell::PatchCell(ChannelListComponent& ownerRef)
 
 void ChannelListComponent::PatchCell::setRow(int newRow) {
     row = newRow;
-    const String accessibleName{
-        String{"MIDI channel "} + String(row + 1) + " instrument"};
+    const String accessibleName{channelPrefix(row) + " instrument"};
     combo.setName(accessibleName);
     combo.setTitle(accessibleName);
     combo.setDescription(String{"Bank and preset selection for "} + accessibleName);
@@ -62,7 +69,114 @@ void ChannelListComponent::PatchCell::setRow(int newRow) {
 }
 
 void ChannelListComponent::PatchCell::resized() {
-    combo.setBounds(getLocalBounds().reduced(1));
+    combo.setBounds(getLocalBounds().reduced(0, 2));
+}
+
+//==============================================================================
+// MuteSoloCell: this channel's mute and solo, bound to muteChN and soloChN.
+//==============================================================================
+ChannelListComponent::MuteSoloCell::MuteSoloCell(ChannelListComponent& ownerRef)
+: owner{ownerRef}
+{
+    for (auto* button : {&mute, &solo}) {
+        button->setClickingTogglesState(true);
+        button->setWantsKeyboardFocus(true);
+        button->setConnectedEdges(0);
+        addAndMakeVisible(*button);
+    }
+    // A lit mute and a lit solo must not look alike at a glance. Solo takes the
+    // accent; mute takes the primary text colour, which is the only other fill
+    // in the palette bright enough to read as "on".
+    solo.setColour(juce::TextButton::buttonOnColourId,
+                   findColour(Juicy16::accentColourId));
+    mute.setColour(juce::TextButton::buttonOnColourId,
+                   findColour(Juicy16::textPrimaryColourId));
+}
+
+void ChannelListComponent::MuteSoloCell::setRow(int newRow) {
+    if (row == newRow)
+        return; // recycled onto the same channel: the attachments already fit
+    row = newRow;
+
+    const String prefix{channelPrefix(row)};
+    mute.setName(prefix + " mute");
+    mute.setTitle(prefix + " mute");
+    mute.setDescription(String{"Mute "} + prefix);
+    mute.setHelpText(
+        "Silences this channel's new notes. Not a MIDI controller: nothing in a MIDI file changes it.");
+    mute.setTooltip(mute.getHelpText());
+    solo.setName(prefix + " solo");
+    solo.setTitle(prefix + " solo");
+    solo.setDescription(String{"Solo "} + prefix);
+    solo.setHelpText(
+        "While any channel is soloed, every channel that is not soloed is silenced.");
+    solo.setTooltip(solo.getHelpText());
+
+    // Rebuild rather than retarget: an attachment binds one parameter for life.
+    muteAttachment.reset();
+    soloAttachment.reset();
+    muteAttachment = make_unique<AudioProcessorValueTreeState::ButtonAttachment>(
+        owner.valueTreeState, "muteCh" + String(row + 1), mute);
+    soloAttachment = make_unique<AudioProcessorValueTreeState::ButtonAttachment>(
+        owner.valueTreeState, "soloCh" + String(row + 1), solo);
+}
+
+void ChannelListComponent::MuteSoloCell::resized() {
+    Rectangle<int> r{getLocalBounds().reduced(0, 5)};
+    const int width{(r.getWidth() - 4) / 2};
+    mute.setBounds(r.removeFromLeft(width));
+    solo.setBounds(r.removeFromRight(width));
+}
+
+//==============================================================================
+// MixerCell: one channel's volume or pan knob, bound to volChN / panChN.
+//==============================================================================
+ChannelListComponent::MixerCell::MixerCell(ChannelListComponent& ownerRef, int column)
+: owner{ownerRef}
+, columnId{column}
+{
+    knob.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    // The value box is the readout in the approved layout; editable, so a value
+    // can be typed rather than only dragged.
+    knob.setTextBoxStyle(juce::Slider::TextBoxRight, false,
+                         GuiConstants::rowValueWidth, GuiConstants::rowKnobSize);
+    knob.setRange(MidiConstants::midiMinValue, MidiConstants::midiMaxValue, 1);
+    // Pan is bipolar: the accent arc grows outward from centre, so "centred"
+    // reads as no fill. See Juicy16::LookAndFeel::drawRotarySlider.
+    knob.getProperties().set("bipolar", columnId == panColumn);
+    // JUCE sliders decline keyboard focus by default, which would leave the
+    // rack mouse-only. A focused slider handles arrow keys.
+    knob.setWantsKeyboardFocus(true);
+    addAndMakeVisible(knob);
+}
+
+void ChannelListComponent::MixerCell::setRow(int newRow) {
+    if (row == newRow)
+        return;
+    row = newRow;
+
+    const bool isVolume{columnId == volumeColumn};
+    const String prefix{channelPrefix(row)};
+    const String name{prefix + (isVolume ? " volume" : " pan")};
+    knob.setName(name);
+    knob.setTitle(name);
+    knob.setDescription(name);
+    knob.setHelpText(isVolume
+        ? "Volume (CC7) for this channel. Default 100. Incoming CC7 on this "
+          "channel replaces this value."
+        : "Pan (CC10) for this channel. 64 is centre, 0 is hard left, 127 is "
+          "hard right. Incoming CC10 on this channel replaces this value.");
+    knob.setTooltip(knob.getHelpText());
+
+    attachment.reset();
+    attachment = make_unique<AudioProcessorValueTreeState::SliderAttachment>(
+        owner.valueTreeState,
+        (isVolume ? "volCh" : "panCh") + String(row + 1),
+        knob);
+}
+
+void ChannelListComponent::MixerCell::resized() {
+    knob.setBounds(getLocalBounds().reduced(2, 3));
 }
 
 //==============================================================================
@@ -72,50 +186,56 @@ ChannelListComponent::ChannelListComponent(
 )
 : valueTreeState{state}
 , fluidSynthModel{model}
-, font{juce::FontOptions{14.0f}}
+, font{juce::FontOptions{GuiConstants::bodyFontHeight}}
 {
     rebuildPatchList();
 
-    setName("MIDI channel instrument list");
-    setTitle("MIDI channel instrument list");
-    setDescription("Sixteen MIDI channels with independent bank and preset assignments");
+    setName("MIDI channel rack");
+    setTitle("MIDI channel rack");
+    setDescription(
+        "Sixteen MIDI channels, each with its own mute, solo, instrument, volume and pan");
 
     addAndMakeVisible(table);
     table.setModel(this);
     table.setName("MIDI channel assignments");
     table.setTitle("MIDI channel assignments");
-    table.setDescription("Select a row to edit that MIDI channel's sound controls");
+    table.setDescription("Select a row to audition that MIDI channel on the keyboard");
     table.setHelpText(
         "Up and down arrows select a MIDI channel; Return opens that channel's instrument list.");
 
-    table.setColour(ListBox::outlineColourId, juce::Colours::grey);
-    table.setOutlineThickness(1);
-    // GuiConstants::defaultHeight assumes this row height + the header's default
-    // height (28px, JUCE's TableListBox built-in default, not set here) — keep in
-    // sync if this changes.
+    table.setOutlineThickness(0);
+    // GuiConstants::defaultHeight is derived from these two, so a change here
+    // moves the default window height with it.
     table.setRowHeight(GuiConstants::channelRowHeight);
+    table.setHeaderHeight(GuiConstants::channelHeaderHeight);
 
-    int columnIx = 1;
-    table.getHeader().addColumn(
-        String("Ch"),
-        columnIx++,
-        32,  // width
-        32,  // min
-        32,  // max
-        TableHeaderComponent::notSortable);
-    table.getHeader().addColumn(
-        String("Instrument"),
-        columnIx++,
-        200, // width
-        80,  // min
-        600, // max
-        TableHeaderComponent::notSortable);
+    const auto addColumn = [this](const String& name, int id, int width, bool fixed,
+                                  Justification justification) {
+        table.getHeader().addColumn(
+            name, id, width,
+            fixed ? width : GuiConstants::minInstrumentWidth,
+            fixed ? width : -1,
+            TableHeaderComponent::notSortable);
+        // Each header aligns over its own column's content; the LookAndFeel draws
+        // it, so the rack states the alignment rather than the theme guessing.
+        if (name.isNotEmpty())
+            table.getHeader().getProperties().set(
+                "headerJustification" + name, justification.getFlags());
+    };
+    addColumn("Ch",         channelColumn,    GuiConstants::channelNumberWidth, true,
+              Justification::centredRight);
+    addColumn({},           muteSoloColumn,   GuiConstants::muteSoloWidth,      true,
+              Justification::centredLeft);
+    addColumn("Instrument", instrumentColumn, GuiConstants::minInstrumentWidth, false,
+              Justification::centredLeft);
+    addColumn("Vol",        volumeColumn,     GuiConstants::mixerCellWidth,     true,
+              Justification::centred);
+    addColumn("Pan",        panColumn,        GuiConstants::mixerCellWidth,     true,
+              Justification::centred);
 
-    // Keyboard-reachable. This was previously false, justified as stopping arrow
-    // keys from fighting row selection the plugin drives from MIDI - but nothing
-    // does: selectChannelForEditing has one caller, a mouse click, and incoming
-    // MIDI changes a channel's program rather than which row is selected. So the
-    // table can take focus, and channel selection works without a mouse.
+    // Keyboard-reachable: arrow keys move the selection, Return opens the
+    // selected row's instrument list. Nothing drives row selection from MIDI, so
+    // there is no selection for the keyboard to fight.
     table.setWantsKeyboardFocus(true);
     table.setMultipleSelectionEnabled(false);
 
@@ -159,35 +279,26 @@ int ChannelListComponent::getSelectedChannelIndex() const {
         .getProperty("selectedChannel", 1)) - 1;
 }
 
-String ChannelListComponent::getInstrumentName(int bankNum, int presetNum) const {
-    ValueTree banks{valueTreeState.state.getChildWithName("banks")};
-    ValueTree bank{banks.getChildWithProperty("num", bankNum)};
-    if (bank.isValid()) {
-        ValueTree preset{bank.getChildWithProperty("num", presetNum)};
-        if (preset.isValid())
-            return preset.getProperty("name").toString();
-    }
-    // fallback when the saved program isn't present in the loaded font
-    return String(bankNum) + "/" + String(presetNum);
-}
-
 void ChannelListComponent::paintRowBackground(
     Graphics& g,
     int rowNumber,
-    int /*width*/,
-    int /*height*/,
+    int width,
+    int height,
     bool /*rowIsSelected*/
 ) {
-    const Colour alternateColour(getLookAndFeel().findColour(ListBox::backgroundColourId)
-        .interpolatedWith(getLookAndFeel().findColour(ListBox::textColourId), 0.03f));
-    if (rowNumber == getSelectedChannelIndex())
-        // The scheme's selection fill is designed to pair with its highlighted
-        // text; a fixed pale blue left near-white row text at 1.5:1.
-        g.fillAll(MyColours::getUIColourIfAvailable(
-            LookAndFeel_V4::ColourScheme::UIColour::highlightedFill,
-            juce::Colours::steelblue));
+    auto& lookAndFeel{getLookAndFeel()};
+    const bool selected{rowNumber == getSelectedChannelIndex()};
+    if (selected)
+        g.fillAll(lookAndFeel.findColour(Juicy16::rowSelectedColourId));
     else if (rowNumber % 2)
-        g.fillAll(alternateColour);
+        g.fillAll(lookAndFeel.findColour(Juicy16::rowAlternateColourId));
+    if (selected) {
+        // A 2px accent marker rather than a wash of colour, so the row text keeps
+        // its contrast and the selection reads at a glance.
+        g.setColour(lookAndFeel.findColour(Juicy16::accentColourId));
+        g.fillRect(0, 0, 2, height);
+    }
+    juce::ignoreUnused(width);
 }
 
 void ChannelListComponent::paintCell(
@@ -198,23 +309,18 @@ void ChannelListComponent::paintCell(
     int height,
     bool /*rowIsSelected*/
 ) {
-    if (rowNumber < 0 || rowNumber >= numChannels)
-        return;
+    if (rowNumber < 0 || rowNumber >= numChannels || columnId != channelColumn)
+        return; // every other column is drawn by its own control
 
-    // column 2 (Instrument) is drawn by its PatchCell ComboBox
-    if (columnId == 1) {
-        g.setColour(rowNumber == getSelectedChannelIndex()
-            ? MyColours::getUIColourIfAvailable(
-                LookAndFeel_V4::ColourScheme::UIColour::highlightedText,
-                juce::Colours::white)
-            : getLookAndFeel().findColour(ListBox::textColourId));
-        g.setFont(font);
-        // channel number, displayed 1-indexed
-        g.drawText(String(rowNumber + 1), 2, 0, width - 4, height,
-                   Justification::centredRight, true);
-        g.setColour(getLookAndFeel().findColour(ListBox::backgroundColourId));
-        g.fillRect(width - 1, 0, 1, height);
-    }
+    auto& lookAndFeel{getLookAndFeel()};
+    g.setColour(lookAndFeel.findColour(rowNumber == getSelectedChannelIndex()
+        ? Juicy16::textPrimaryColourId
+        : Juicy16::textValueColourId));
+    g.setFont(font);
+    // channel number, displayed 1-indexed
+    g.drawText(String(rowNumber + 1),
+               0, 0, width - GuiConstants::innerPadding, height,
+               Justification::centredRight, true);
 }
 
 Component* ChannelListComponent::refreshComponentForCell(
@@ -223,8 +329,8 @@ Component* ChannelListComponent::refreshComponentForCell(
     bool /*isRowSelected*/,
     Component* existingComponentToUpdate
 ) {
-    if (columnId != 2) {
-        // only the Instrument column owns a custom component
+    if (columnId == channelColumn) {
+        // painted, not a control
         jassert(existingComponentToUpdate == nullptr);
         return nullptr;
     }
@@ -232,11 +338,34 @@ Component* ChannelListComponent::refreshComponentForCell(
         delete existingComponentToUpdate;
         return nullptr;
     }
-    auto* cell{static_cast<PatchCell*>(existingComponentToUpdate)};
-    if (cell == nullptr)
-        cell = new PatchCell(*this);
-    cell->setRow(rowNumber);
-    return cell;
+    switch (columnId) {
+        case muteSoloColumn: {
+            auto* cell{static_cast<MuteSoloCell*>(existingComponentToUpdate)};
+            if (cell == nullptr)
+                cell = new MuteSoloCell(*this);
+            cell->setRow(rowNumber);
+            return cell;
+        }
+        case instrumentColumn: {
+            auto* cell{static_cast<PatchCell*>(existingComponentToUpdate)};
+            if (cell == nullptr)
+                cell = new PatchCell(*this);
+            cell->setRow(rowNumber);
+            return cell;
+        }
+        case volumeColumn:
+        case panColumn: {
+            auto* cell{static_cast<MixerCell*>(existingComponentToUpdate)};
+            if (cell == nullptr)
+                cell = new MixerCell(*this, columnId);
+            cell->setRow(rowNumber);
+            return cell;
+        }
+        default:
+            break;
+    }
+    delete existingComponentToUpdate;
+    return nullptr;
 }
 
 void ChannelListComponent::cellClicked(int rowNumber, int /*columnId*/, const juce::MouseEvent&) {
@@ -256,7 +385,7 @@ juce::ComboBox* ChannelListComponent::patchComboForRow(int row) {
         return nullptr;
     // A row that is scrolled out of view has no cell component yet.
     table.scrollToEnsureRowIsOnscreen(row);
-    auto* cell{dynamic_cast<PatchCell*>(table.getCellComponent(2, row))};
+    auto* cell{dynamic_cast<PatchCell*>(table.getCellComponent(instrumentColumn, row))};
     return cell == nullptr ? nullptr : &cell->getCombo();
 }
 
@@ -278,24 +407,40 @@ void ChannelListComponent::syncTableSelectionFromState() {
 
 void ChannelListComponent::valueTreePropertyChanged(
     ValueTree& treeWhosePropertyHasChanged,
-    const Identifier& /*property*/) {
+    const Identifier& property) {
     const Identifier type{treeWhosePropertyHasChanged.getType()};
     if (type == StringRef("banks")) {
         // a font (re)loaded: rebuild the shared patch list, then refresh every
         // row's dropdown items + selection.
         rebuildPatchList();
         table.updateContent();
-    } else if (type == StringRef("ch") || type == StringRef("uiState")) {
-        // a channel's program changed (manual or via MIDI), or the selection
-        // moved: refresh dropdown selections + the selected-row highlight.
-        table.updateContent();
-        if (type == StringRef("uiState"))
-            syncTableSelectionFromState();
+    } else if (type == StringRef("ch")) {
+        // Only a program change needs the dropdowns rebuilt. Volume, pan, mute
+        // and solo reach their controls through parameter attachments, and a
+        // game rip streams CC7/CC10 continuously - rebuilding the table on every
+        // one of those would rebuild every visible cell for nothing.
+        if (property == StringRef("bank") || property == StringRef("preset"))
+            table.updateContent();
+    } else if (type == StringRef("uiState")
+               && property == StringRef("selectedChannel")) {
+        // the selection marker is a paint concern, not a content one
+        table.repaint();
+        syncTableSelectionFromState();
     }
+}
+
+int ChannelListComponent::instrumentColumnWidth() const {
+    // Everything the fixed columns leave behind. Nothing is clamped away, so no
+    // visible region belongs to no control.
+    return juce::jmax(
+        GuiConstants::minInstrumentWidth,
+        getWidth()
+            - GuiConstants::channelNumberWidth
+            - GuiConstants::muteSoloWidth
+            - 2 * GuiConstants::mixerCellWidth);
 }
 
 void ChannelListComponent::resized() {
     table.setBoundsInset(BorderSize<int>(0));
-    // give the instrument column whatever width is left after the fixed Ch column
-    table.getHeader().setColumnWidth(2, jmax(120, getWidth() - 32 - 4));
+    table.getHeader().setColumnWidth(instrumentColumn, instrumentColumnWidth());
 }

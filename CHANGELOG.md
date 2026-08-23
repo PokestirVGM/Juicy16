@@ -1,5 +1,90 @@
 # Changelog
 
+## 0.5.1-alpha.7 — unreleased
+
+Phase 9 of the Beta 1 plan: the interface redesign the owner approved on
+2026-08-23, implemented.
+
+### Added
+
+- **Every channel row owns its own volume, pan, mute and solo.** The defect this
+  phase exists to fix was that volume and pan edited only the *selected* channel
+  — in a plugin whose whole purpose is 16 channels at once, 15 of them were
+  invisible at any moment. All 16 are now visible and editable without selecting
+  anything. Mute and solo were in the approved mockup but in no task; the owner
+  asked for them and they ship.
+- **Mute and solo are the plugin's own, not MIDI controllers.** Nothing in a MIDI
+  file changes them and no controller reset or GM/GS/XG reset SysEx clears them.
+  A silenced channel drops incoming note-ons but still receives note-offs,
+  controllers, program changes and bend, so the file's own volume survives being
+  muted and unmuting mid-song needs no resync. Muting a sounding channel sends it
+  All Notes Off, so held notes release naturally instead of ringing on or cutting
+  off with a click. While any channel is soloed, everything not soloed is
+  silenced and mute is irrelevant; clearing the last solo restores exactly the
+  mute picture that was there before.
+- **A settings popover** behind a gear in the header: the accent colour (sage,
+  amber, terracotta, neutral) and the engine facts worth quoting in a bug report.
+  It exists so later settings have somewhere to land instead of being bolted onto
+  the header one at a time.
+- **The Juicy16 wordmark is compiled into the plugin** as a binary resource and
+  drawn in the header at its own aspect ratio, in all three formats.
+
+### Changed
+
+- **One palette, one LookAndFeel.** The editor used stock `LookAndFeel_V4` dark
+  plus one-off literals — `Colours::grey` for the table outline, `salmon` and
+  `lightgrey` for status text — which is where the general inconsistency came
+  from. `Source/Theme.h` now declares the palette as named ColourIds and
+  `Source/Theme.cpp` is the only file that names a colour. Every control takes
+  its appearance from `Juicy16::PluginLookAndFeel`, installed on the editor
+  rather than globally so it cannot reach other plugins in the host's process.
+
+  The palette is measured, not asserted: a test walks every text token against
+  every background it can be drawn on, in all four accents, at the WCAG AA 4.5:1
+  threshold, and the accent against the 3:1 non-text threshold. The approved
+  mockup's decorative greys did not survive that and were corrected.
+- **Layout metrics are derived rather than typed in.** `GuiConstants` carries the
+  whole layout — a spacing scale, a type scale, and every strip and column width
+  — and the minimum and default window sizes are computed from the same terms
+  `resized()` lays out from. The minimum width moved from 500 to **617**, which
+  is the narrowest row that keeps every control usable plus the right-hand panel;
+  the default height is 564.
+- **`SlidersComponent` is deleted rather than reduced.** The master trim moved to
+  a 236px right-hand panel where its label and value fit — the old group box was
+  50px wide, so "Master" rendered as "M..." and the value as `0.0...`.
+  `TablesComponent` (a pass-through wrapper) and `MyColours` (whose only job was
+  reaching into the stock scheme) went with it.
+- **Parameter set: 21 to 83.** `volume` and `pan` are retired in favour of
+  `volCh1`-`volCh16` and `panCh1`-`panCh16`, plus `muteCh1`-`muteCh16` and
+  `soloCh1`-`soloCh16`. They are real host parameters rather than editor state,
+  so a host can automate any channel and a right-click on a knob offers the
+  host's own automation and controller-link menu.
+
+  None of the 64 is in a parameter group. JUCE derives a VST3 `unitId` from a
+  parameter's group and the vendored wrapper serves a fixed 17-unit structure
+  that hosts cache before the component connection exists — a group would have
+  published parameters pointing at an 18th unit the host was never told about.
+  Ungrouped, they report the root unit, and the 16 `progChN` ParamIDs and all 16
+  channel unit IDs are **unchanged**, so existing sessions' program automation is
+  intact. `vst3_smoke` asserts both halves.
+- **State schema 4 to 5.** A version 4 save is migrated from its per-channel
+  records rather than from the two retired parameters: `channelPrograms` already
+  stored every channel's volume and pan, so each channel's saved values become
+  that channel's own parameter and reach the engine as before. Mute and solo do
+  not exist in a version 4 save and arrive off. Pinned by a regression that
+  writes a version 4 envelope, reads it back, and asserts all 16 channels on both
+  the parameters and the engine.
+
+### Fixed
+
+- A row's value readout was 22px, so a volume of 100 rendered as "...". Found by
+  looking at the running plugin, not at the layout.
+- The bank summary's second line was cut off by the panel's bottom edge.
+- Incoming CC7/CC10 no longer rebuilds every visible table cell. A game rip
+  streams those continuously, and the rack previously called `updateContent()` on
+  each one; the row controls reach their values through parameter attachments, so
+  only a program change needs the dropdowns refreshed.
+
 ## 0.5.1-alpha.6 — unreleased
 
 The two defects the owner declined to ship as documented limitations on 2026-08-23. Both were deliberate behaviour with a written rationale; both rationales were wrong about what a tester experiences.

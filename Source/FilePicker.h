@@ -6,6 +6,7 @@
 
 #include "../JuceLibraryCode/JuceHeader.h"
 #include "FluidSynthModel.h"
+#include "Theme.h"
 
 #if JUCE_MAC || JUCE_IOS
 //   #include <CoreFoundation/CoreFoundation.h>
@@ -24,8 +25,10 @@ private:
 };
 
 // Scoped to just the FilePicker's FilenameComponent (via Component::setLookAndFeel),
-// so it doesn't affect the rest of the plugin's UI.
-class FilePickerLookAndFeel : public LookAndFeel_V4
+// so it doesn't affect the rest of the plugin's UI. Derives from the plugin's
+// own LookAndFeel, not LookAndFeel_V4: overriding the browse button must not
+// also opt this one control out of the palette.
+class FilePickerLookAndFeel : public Juicy16::PluginLookAndFeel
 {
 public:
     Button* createFilenameComponentBrowseButton(const String& text) override {

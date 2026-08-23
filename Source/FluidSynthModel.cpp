@@ -31,15 +31,18 @@ using namespace std;
 // Incoming MIDI stays authoritative exactly as it is for Bank Select and Program
 // Change: a value set in the editor is only a starting point, and the next
 // CC7/CC10 on that channel replaces it at that event's timestamp.
-const map<fluid_midi_control_change, String> FluidSynthModel::controllerToParam{
+// CC -> the property name it occupies in a channelPrograms/ch node. The
+// host-facing parameters are per channel ("volCh1".."panCh16"); these two names
+// are the tree's, and the two are bridged by mixerParamId below.
+const map<fluid_midi_control_change, String> FluidSynthModel::ccToChannelProperty{
     {VOLUME_MSB, "volume"}, // MIDI CC 7 Channel Volume
     {PAN_MSB, "pan"}};      // MIDI CC 10 Pan
 
-const map<String, fluid_midi_control_change> FluidSynthModel::paramToController{[]{
+const map<String, fluid_midi_control_change> FluidSynthModel::channelPropertyToCc{[]{
     map<String, fluid_midi_control_change> map;
     transform(
-        controllerToParam.begin(),
-        controllerToParam.end(),
+        ccToChannelProperty.begin(),
+        ccToChannelProperty.end(),
         inserter(map, map.begin()),
         [](const pair<fluid_midi_control_change, String>& pair) {
             return make_pair(pair.second, pair.first);
@@ -71,7 +74,7 @@ void FluidSynthModel::setOutputLevelDb(float decibels) {
 
 int FluidSynthModel::defaultParamValue(const String& parameterID) {
     // GM channel defaults, which are also FluidSynth's own channel initialisation
-    // values: volume 100, pan 64 (centre). bank/preset default to 0.
+    // values: volume 100, pan 64 (centre). bank/preset and mute/solo default to 0.
     if (parameterID == "volume")
         return MidiConstants::defaultChannelVolume;
     if (parameterID == "pan")
@@ -79,25 +82,62 @@ int FluidSynthModel::defaultParamValue(const String& parameterID) {
     return programChangeParams.contains(parameterID) ? 0 : 64;
 }
 
+String FluidSynthModel::mixerParamId(int ccIndex, int chZeroBased) {
+    jassert(ccIndex >= 0 && ccIndex < kNumMixerCcs);
+    return (ccIndexOrder[ccIndex] == VOLUME_MSB ? "volCh" : "panCh")
+        + String(chZeroBased + 1);
+}
+
+String FluidSynthModel::muteParamId(int chZeroBased) {
+    return "muteCh" + String(chZeroBased + 1);
+}
+
+String FluidSynthModel::soloParamId(int chZeroBased) {
+    return "soloCh" + String(chZeroBased + 1);
+}
+
+// Matches "<prefix><1..16>" without substring()/numeric conversion, because
+// parameterChanged may run on the audio thread and neither allocates there.
+int FluidSynthModel::channelSuffixOf(const String& parameterID,
+                                     const char* prefix,
+                                     int prefixLength) {
+    const int length{parameterID.length()};
+    if (length < prefixLength + 1 || length > prefixLength + 2
+        || !parameterID.startsWith(prefix))
+        return -1;
+    int oneBased{0};
+    if (length == prefixLength + 1
+        && parameterID[prefixLength] >= '1' && parameterID[prefixLength] <= '9') {
+        oneBased = static_cast<int>(parameterID[prefixLength] - '0');
+    } else if (length == prefixLength + 2
+               && parameterID[prefixLength] == '1'
+               && parameterID[prefixLength + 1] >= '0'
+               && parameterID[prefixLength + 1] <= '6') {
+        oneBased = 10 + static_cast<int>(parameterID[prefixLength + 1] - '0');
+    }
+    return oneBased > 0 ? oneBased - 1 : -1;
+}
+
+FluidSynthModel::ChannelParamKind FluidSynthModel::parseChannelParam(
+    const String& parameterID, int& chZeroBased) {
+    // Ordered by first character so a non-match costs one comparison.
+    if ((chZeroBased = channelSuffixOf(parameterID, "volCh", 5)) >= 0)
+        return ChannelParamKind::volume;
+    if ((chZeroBased = channelSuffixOf(parameterID, "panCh", 5)) >= 0)
+        return ChannelParamKind::pan;
+    if ((chZeroBased = channelSuffixOf(parameterID, "muteCh", 6)) >= 0)
+        return ChannelParamKind::mute;
+    if ((chZeroBased = channelSuffixOf(parameterID, "soloCh", 6)) >= 0)
+        return ChannelParamKind::solo;
+    return ChannelParamKind::none;
+}
+
 String FluidSynthModel::progParamId(int chZeroBased) {
     return "progCh" + String(chZeroBased + 1);
 }
 
 int FluidSynthModel::progParamChannel(const String& parameterID) {
-    if (!parameterID.startsWith("progCh"))
-        return -1;
-    // This parser runs from parameterChanged, which hosts may call on the audio
-    // thread. Avoid substring()/numeric String conversion and their temporary
-    // allocation for the fixed identifiers progCh1..progCh16.
-    const int length{parameterID.length()};
-    int oneBased{0};
-    if (length == 7 && parameterID[6] >= '1' && parameterID[6] <= '9') {
-        oneBased = static_cast<int>(parameterID[6] - '0');
-    } else if (length == 8 && parameterID[6] == '1'
-               && parameterID[7] >= '0' && parameterID[7] <= '6') {
-        oneBased = 10 + static_cast<int>(parameterID[7] - '0');
-    }
-    return oneBased > 0 ? oneBased - 1 : -1;
+    return channelSuffixOf(parameterID, "progCh", 6);
 }
 
 FluidSynthModel::FluidSynthModel(
@@ -132,18 +172,19 @@ FluidSynthModel::FluidSynthModel(
             // not a single shared constant: volume is 100 and pan is 64, and a
             // reset SysEx re-asserts whatever is stored here.
             engineCc[i][c].store(
-                defaultParamValue(controllerToParam.at(ccIndexOrder[c])),
+                defaultParamValue(ccToChannelProperty.at(ccIndexOrder[c])),
                 std::memory_order_relaxed);
         }
     }
     valueTreeState.addParameterListener("bank", this);
     valueTreeState.addParameterListener("preset", this);
     valueTreeState.addParameterListener("outputLevel", this);
-    for (const auto &[param, controller]: paramToController) {
-        valueTreeState.addParameterListener(param, this);
-    }
     for (int ch = 0; ch < kNumChannels; ch++) {
         valueTreeState.addParameterListener(progParamId(ch), this);
+        for (int idx = 0; idx < kNumMixerCcs; idx++)
+            valueTreeState.addParameterListener(mixerParamId(idx, ch), this);
+        valueTreeState.addParameterListener(muteParamId(ch), this);
+        valueTreeState.addParameterListener(soloParamId(ch), this);
     }
     valueTreeState.state.addListener(this);
 }
@@ -154,8 +195,11 @@ FluidSynthModel::~FluidSynthModel() {
     for (int ch = 0; ch < kNumChannels; ch++) {
         valueTreeState.removeParameterListener(progParamId(ch), this);
     }
-    for (const auto &[param, controller]: paramToController) {
-        valueTreeState.removeParameterListener(param, this);
+    for (int ch = 0; ch < kNumChannels; ch++) {
+        for (int idx = 0; idx < kNumMixerCcs; idx++)
+            valueTreeState.removeParameterListener(mixerParamId(idx, ch), this);
+        valueTreeState.removeParameterListener(muteParamId(ch), this);
+        valueTreeState.removeParameterListener(soloParamId(ch), this);
     }
     valueTreeState.removeParameterListener("bank", this);
     valueTreeState.removeParameterListener("preset", this);
@@ -284,7 +328,7 @@ void FluidSynthModel::prepareToPlay(double sampleRate, int samplesPerBlock) {
 
 const StringArray FluidSynthModel::programChangeParams{"bank", "preset"};
 const StringArray FluidSynthModel::perChannelParams{
-    "bank", "preset", "volume", "pan"};
+    "bank", "preset", "volume", "pan", "mute", "solo"};
 
 void FluidSynthModel::syncProgParam(int ch, int preset) {
     juce::ScopedValueSetter<bool> guard{mirroringParameters, true};
@@ -377,15 +421,6 @@ void FluidSynthModel::syncAppliedProgramOnMessageThread(
     }
 }
 
-void FluidSynthModel::saveParamToChannel(const String& parameterID, int value) {
-    if (mirroringParameters)
-        return;
-    ValueTree chNode{valueTreeState.state.getChildWithName("channelPrograms")
-        .getChildWithProperty("num", static_cast<int>(channel.load(std::memory_order_relaxed)))};
-    if (chNode.isValid())
-        chNode.setProperty(parameterID, value, nullptr);
-}
-
 void FluidSynthModel::parameterChanged(const String& parameterID, float /*newValue*/) {
     // While loadingChannel is set, the params are being written to MIRROR state the
     // engine already has (channel switch, MIDI program-change sync, dropdown pick):
@@ -440,31 +475,107 @@ void FluidSynthModel::parameterChanged(const String& parameterID, float /*newVal
                 && onMessageThread)
                 syncAppliedProgramOnMessageThread(static_cast<int>(ch), applied);
         }
-    } else if (
-        // https://stackoverflow.com/a/55482091/5257399
-        auto it{paramToController.find(parameterID)};
-        it != end(paramToController)) {
-        RangedAudioParameter *param{valueTreeState.getParameter(parameterID)};
-        jassert(dynamic_cast<AudioParameterInt*>(param) != nullptr);
-        AudioParameterInt* castParam{dynamic_cast<AudioParameterInt*>(param)};
-        int value{castParam->get()};
-        int controllerNumber{static_cast<int>(it->second)};
-
-        const unsigned int ch{channel.load(std::memory_order_relaxed)};
-        if (ch >= static_cast<unsigned int>(kNumChannels))
-            return;
-        fluid_synth_cc(synth.get(), static_cast<int>(ch), controllerNumber, value);
-        if (const int idx{ccToIndex(controllerNumber)}; idx >= 0)
-            engineCc[ch][idx].store(value, std::memory_order_relaxed);
-        if (juce::MessageManager::existsAndIsCurrentThread()) {
-            saveParamToChannel(parameterID, value);
-        } else if (int idx{ccToIndex(controllerNumber)}; idx >= 0) {
-            // audio-thread automation: defer the tree write to handleAsyncUpdate
-            midiCcValue[ch][idx].store(value, std::memory_order_relaxed);
-            midiCcDirtyMask.fetch_or(1u << ch, std::memory_order_release);
-            triggerAsyncUpdate();
-        }
+        return;
     }
+    int paramChannel{-1};
+    switch (parseChannelParam(parameterID, paramChannel)) {
+        case ChannelParamKind::volume:
+        case ChannelParamKind::pan: {
+            // volChN / panChN: this row's knob, host automation, and an incoming
+            // CC7/CC10 on channel N all arrive here or in dispatchMidiEvent, and
+            // all end at the same place - the engine, the channelPrograms node,
+            // and the parameter. MIDI stays authoritative because its write
+            // happens last, at the event's own timestamp.
+            const int controllerNumber{static_cast<int>(
+                parameterID.startsWith("volCh") ? VOLUME_MSB : PAN_MSB)};
+            int value{0};
+            if (auto* p{dynamic_cast<AudioParameterInt*>(
+                    valueTreeState.getParameter(parameterID))})
+                value = p->get();
+            setChannelControllerValue(paramChannel, controllerNumber, value);
+            const int idx{ccToIndex(controllerNumber)};
+            if (idx < 0)
+                return;
+            if (juce::MessageManager::existsAndIsCurrentThread()) {
+                ValueTree chNode{valueTreeState.state.getChildWithName("channelPrograms")
+                    .getChildWithProperty("num", paramChannel)};
+                if (chNode.isValid())
+                    chNode.setProperty(
+                        ccToChannelProperty.at(ccIndexOrder[idx]), value, nullptr);
+            } else {
+                // audio-thread automation: defer the tree write to handleAsyncUpdate
+                midiCcValue[paramChannel][idx].store(value, std::memory_order_relaxed);
+                midiCcDirtyMask.fetch_or(1u << paramChannel, std::memory_order_release);
+                triggerAsyncUpdate();
+            }
+            return;
+        }
+        case ChannelParamKind::mute:
+        case ChannelParamKind::solo: {
+            const bool isMute{parameterID.startsWith("muteCh")};
+            bool engaged{false};
+            if (auto* p{dynamic_cast<juce::AudioParameterBool*>(
+                    valueTreeState.getParameter(parameterID))})
+                engaged = p->get();
+            std::atomic<unsigned int>& mask{isMute ? muteMask : soloMask};
+            const unsigned int bit{1u << paramChannel};
+            if (engaged)
+                mask.fetch_or(bit, std::memory_order_relaxed);
+            else
+                mask.fetch_and(~bit, std::memory_order_relaxed);
+            refreshSilencedMask();
+            if (juce::MessageManager::existsAndIsCurrentThread()) {
+                ValueTree chNode{valueTreeState.state.getChildWithName("channelPrograms")
+                    .getChildWithProperty("num", paramChannel)};
+                if (chNode.isValid())
+                    chNode.setProperty(isMute ? "mute" : "solo",
+                                       engaged ? 1 : 0, nullptr);
+            }
+            return;
+        }
+        case ChannelParamKind::none:
+            break;
+    }
+}
+
+void FluidSynthModel::syncMixerParamsFromState() {
+    ValueTree chPrograms{valueTreeState.state.getChildWithName("channelPrograms")};
+    unsigned int mutes{0};
+    unsigned int solos{0};
+    for (int ch = 0; ch < kNumChannels; ch++) {
+        ValueTree chNode{chPrograms.getChildWithProperty("num", ch)};
+        if (!chNode.isValid())
+            continue;
+        // Mirroring: the values are already in the tree, and the engine receives
+        // them when the font loads. Writing them back would be a no-op at best.
+        juce::ScopedValueSetter<bool> guard{mirroringParameters, true};
+        for (int idx = 0; idx < kNumMixerCcs; idx++) {
+            const String& property{ccToChannelProperty.at(ccIndexOrder[idx])};
+            const int value{juce::jlimit(
+                MidiConstants::midiMinValue, MidiConstants::midiMaxValue,
+                static_cast<int>(
+                    chNode.getProperty(property, defaultParamValue(property))))};
+            if (auto* p{dynamic_cast<AudioParameterInt*>(
+                    valueTreeState.getParameter(mixerParamId(idx, ch)))})
+                *p = value;
+            engineCc[ch][idx].store(value, std::memory_order_relaxed);
+        }
+        const bool muted{static_cast<int>(chNode.getProperty("mute", 0)) != 0};
+        const bool soloed{static_cast<int>(chNode.getProperty("solo", 0)) != 0};
+        if (muted)
+            mutes |= 1u << ch;
+        if (soloed)
+            solos |= 1u << ch;
+        if (auto* p{dynamic_cast<juce::AudioParameterBool*>(
+                valueTreeState.getParameter(muteParamId(ch)))})
+            *p = muted;
+        if (auto* p{dynamic_cast<juce::AudioParameterBool*>(
+                valueTreeState.getParameter(soloParamId(ch)))})
+            *p = soloed;
+    }
+    muteMask.store(mutes, std::memory_order_relaxed);
+    soloMask.store(solos, std::memory_order_relaxed);
+    refreshSilencedMask();
 }
 
 void FluidSynthModel::syncToSelectedChannel() {
@@ -511,7 +622,6 @@ void FluidSynthModel::handleAsyncUpdate() {
     const unsigned int ccMask{midiCcDirtyMask.exchange(0, std::memory_order_acquire)};
     if (pcMask == 0 && ccMask == 0)
         return;
-    const int selected{static_cast<int>(channel.load(std::memory_order_relaxed))};
     ValueTree chPrograms{valueTreeState.state.getChildWithName("channelPrograms")};
 
     if (pcMask != 0) {
@@ -533,15 +643,17 @@ void FluidSynthModel::handleAsyncUpdate() {
             const int value{midiCcValue[ch][idx].exchange(-1, std::memory_order_relaxed)};
             if (value < 0)
                 continue; // nothing pending for this CC
-            const String& paramID{controllerToParam.at(ccIndexOrder[idx])};
             if (chNode.isValid())
-                chNode.setProperty(paramID, value, nullptr);
-            // if this is the channel the user is viewing, move its slider too
-            if (ch == selected) {
-                juce::ScopedValueSetter<bool> guard{mirroringParameters, true};
-                if (auto* p{dynamic_cast<AudioParameterInt*>(valueTreeState.getParameter(paramID))})
-                    *p = value;
-            }
+                chNode.setProperty(
+                    ccToChannelProperty.at(ccIndexOrder[idx]), value, nullptr);
+            // Every channel has its own knob and its own parameter now, so an
+            // incoming CC moves that row whether or not it is the selected one.
+            // The guard stops the parameter write from being sent back to the
+            // engine, which already has this value from the MIDI event itself.
+            juce::ScopedValueSetter<bool> guard{mirroringParameters, true};
+            if (auto* p{dynamic_cast<AudioParameterInt*>(
+                    valueTreeState.getParameter(mixerParamId(idx, ch)))})
+                *p = value;
         }
     }
 }
@@ -553,12 +665,13 @@ void FluidSynthModel::loadSelectedChannel(int newChannel) {
         .getChildWithProperty("num", newChannel)};
     if (!chNode.isValid())
         return;
-    // push the saved values into the params; this drives the sliders and channel
-    // dropdowns to display the newly-selected channel. The guard makes
-    // parameterChanged skip both the engine re-send and the save-back — the engine
-    // already holds these values for this channel.
+    // Push the saved program into the shared bank/preset params so they describe
+    // the newly-selected channel. Volume, pan, mute, and solo no longer follow
+    // the selection: each channel owns its own parameter, and each row its own
+    // control. The guard makes parameterChanged skip both the engine re-send and
+    // the save-back - the engine already holds these values for this channel.
     juce::ScopedValueSetter<bool> guard{mirroringParameters, true};
-    for (const String& p : perChannelParams) {
+    for (const String& p : programChangeParams) {
         AudioParameterInt* param{dynamic_cast<AudioParameterInt*>(valueTreeState.getParameter(p))};
         if (param)
             *param = static_cast<int>(chNode.getProperty(p, defaultParamValue(p)));
@@ -653,6 +766,47 @@ void FluidSynthModel::setControllerValue(int controller, int value) {
     fluid_synth_cc(synth.get(), static_cast<int>(ch), controller, value);
     if (const int idx{ccToIndex(controller)}; idx >= 0)
         engineCc[ch][idx].store(value, std::memory_order_relaxed);
+}
+
+void FluidSynthModel::setChannelControllerValue(int channelToWrite, int controller, int value) {
+    if (channelToWrite < 0 || channelToWrite >= kNumChannels
+        || !juce::isPositiveAndBelow(controller, 128)
+        || !juce::isPositiveAndBelow(value, 128))
+        return;
+    fluid_synth_cc(synth.get(), channelToWrite, controller, value);
+    if (const int idx{ccToIndex(controller)}; idx >= 0)
+        engineCc[channelToWrite][idx].store(value, std::memory_order_relaxed);
+}
+
+unsigned int FluidSynthModel::deriveSilencedMask(unsigned int mutes, unsigned int solos) {
+    // Solo wins: while anything is soloed, mute is irrelevant and everything
+    // else is silenced. This is the mixer convention, and it means clearing the
+    // last solo restores exactly the mute picture the user left behind.
+    constexpr unsigned int all{(1u << kNumChannels) - 1u};
+    return solos != 0 ? (~solos & all) : (mutes & all);
+}
+
+void FluidSynthModel::refreshSilencedMask() {
+    const unsigned int updated{deriveSilencedMask(
+        muteMask.load(std::memory_order_relaxed),
+        soloMask.load(std::memory_order_relaxed))};
+    const unsigned int previous{silencedMask.exchange(updated, std::memory_order_release)};
+    // All-notes-off, not all-sound-off: the envelopes release naturally, so
+    // muting a sustained pad does not click. Note-offs are never dropped, so a
+    // channel unmuted later is not left with stuck state either.
+    for (int ch = 0; ch < kNumChannels; ++ch)
+        if ((updated & ~previous & (1u << ch)) != 0)
+            fluid_synth_all_notes_off(synth.get(), ch);
+}
+
+bool FluidSynthModel::isChannelSilenced(int channelToRead) const {
+    if (channelToRead < 0 || channelToRead >= kNumChannels)
+        return false;
+    return (silencedMask.load(std::memory_order_acquire) & (1u << channelToRead)) != 0;
+}
+
+unsigned int FluidSynthModel::getSilencedMask() const {
+    return silencedMask.load(std::memory_order_acquire);
 }
 
 bool FluidSynthModel::getControllerValue(int channelToRead, int controller, int& value) const {
@@ -1080,7 +1234,7 @@ void FluidSynthModel::refreshBanks() {
                 continue;
             syncAppliedProgramOnMessageThread(chNum, applied);
             // re-apply this channel's saved envelope/filter sliders (64 = neutral)
-            for (const auto& [paramID, cc] : paramToController) {
+            for (const auto& [paramID, cc] : channelPropertyToCc) {
                 fluid_synth_cc(
                     synth.get(),
                     chNum,
@@ -1263,6 +1417,12 @@ void FluidSynthModel::dispatchMidiEvent(const MidiMessage& m, int samplePosition
             return;
         const int midiCh{channelIndex};
         if (m.isNoteOn()) {
+            // Muted, or not soloed while something else is. Drop the note-on and
+            // do not record it in the trace: no note sounded. Note-offs, CCs,
+            // program changes, and bend still pass through below, so the channel
+            // stays in step and unmuting mid-song needs no resync.
+            if ((silencedMask.load(std::memory_order_acquire) & (1u << midiCh)) != 0)
+                return;
             // Fixed-size diagnostic trace: capture the already-maintained engine
             // snapshot immediately before dispatch. This lets the conformance
             // suite prove reset/Program Change ordering at the sounding note.

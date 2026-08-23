@@ -1,7 +1,13 @@
 //
-// 16-channel instrument list (Fruity LSD-style). Each row is a MIDI channel;
-// each row carries its own "Patch Selection" dropdown that assigns an instrument
-// to that channel. Incoming MIDI program changes update the dropdown in place.
+// The 16-channel rack. Each row is a MIDI channel and owns everything that
+// belongs to that channel: mute and solo, its instrument dropdown, and its
+// volume and pan knobs. Nothing here requires selecting a row first - that was
+// the defect Phase 9 exists to fix.
+//
+// Every control is bound to a real plugin parameter (muteChN, soloChN, progChN
+// via the dropdown, volChN, panChN), so host automation, incoming MIDI, and the
+// user's mouse all move the same thing, and a host's right-click automation menu
+// works on the knobs.
 //
 
 #pragma once
@@ -10,6 +16,7 @@
 #include "FluidSynthModel.h"
 #include "PatchList.h"
 #include "GuiConstants.h"
+#include <memory>
 #include <vector>
 
 using namespace std;
@@ -18,6 +25,15 @@ class ChannelListComponent : public Component,
                              public TableListBoxModel,
                              public ValueTree::Listener {
 public:
+    // Column ids, in the row's left-to-right order.
+    enum ColumnId {
+        channelColumn = 1,
+        muteSoloColumn,
+        instrumentColumn,
+        volumeColumn,
+        panColumn,
+    };
+
     ChannelListComponent(
         AudioProcessorValueTreeState& valueTreeState,
         FluidSynthModel& fluidSynthModel
@@ -42,7 +58,7 @@ public:
         bool rowIsSelected
     ) override;
 
-    // the Instrument column hosts a live ComboBox per row
+    // the instrument, mute/solo, volume and pan columns each host live controls
     Component* refreshComponentForCell(
         int rowNumber,
         int columnId,
@@ -76,8 +92,19 @@ public:
     void valueTreeRedirected(ValueTree&) override {}
 
 private:
+    // TableListBox creates a cell component before handing it to the table, so a
+    // control built in a cell's constructor resolves the DEFAULT LookAndFeel and
+    // caches its colours from it - the theme is only reachable once the cell is
+    // parented. Re-sending the change on reparent is what makes a cell inherit
+    // the palette, and it is inherited by every cell type below rather than
+    // remembered per control.
+    class ThemedCell : public Component {
+    public:
+        void parentHierarchyChanged() override { sendLookAndFeelChange(); }
+    };
+
     // one cell's patch dropdown, bound to a MIDI channel (row)
-    class PatchCell : public Component {
+    class PatchCell : public ThemedCell {
     public:
         explicit PatchCell(ChannelListComponent& owner);
         void setRow(int newRow);
@@ -90,6 +117,35 @@ private:
         int cellListVersion{-1};
     };
 
+    // Mute and solo for one channel, each attached to its own bool parameter.
+    class MuteSoloCell : public ThemedCell {
+    public:
+        explicit MuteSoloCell(ChannelListComponent& owner);
+        void setRow(int newRow);
+        void resized() override;
+    private:
+        ChannelListComponent& owner;
+        juce::TextButton mute{"M"};
+        juce::TextButton solo{"S"};
+        unique_ptr<AudioProcessorValueTreeState::ButtonAttachment> muteAttachment;
+        unique_ptr<AudioProcessorValueTreeState::ButtonAttachment> soloAttachment;
+        int row{-1};
+    };
+
+    // A volume or pan knob for one channel, attached to volChN / panChN.
+    class MixerCell : public ThemedCell {
+    public:
+        MixerCell(ChannelListComponent& owner, int columnId);
+        void setRow(int newRow);
+        void resized() override;
+    private:
+        ChannelListComponent& owner;
+        int columnId;
+        juce::Slider knob;
+        unique_ptr<AudioProcessorValueTreeState::SliderAttachment> attachment;
+        int row{-1};
+    };
+
     static constexpr int numChannels{16};
 
     // uiState.selectedChannel remains the single source of truth for which
@@ -99,7 +155,9 @@ private:
     void syncTableSelectionFromState();
 
     int getSelectedChannelIndex() const; // 0-indexed
-    String getInstrumentName(int bankNum, int presetNum) const;
+    // Width the instrument column should take: everything the fixed columns
+    // leave behind. No visible region belongs to no control.
+    int instrumentColumnWidth() const;
 
     void rebuildPatchList();
     int patchIndexFor(int bank, int preset) const; // -1 if absent from font

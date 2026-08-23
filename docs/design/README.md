@@ -4,6 +4,11 @@ The approved Beta 1 interface direction, as reviewed and chosen by the owner on
 2026-08-23. Phase 9 of [MILESTONE_PLAN.md](../../MILESTONE_PLAN.md) implements
 what is here; nothing in this directory ships in the plugin.
 
+**Status: implemented in 0.5.1-alpha.7.** Where the built interface departs from
+these mockups, the departures are listed at the foot of this file — the mockups
+are kept as drawn rather than retouched, so the record of what was approved
+stays intact.
+
 Live canvas: <https://claude.ai/code/artifact/c86db4a3-8c21-487d-93ec-d02f86605bc3>
 
 ## Files
@@ -55,3 +60,31 @@ read it, or edit and re-publish the whole set to the canvas above.
 - Metrics here match the current source (24px rows became 26px, 28px header,
   32px channel column). Anything that changes them changes
   `GuiConstants::defaultHeight`, which is derived rather than typed in.
+
+## Where the build departs from the mockup
+
+Recorded rather than quietly absorbed, so a later reader can tell a deliberate
+change from drift.
+
+- **Palette contrast.** The mockup's decorative greys do not meet WCAG AA on the
+  backgrounds they sit on: `#767676` is 3.46:1 on the panel and `#909090` is
+  4.25:1 on a selected row. The build uses `#949494` for labels and `#a8a8a8` for
+  values, and a test now walks every token against every background in all four
+  accents. Phase 9.4 forbids regressing accessibility, and shipping the drawn
+  values would have done exactly that.
+- **The error colour is a token the mockup never showed.** `#ef8f77`, 6.64:1 on
+  the panel background the status bar uses.
+- **Row metrics.** The mixer cell is 70px rather than 56 and the value readout
+  30px rather than 20: at the drawn widths a volume of 100 renders as "...".
+- **Mute and solo lit states differ.** The mockup shows one accent. A lit mute
+  and a lit solo must not look alike at a glance, so solo takes the accent and
+  mute takes the primary text colour — the only other fill in the palette bright
+  enough to read as "on".
+- **"N channels active" is not shown.** The bank block reports the format and the
+  bank's preset count instead. How many channels a file *touches* has no
+  definition the plugin can compute, which is the same gap that keeps the faded
+  untouched-channel rows unimplemented.
+- **Faded untouched channels are not implemented.** Still a proposal about
+  behaviour, still needing a definition of "untouched".
+- **Reverb is not in the panel yet.** Phase 10. The panel leaves the space
+  between the master block and the bank block for it.

@@ -60,7 +60,9 @@ JuicySFAudioProcessor::JuicySFAudioProcessor()
             { "bank", i == 9 ? 128 : 0 },
             { "preset", 0 },
             { "volume", MidiConstants::defaultChannelVolume },
-            { "pan", MidiConstants::centreValue }
+            { "pan", MidiConstants::centreValue },
+            { "mute", 0 },
+            { "solo", 0 }
         }, {} }, nullptr);
     }
     valueTreeState.state.appendChild(channelPrograms, nullptr);
@@ -119,16 +121,7 @@ AudioProcessorValueTreeState::ParameterLayout JuicySFAudioProcessor::createParam
                  MidiConstants::midiMinValue, MidiConstants::maxChannelBank,
                  MidiConstants::midiMinValue, "Bank"),
         // note: banks may be sparse, and lack a 0th preset. so defend against this.
-        intParam("preset", "which patch (program/instrument) is selected in the SoundFont", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, MidiConstants::midiMinValue, "Preset"),
-        // Per-channel mixer controls for the selected channel. Incoming CC7/CC10
-        // on any channel overwrite these, exactly as Program Change overwrites a
-        // manual instrument pick.
-        intParam("volume", "channel volume (CC7) for the selected MIDI channel",
-                 MidiConstants::midiMinValue, MidiConstants::midiMaxValue,
-                 MidiConstants::defaultChannelVolume, "Vol"),
-        intParam("pan", "pan (CC10) for the selected MIDI channel",
-                 MidiConstants::midiMinValue, MidiConstants::midiMaxValue,
-                 MidiConstants::centreValue, "Pan"));
+        intParam("preset", "which patch (program/instrument) is selected in the SoundFont", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, MidiConstants::midiMinValue, "Preset"));
 
     // Master output trim. Not a MIDI controller and not per channel: it is the
     // user's gain-staging control over the whole plugin, applied after rendering.
@@ -138,6 +131,51 @@ AudioProcessorValueTreeState::ParameterLayout JuicySFAudioProcessor::createParam
                                        GuiConstants::outputLevelMaxDb, 0.1f},
         0.0f,
         juce::AudioParameterFloatAttributes{}.withLabel("Out")));
+
+    // Per-channel mixer parameters: volume (CC7), pan (CC10), mute, and solo, one
+    // of each for all 16 channels. Real host parameters rather than editor-only
+    // state, so a host can automate any channel and a right-click on a knob
+    // offers the host's own automation and controller-link menu.
+    //
+    // They are deliberately NOT in a parameter group. JUCE derives a VST3
+    // parameter's unitId from its group, and the vendored wrapper serves a FIXED
+    // 17-unit structure (root plus chUnit1..16) that Cubase caches before the
+    // component connection exists. Any group here would publish a parameter
+    // pointing at an 18th unit the host was never told about. Ungrouped, these
+    // land in the root unit beside bank, preset, and outputLevel, and the
+    // structure Cubase's program-change routing depends on is untouched.
+    //
+    // Incoming CC7/CC10 on a channel overwrite that channel's volume/pan exactly
+    // as Program Change overwrites a manual instrument pick: what the knob sets
+    // is a starting point, and the next event on that channel replaces it at the
+    // event's own timestamp.
+    for (int ch = 1; ch <= 16; ++ch)
+        layout.add(intParam(
+            "volCh" + String(ch), "volume (CC7) for MIDI channel " + String(ch),
+            MidiConstants::midiMinValue, MidiConstants::midiMaxValue,
+            MidiConstants::defaultChannelVolume,
+            "Ch" + String(ch) + " Vol"));
+    for (int ch = 1; ch <= 16; ++ch)
+        layout.add(intParam(
+            "panCh" + String(ch), "pan (CC10) for MIDI channel " + String(ch),
+            MidiConstants::midiMinValue, MidiConstants::midiMaxValue,
+            MidiConstants::centreValue,
+            "Ch" + String(ch) + " Pan"));
+    // Mute and solo are the plugin's own, not MIDI controllers: nothing in a MIDI
+    // file changes them, and a silenced channel drops note-ons rather than having
+    // its CC7 forced to zero, so the file's own volume survives being muted.
+    for (int ch = 1; ch <= 16; ++ch)
+        layout.add(make_unique<juce::AudioParameterBool>(
+            juce::ParameterID{"muteCh" + String(ch), 1},
+            "mute MIDI channel " + String(ch), false,
+            juce::AudioParameterBoolAttributes{}.withLabel(
+                "Ch" + String(ch) + " Mute")));
+    for (int ch = 1; ch <= 16; ++ch)
+        layout.add(make_unique<juce::AudioParameterBool>(
+            juce::ParameterID{"soloCh" + String(ch), 1},
+            "solo MIDI channel " + String(ch), false,
+            juce::AudioParameterBoolAttributes{}.withLabel(
+                "Ch" + String(ch) + " Solo")));
 
     // Per-channel program parameters ("progCh1".."progCh16"), each in its own
     // parameter group. Two purposes:
@@ -318,6 +356,9 @@ void JuicySFAudioProcessor::getStateInformation (MemoryBlock& destData)
 
     // Create an outer XML element..
     XmlElement xml{"MYPLUGINSETTINGS"};
+    // v5: volume and pan became per-channel parameters (volCh1..panCh16) and mute
+    // and solo were added, so the two selected-channel `volume`/`pan` parameters
+    // are gone and each channelPrograms node carries mute and solo as well.
     // v4: as v3, but the `bank` parameter spans 0-255 instead of 0-128, so its
     // normalised value means a different bank number than it did.
     // v3: per-channel state is bank/preset plus the mixer controls volume and pan.
@@ -434,7 +475,9 @@ void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInByt
                                     continue;
                                 const int maximum{p == "bank"
                                     ? MidiConstants::maxChannelBank
-                                    : MidiConstants::midiMaxValue};
+                                    : (p == "mute" || p == "solo")
+                                        ? 1
+                                        : MidiConstants::midiMaxValue};
                                 const int restored{chElement->getIntAttribute(
                                     p, static_cast<int>(ch.getProperty(p, 0)))};
                                 ch.setProperty(
@@ -446,6 +489,12 @@ void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInByt
                     }
                 }
             }
+            // channelPrograms is the only record a pre-v5 save has of per-channel
+            // volume and pan, and it has none at all of mute and solo. Derive the
+            // parameters from it now: the params loop below reads each parameter's
+            // CURRENT value when the attribute is absent, so this becomes the
+            // restored value there rather than being overwritten by a default.
+            fluidSynthModel.syncMixerParamsFromState();
             {
                 ValueTree tree{valueTreeState.state.getChildWithName("uiState")};
                 XmlElement* xmlElement{xmlState->getChildByName("uiState")};
@@ -485,8 +534,6 @@ void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInByt
             if (params) {
                 for (auto* param : getParameters()) {
                     if (auto* p = dynamic_cast<AudioProcessorParameterWithID*>(param)) {
-                        if (!restoreMixer && (p->paramID == "volume" || p->paramID == "pan"))
-                            continue; // pre-v3 save has no mixer values; keep GM defaults
                         double stored{params->getDoubleAttribute(p->paramID, p->getValue())};
                         // v4 widened `bank` from 0-128 to 0-255. Parameters are
                         // stored normalised, so the same 1.0 that meant bank 128
