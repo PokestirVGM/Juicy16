@@ -2,6 +2,29 @@
 
 This file describes the unreleased `0.5.1-alpha.7` development state. It must be regenerated for the exact frozen candidate.
 
+## Debug-only: unregistered LookAndFeel colour IDs
+
+Constructing the editor produces 138 `jassertfalse` hits at
+`juce_LookAndFeel.cpp:94` — `LookAndFeel::findColour` for a colour ID that was
+never registered, which returns black. **Debug builds only**; release builds
+compile the assertion out.
+
+What is established:
+
+- It is editor-specific. A `--game-rip` run, which never builds an editor,
+  produces zero.
+- It has no visible effect. Every surface was inspected in the running plugin at
+  minimum, default and 1000px widths and rendered correctly, so whatever is
+  asking for the colour is not drawing with the black it gets back.
+- `DrawableButton`'s four colour IDs were a plausible cause — `LookAndFeel_V4`
+  does not initialise them and the header's settings button is one — but
+  registering them changed the count by zero, so they are not it. They are now
+  set anyway, because a themed editor should define them.
+
+Not yet identified: which ID, and which control asks for it. Worth attaching a
+debugger to `LookAndFeel::findColour` and reading `colourID` on the first hit.
+Low severity, but 138 assertions is loud enough to hide a real one.
+
 ## Reverb
 
 - **Old projects will sound different.** Juicy16 discarded FluidSynth's effects

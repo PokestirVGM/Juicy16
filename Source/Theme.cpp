@@ -154,6 +154,15 @@ void PluginLookAndFeel::applyTokens() {
     setColour(juce::TooltipWindow::textColourId,         kTextPrimary);
     setColour(juce::TooltipWindow::outlineColourId,      kBorder);
 
+    // LookAndFeel_V4::initialiseColours does NOT cover every ColourId a JUCE
+    // control can ask for, and findColour asserts and returns black for one it
+    // has never been given. These are the ids this editor's controls reach for
+    // that the V4 scheme leaves unset.
+    setColour(juce::DrawableButton::backgroundColourId,   juce::Colours::transparentBlack);
+    setColour(juce::DrawableButton::backgroundOnColourId, kAccent.withAlpha(0.25f));
+    setColour(juce::DrawableButton::textColourId,         kTextLabel);
+    setColour(juce::DrawableButton::textColourOnId,       kTextPrimary);
+
     setColour(juce::ToggleButton::textColourId,          kTextPrimary);
     setColour(juce::ToggleButton::tickColourId,          kAccent);
     setColour(juce::ToggleButton::tickDisabledColourId,  kControlBorder);
