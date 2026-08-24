@@ -75,9 +75,35 @@ The remaining 63 are not yet identified and are most likely stock JUCE IDs that
   whose original hardware behaved differently. That is a real gap, but it is a
   deliberate-deviation question, not a defect to fix.
 
-  Still wanted: a specific song, channel and instrument, with what it should
-  sound like. That can be measured against the original; "dynamics feel off"
-  across a corpus cannot.
+  **Update 2, after the owner reported this with certainty against Fruity LSD.**
+  Fruity LSD plays DLS through DirectMusic, not FluidSynth, so the comparison is
+  FluidSynth's DLS interpretation against Microsoft's. Ruled out so far, by
+  measurement on the owner's VGMTrans corpus:
+
+  - Per-instrument level is identical between each bank's DLS and SF2 export
+    (19 programs, none differing by more than 1 dB), so it is not an export
+    artefact.
+  - These DLS files declare no attenuation anywhere: every region `wsmp`
+    attenuation is 0 dB, there are no instrument-level `CONN_DST_GAIN` blocks,
+    and the wave pool carries no `wsmp` chunks at all.
+  - FluidSynth does honour DLS `EG1_SUSTAIN`: instruments VGMTrans declares at
+    roughly 0% sustain render at about 1%, and those declared at 100% render at
+    94-102%.
+  - CC7 tracks the DLS specification's own 40·log10(cc/127) curve within about
+    0.3 dB, so the volume-controller curve is not the difference.
+
+  **The open lead**: several instruments render well below their declared
+  sustain - program 17 declared 99.7% renders at 66%, program 49 declared 100%
+  renders at 70%, program 100 declared 94% renders at 57%. Some of that is
+  one-shot samples ending naturally, which is correct, but a sustained
+  instrument landing 30 points low would put it wrong against the rest of a mix
+  while its neighbours are fine. This needs a specific instrument to confirm
+  rather than a survey.
+
+  **The decisive experiment, which needs the owner**: render one MIDI through
+  Fruity LSD to a WAV, and the same MIDI through Juicy16, then compare per
+  channel. That turns "some instruments are off" into a number per instrument
+  and points straight at the mechanism.
 - **Chorus does nothing.** It was discarded by the same bug and is now switched
   off explicitly rather than un-muted with defaults nobody chose. CC93 still
   reaches the engine. Chorus will get controls of its own in a later release.
