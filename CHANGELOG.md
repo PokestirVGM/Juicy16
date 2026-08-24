@@ -33,6 +33,26 @@
 
 ### Notes
 
+- **Beta gate work that needed no host and no Windows machine.** Phase 4
+  packaging proven by running `distribute/bundle_macos.sh` end to end (arm64-only,
+  macOS 11.0, strict signature checks, VST2 absent, source commit and per-binary
+  SHA-256 recorded, archive checksum verifies); configure-time checks confirmed
+  for all five required inputs including keychain validation of the signing
+  identity; dependency inventory verified against the installed artifact rather
+  than the recipe; ASan/UBSan and leaks gates run against the Phase 9/10 code and
+  clean (0 leaks across all four harnesses); CI confirmed to gate release
+  creation via `needs: gates`.
+- **Finding: declared sandbox entitlements are never applied.** JUCE generates
+  `app-sandbox` and `files.user-selected.read-only` entitlements, but the
+  project's post-build `codesign --force --deep` re-sign has no `--entitlements`
+  and discards them, on every format. Impact is inert — AU and VST3 inherit the
+  host's sandbox, and the Standalone simply is not sandboxed, which grants more
+  access rather than less — but the build claims a sandbox that is not in force.
+  Not changed, because both the fix and its consequences need a sandboxed host to
+  verify. See `MILESTONE_PLAN.md` Phase 2.
+- **Finding: WebKit is linked but unused**, despite `JUCE_WEB_BROWSER=0`.
+  Low severity, avoidable attack surface. See `docs/DEPENDENCIES.md`.
+
 - **Host validation, owner-reported:** multichannel playback works in **both FL
   Studio and Cubase, in both AU and VST3**, with MIDI events transferring
   correctly. That is the workflow this architecture exists for, confirmed for the

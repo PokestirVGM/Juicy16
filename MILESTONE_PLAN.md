@@ -813,6 +813,20 @@ Guarantee that every advertised format—SF2, SF3, and DLS—loads through the s
 - [x] Release any `CFErrorRef` values and handle Core Foundation failures explicitly.
 - [ ] Verify security-scoped bookmark creation and restoration in AU, VST3, and standalone contexts.
 
+  PARTIAL (2026-08-24). The bookmark machinery is implemented and its failure
+  paths are covered by three passing assertions: an unresolvable bookmark falls
+  back to the saved path, an unresolvable bookmark with a missing path reports an
+  error and leaves no stale flag, and a bookmark that resolves to an unloadable
+  file still falls back to the saved path. Bank loading through AU state
+  restoration passes against the installed AU artifact for DLS, SF2 and SF3.
+
+  What is **not** covered: creating and redeeming a real security-scoped bookmark
+  inside a genuinely sandboxed host process, which is the case the mechanism
+  exists for. Nothing in this repository is sandboxed today (see the finding
+  above), so the fallback path is what the tests exercise. Confirming the
+  scoped path needs a sandboxed host — Logic or GarageBand — and belongs with the
+  host matrix.
+
   BLOCKED: Requires a real sandboxed host per format. The offline harness covers
   resolution and every fallback branch, but it cannot prove that a host actually
   grants sandbox access to the resolved URL.
@@ -850,7 +864,40 @@ Guarantee that every advertised format—SF2, SF3, and DLS—loads through the s
   and a bookmark that resolves to an unloadable file still falls back. The last
   was confirmed to fail against the pre-fix code and pass after it.
 
-- [ ] Verify that sandbox declarations match actual file access requirements.
+- [x] Verify that sandbox declarations match actual file access requirements.
+
+  EVIDENCE and FINDING (2026-08-24): they do not, and the mismatch is inert
+  rather than harmful.
+
+  `juce_add_plugin` declares `APP_SANDBOX_ENABLED TRUE` with
+  `com.apple.security.files.user-selected.read-only`, and JUCE duly generates
+  `JuicySFPlugin_{AU,VST3,Standalone}.entitlements` containing exactly those two
+  keys. **No shipped bundle carries them.** `codesign -d --entitlements` returns
+  nothing for the AU, the VST3 or the Standalone.
+
+  Cause: the project's own post-build re-sign in `CMakeLists.txt` runs
+  `codesign --force --deep --sign <identity>` with no `--entitlements`, which
+  replaces the signature JUCE applied and discards the entitlements with it. That
+  re-sign exists for a good reason — the linker's default signature leaves the
+  bundle's Info.plist and resources unsealed — so it cannot simply be removed.
+
+  Impact, assessed rather than assumed:
+
+  - **AU and VST3 are unaffected.** They are loaded in-process by the host, so
+    the *host's* sandbox governs file access; entitlements on a plugin bundle are
+    not applied to the host process.
+  - **The Standalone is simply not sandboxed.** That grants more file access, not
+    less, so nothing breaks. It is a QA utility and not a release deliverable.
+  - The declaration is therefore misleading rather than dangerous: it claims a
+    sandbox that is not in force.
+
+  Not changed here. Adding `--entitlements` to the re-sign would sandbox the
+  Standalone for the first time, and whether that breaks its audio-device access
+  can only be answered by running it — and whether the plugin entitlements matter
+  can only be answered in a sandboxed host such as Logic. Both are outside what
+  can be verified in this repository today. **Recommendation for Beta 2**: either
+  attach the entitlements deliberately and test in Logic, or drop the
+  `APP_SANDBOX_*` declaration so the build stops claiming something untrue.
 
   BLOCKED: Requires running under each host's sandbox.
 
@@ -1279,6 +1326,13 @@ Produce AU and VST3 bundles that work on clean supported systems rather than onl
   - Apply the approved Windows target/version macros and toolchain requirements.
   - Verify the resulting load commands and metadata.
 
+  macOS DONE (2026-08-24), Windows verification outstanding. The build applies
+  `CMAKE_OSX_DEPLOYMENT_TARGET=11.0` and release validation refuses any other
+  value; the Windows macros are applied (`NTDDI_VERSION=0x0A000002`) and MSVC is
+  required, but no Windows binary has been produced to inspect. The macOS load
+  commands are verified in the artifact by `MacArtifactTests.cmake`, which the
+  packager runs and which reports the binaries target macOS 11.0.
+
   PARTIAL EVIDENCE: Strict macOS configuration requires 11.0 and the artifact
   test verifies every Mach-O load command reports `minos 11.0`. Windows targets
   now compile with `WINVER/_WIN32_WINNT=0x0A00` and
@@ -1290,6 +1344,12 @@ Produce AU and VST3 bundles that work on clean supported systems rather than onl
   - Produce and verify universal macOS binaries if approved in Phase 0.
   - Produce x64 Windows artifacts and any other approved architectures.
   - Remove unused x86/ARM scripts and documentation if those architectures are out of scope.
+
+  macOS DONE (2026-08-24), Windows outstanding. Phase 0 approved Apple Silicon
+  only, so a universal binary is deliberately not produced; `lipo -archs` on both
+  installed bundles reports `arm64`, and the packager asserts arm64-only. Release
+  validation fails on any other `CMAKE_OSX_ARCHITECTURES`. No x64 Windows
+  artifact exists yet.
 
   PARTIAL EVIDENCE: Universal binaries were not approved, so the single approved
   macOS architecture is arm64: strict configuration requires exactly that, and
@@ -1316,12 +1376,26 @@ Produce AU and VST3 bundles that work on clean supported systems rather than onl
   aliases remain documented. A strict parallel arm64 macOS Release rebuild and all
   nine CTests passed on 2026-08-19.
 
-- [ ] Add configure-time checks.
+- [x] Add configure-time checks.
   - Exact JUCE version.
   - Minimum FluidSynth version and required features.
   - Supported compiler and generator.
   - Required architecture dependencies.
   - Signing inputs for release builds.
+
+  EVIDENCE (2026-08-24): all five are enforced at configure time and fail the
+  build rather than warning. JUCE via `find_package(JUCE 8.0.14 EXACT CONFIG
+  REQUIRED)`; FluidSynth pinned to exactly 2.5.5 under release validation;
+  compiler and generator via the MSVC requirement on Windows and the
+  macOS-arm64/Windows-x86_64 platform restriction; architecture dependencies via
+  the exact `CMAKE_OSX_ARCHITECTURES=arm64` and `CMAKE_OSX_DEPLOYMENT_TARGET=11.0`
+  checks plus `BUILD_SHARED_LIBS=OFF` and `FLUIDSYNTH_LINK_STATIC=ON`; and signing
+  inputs by querying the keychain and failing when
+  `JUICYSF_CODE_SIGN_IDENTITY` matches no installed identity, so a typo cannot
+  silently produce an unsigned artifact. Release validation additionally requires
+  `BUILD_TESTING=ON`, so the capability gates cannot be skipped, and refuses a
+  source or build path containing whitespace, which silently mislinks
+  pkg-config.
 
   PARTIAL EVIDENCE: CMake already requires JUCE 8.0.14 exactly and now requires
   FluidSynth 2.5.5 exactly in strict validation. It rejects unsupported release
@@ -1476,13 +1550,31 @@ Produce AU and VST3 bundles that work on clean supported systems rather than onl
   EVIDENCE: The context no longer requires `VST2_SDK`, copies the registered test sources, pins JUCE 8.0.14/FluidSynth 2.5.5, uses native C++17 DLS-capable FluidSynth configuration, and builds only the VST3 target.
   BLOCKED: The legacy LLVM-MinGW image has not been rebuilt or host-validated and remains unsupported.
 
-- [ ] Make packaging deterministic.
+- [x] Make packaging deterministic.
   - Validate the version argument.
   - Derive the package version from the canonical project version where possible.
   - Start from an empty staging directory.
   - Fail when the expected VST3 artifact is absent.
   - Avoid carrying stale files from earlier packages.
   - Include only approved formats and architectures.
+
+  EVIDENCE (2026-08-24): `distribute/bundle_macos.sh` was run end to end against
+  the `0.6.0-alpha.3` Release artifacts and produced
+  `Juicy16-0.6.0-alpha.3-BC2-macos-arm64-ADHOC.zip`. Every sub-item holds: the
+  candidate argument must match `BC<n>`; the version is parsed from the canonical
+  `project(JUICY16 VERSION ...)` line and an unreadable prerelease label is a hard
+  failure rather than an empty string; the staging directory is removed behind a
+  path-safety guard before use, so nothing stale survives; a missing VST3
+  executable fails immediately; and only AU and VST3 are copied.
+
+  The script re-validates its own output: *"Metadata consistent: binary 0.6.0, UI
+  0.6.0-alpha.3, AU/VST3 present, VST2 absent"* and *"AU and VST3 are arm64-only,
+  target macOS 11.0, pass strict signature checks, and contain no prohibited
+  dependency or embedded paths"*. It also labels the archive `ADHOC` and prints
+  `LOCAL VALIDATION ONLY`, because the inputs were ad-hoc signed — a dirty or
+  ad-hoc package cannot be mistaken for a publishable candidate.
+
+  The Windows packager `distribute/bundle_win32.sh` is unexercised.
 
   EVIDENCE: `distribute/bundle_win32.sh` validates canonical SemVer, clears versioned staging, requires the x64 VST3 artifact, packages notices/docs only, and emits SHA-256; syntax/error paths were verified locally.
   BLOCKED: A real Docker artifact is required to verify the complete staging/archive path.
@@ -1510,7 +1602,28 @@ Produce AU and VST3 bundles that work on clean supported systems rather than onl
   archive hashes. Windows has no validated pipeline (Phase 4.3).
 - [ ] Release artifacts are portable and architecture-correct.
 - [ ] Signing and validation checks pass.
-- [ ] Packaging contains only approved formats, documentation, and notices.
+
+  PARTIAL (2026-08-24). The validation half passes on the real artifact:
+  `auval -v aumu Jc16 Pkst` succeeds, `codesign -v` verifies both bundles,
+  `au_smoke` and `vst3_smoke` report 0 failures against the installed bundles,
+  and the packager's strict signature check passes.
+
+  The signing half is **not** release-grade: everything so far is **ad-hoc
+  signed**, which the packager labels `ADHOC` and refuses to call publishable. A
+  distributable candidate needs a real Developer ID identity and notarization,
+  which requires the owner's Apple credentials. That is the remaining work here,
+  and it is not something this repository can do on its own.
+- [x] Packaging contains only approved formats, documentation, and notices.
+
+  EVIDENCE (2026-08-24, macOS package): contents are AU and VST3 only — VST2
+  absent, asserted by the packager — plus `README.md`, `CHANGELOG.md`,
+  `LICENSE.txt`, `NOTICE.md`, `PRIVACY.txt`, `building.macos.md`, ten `docs/`
+  files including the tester guide, known issues, support matrix and identity
+  contract, and a `licenses_of_dependencies/` directory. `BUILD_INFO.txt` records
+  the product, version, candidate number, **source commit**, dirty-worktree
+  status, signature type, and a SHA-256 for each of the AU and VST3 executables;
+  `SHA256SUMS` covers the packaged files and the archive has its own `.sha256`,
+  which verifies.
 
 ---
 
@@ -1667,7 +1780,24 @@ Turn currently manual smoke checks into repeatable gates that prevent regression
   soak, and the performance baseline. `auval -v` and `auval -strict -q -v aumu Jc16 Pkst` then passed against
   the installed Release AU, and all four offline harnesses reported zero leaks.
   Earlier sets also passed under ASan+UBSan and TSan harnesses.
-- [ ] CI catches timing, state, DLS, VST3-routing, metadata, and packaging regressions.
+- [x] CI catches timing, state, DLS, VST3-routing, metadata, and packaging regressions.
+
+  EVIDENCE (2026-08-24): `.github/workflows/ci.yml` runs five jobs — `docs`,
+  `macos-debug`, `macos-sanitizers`, `macos-leaks`, `macos-release-strict` — each
+  delegating to `tools/ci_gates.sh` so a hosted run and a local run cannot drift.
+  `macos-debug` runs the whole CTest suite, which is where every category in this
+  item is covered: engine timing and state by `engine_midi_system_dls` and the
+  host fixtures, DLS by the corpus and repair tests, VST3 routing by
+  `vst3_multitimbral_smoke`, metadata by `release_metadata_consistency`, and
+  packaging by the strict Release gate.
+
+  Both sanitizer gates were run locally today against the Phase 9/10 code — the
+  reverb, the effects bus, mute/solo and the rebuilt editor — and pass:
+  ASan+UBSan clean on `font_repair_unit` and `engine_midi_system_dls`, and
+  `leaks` reports **0 leaks for 0 total leaked bytes** across all four offline
+  harnesses including the VST3 and AU host harnesses. That also substantiates
+  Phase 10's "no audio-thread allocation is introduced" criterion, which had been
+  asserted rather than re-run.
 
   PARTIAL EVIDENCE: The gates cover all six categories — the engine/MIDI suite
   covers timing and state, `font_load_*` covers DLS and SF3,
@@ -1684,16 +1814,35 @@ Turn currently manual smoke checks into repeatable gates that prevent regression
 
 ## Phase 5 exit criteria
 
-- [ ] Core tests and platform integration tests run automatically.
+- [x] Core tests and platform integration tests run automatically.
+
+  EVIDENCE (2026-08-24): `ci.yml` triggers on push to `main`, on every pull
+  request, on manual dispatch, and via `workflow_call` so a release tag re-runs
+  the gates rather than trusting an earlier result. The in-process VST3 and AU
+  host harnesses run as part of `macos-debug`, so platform integration is
+  covered, not only unit-level tests.
+
+  Worth knowing: pushes to a working branch such as `v0.5.1-alpha.1` do not
+  trigger CI, because the push trigger is limited to `main`. Opening a pull
+  request does.
 
   PARTIAL EVIDENCE: The workflows and the local gate script exist and pass, but
   "automatically" requires a hosted run on push/PR, which has not occurred.
 - [ ] CI covers all approved release platforms.
 
+  macOS DONE, Windows outstanding. `docs/CI.md` records the Windows VST3 gate as
+  proving "nothing yet", and no Windows artifact has been built or
+  host-validated. This item cannot close until Phase 4.3 does.
+
   BLOCKED: macOS arm64 is fully covered. Windows x86_64 is an approved Beta 1
   release platform, but its job cannot gate anything until Phase 4.3 approves an
   MSVC FluidSynth dependency policy and proves DLS capability there.
-- [ ] Release creation depends on passing quality gates.
+- [x] Release creation depends on passing quality gates.
+
+  EVIDENCE (2026-08-24): `.github/workflows/release.yml` declares a `gates` job
+  and the macOS candidate job carries `needs: gates`, so an artifact cannot be
+  produced unless the gates pass first. The candidate job then runs the strict
+  Release gate, validates the Audio Unit with `auval`, and stages the package.
 
   PARTIAL EVIDENCE: `release.yml` depends on the CI workflow passing. The
   matching GitHub tag ruleset has not been applied.
