@@ -100,10 +100,39 @@ The remaining 63 are not yet identified and are most likely stock JUCE IDs that
   while its neighbours are fine. This needs a specific instrument to confirm
   rather than a survey.
 
-  **The decisive experiment, which needs the owner**: render one MIDI through
-  Fruity LSD to a WAV, and the same MIDI through Juicy16, then compare per
-  channel. That turns "some instruments are off" into a number per instrument
-  and points straight at the mechanism.
+  **Update 3 — isolated, 2026-08-23.** The owner named the case: in
+  `SEQ_BGM_N_CASTLE` the vibraphone and the timpani are too quiet, while other
+  parts are fine. Measured on that bank:
+
+  | program | declared EG1 decay | rendered to -20 dB |
+  |---|---|---|
+  | 10 (vibraphone) | 2.947 s | **0.442 s** |
+  | 14 (timpani) | 2.947 s | **0.603 s** |
+  | 38 (bass) | 4.846 s | 1.010 s |
+  | 30, 63, 75 (sustaining) | n/a, sustain 99-100% | 1.1-1.8 s, correct |
+
+  The split is exact: **every instrument VGMTrans declares with ~0% sustain
+  decays far too fast, and every instrument that sustains is fine.** That is
+  why some parts sound right and the struck ones do not.
+
+  The cause is envelope-curve interpretation, not a missing value. FluidSynth
+  ramps the volume envelope linearly in DECIBELS across the declared decay time,
+  so an instrument declared to decay over 2.95 s is 20 dB down in 0.61 s - and
+  programs 14 and 38 match that model to within a millisecond, which is how we
+  know that is what it is doing. A PlayStation SPU envelope, which is what
+  VGMTrans transcribed, decays exponentially in AMPLITUDE and stays audible far
+  longer. Fruity LSD plays these through DirectMusic, which is closer to the
+  original, which is why the owner does not hear it there.
+
+  DLS and SF2 exports of the same bank behave identically, so switching format
+  is not a workaround.
+
+  **This is FluidSynth's DLS envelope conversion, not a Juicy16 defect** - the
+  plugin reproduces FluidSynth exactly, as measured. Making struck instruments
+  ring correctly means deliberately deviating from FluidSynth's envelope, which
+  is a product decision rather than a bug fix, and is not taken here without the
+  owner's call. Options if it is taken: correct the decay generator per voice on
+  DLS banks, or carry a patched FluidSynth.
 - **Chorus does nothing.** It was discarded by the same bug and is now switched
   off explicitly rather than un-muted with defaults nobody chose. CC93 still
   reaches the engine. Chorus will get controls of its own in a later release.
