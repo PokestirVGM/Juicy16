@@ -2976,19 +2976,36 @@ rather than impressions:
   NOT started: implementation. This item covers the design decision only; 9.2,
   9.3, and 9.4 remain open.
 
-- [ ] Bind the Juicy16 logo into the build as a binary resource.
+- [x] Bind the Juicy16 logo into the build as a binary resource.
 
   The owner's wordmark is committed at `resources/juicy16-logo.png` and the
   approved mockup uses it rather than a typeset stand-in. What remains is making
   it a build input the header can draw, at the header's scale, on both plugin
   formats.
 
+  EVIDENCE (2026-08-23): `juce_add_binary_data(Juicy16Assets ...)` compiles the
+  PNG in, and `PluginEditor::paint` draws it at `GuiConstants::logoHeight` from
+  the asset's own aspect ratio, so it is never stretched. The asset target is
+  linked PUBLIC rather than PRIVATE: `juce_add_binary_data` attaches both
+  `JUCE_TARGET_HAS_BINARY_DATA` and BinaryData.h's include directory as INTERFACE
+  usage requirements, and JuceHeader.h includes BinaryData.h whenever that
+  definition is set, so the test and tool executables need both or neither.
+  `POSITION_INDEPENDENT_CODE` is set on it because AU and VST3 are loadable
+  modules. Visible in the header in all three formats.
+
 ## 9.2 Channel rack row
 
-- [ ] Reclaim the unallocated table width.
+- [x] Reclaim the unallocated table width.
   - Raise or remove the `Instrument` column's 600px maximum, or replace the
     two-column table with a layout that owns the full width deliberately.
   - No visible region may exist that belongs to no control.
+
+  EVIDENCE (2026-08-23): the rack is five columns - channel number, mute/solo,
+  instrument, volume, pan - and the instrument column's maximum is removed.
+  `ChannelListComponent::instrumentColumnWidth()` gives it everything the four
+  fixed columns leave behind, so widening the window widens exactly one column
+  and nothing else. Confirmed visually at minimum width and at 1000px: no region
+  belongs to no control at either.
 
 - [x] Put volume and pan on every channel row.
   - Both controls appear per row, for all 16 channels, without selecting a row.
