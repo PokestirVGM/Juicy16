@@ -59,8 +59,25 @@ The remaining 63 are not yet identified and are most likely stock JUCE IDs that
      this one way or the other.
   2. **Chorus is off** (below), while stock FluidSynth and most other players
      have it on. A file that sends CC93 will sound thinner here than elsewhere.
-  If it persists with reverb off, the useful report is a specific MIDI, the
-  channel, and the instrument — that can be measured rather than guessed at.
+  **Update (2026-08-23), measured against the owner's own 24-rip VGMTrans
+  corpus:** neither candidate holds, and no Juicy16-specific cause was found.
+  Rendering `SEQ_BGM_VS_GYMLEADER` through stock FluidSynth 2.5.5 at matched
+  settings gives RMS -19.82 dBFS against Juicy16's -19.79 — a 0.03 dB
+  difference. The same bank exported as DLS and as SF2 renders within 0.15 dB.
+  Across all 24 rips the corpus sends CC7 8342 times, CC10 15977 and CC11 1929,
+  but CC91 only 8 times and **CC93 not once**, so neither reverb nor chorus is
+  involved in how this material sounds.
+
+  Juicy16 therefore reproduces FluidSynth faithfully, and any remaining
+  difference is FluidSynth's interpretation of these banks rather than
+  something this plugin does to them — most likely its CC7/CC11 attenuation
+  curve and its reading of DLS articulation, against PlayStation-era material
+  whose original hardware behaved differently. That is a real gap, but it is a
+  deliberate-deviation question, not a defect to fix.
+
+  Still wanted: a specific song, channel and instrument, with what it should
+  sound like. That can be measured against the original; "dynamics feel off"
+  across a corpus cannot.
 - **Chorus does nothing.** It was discarded by the same bug and is now switched
   off explicitly rather than un-muted with defaults nobody chose. CC93 still
   reaches the engine. Chorus will get controls of its own in a later release.

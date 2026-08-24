@@ -658,15 +658,28 @@ int runGameRipScenario(const juce::File& bank, const juce::File& midiFile)
     merged.updateMatchedPairs();
     merged.sort();
 
-    // Last Program Change per channel, and whether the channel ever plays.
+    // Last Program Change per channel, whether the channel ever plays, and the
+    // program that was in effect at the channel's LAST note-on.
+    //
+    // Those last two are not the same thing, and conflating them made this
+    // assertion fail on 6 of 24 real VGMTrans rips: a rip commonly sends a
+    // trailing Program Change after its final note, so the last note legitimately
+    // sounded with the previous program. Comparing the last note against the
+    // file's final Program Change reported a wrong instrument where the plugin
+    // had done exactly the right thing.
     std::map<int, int> expectedProgram;
+    std::map<int, int> programAtLastNote;
     std::set<int> channelsWithNotes;
     for (int i = 0; i < merged.getNumEvents(); ++i) {
         const auto& message{merged.getEventPointer(i)->message};
         if (message.isProgramChange())
             expectedProgram[message.getChannel() - 1] = message.getProgramChangeNumber();
-        if (message.isNoteOn() && message.getVelocity() > 0)
-            channelsWithNotes.insert(message.getChannel() - 1);
+        if (message.isNoteOn() && message.getVelocity() > 0) {
+            const int channel{message.getChannel() - 1};
+            channelsWithNotes.insert(channel);
+            if (expectedProgram.count(channel) > 0)
+                programAtLastNote[channel] = expectedProgram[channel];
+        }
     }
     if (expectedProgram.empty()) {
         std::fprintf(stderr, "MIDI file contains no Program Change to verify\n");
@@ -741,11 +754,17 @@ int runGameRipScenario(const juce::File& bank, const juce::File& midiFile)
         int noteBank{-1}, notePreset{-1}, noteSample{-1};
         if (!model.getLastDispatchedNoteOnProgram(channel, noteBank, notePreset, noteSample))
             everyPlayedChannelSounded = false;
-        else if (expectedProgram.count(channel) > 0 && notePreset != expectedProgram[channel])
+        else if (programAtLastNote.count(channel) > 0
+                 && notePreset != programAtLastNote[channel]) {
+            std::fprintf(stderr,
+                         "channel %d last note-on used preset %d, but the program "
+                         "in effect at that point was %d\n",
+                         channel + 1, notePreset, programAtLastNote[channel]);
             everyPlayedChannelSounded = false;
+        }
     }
     check(everyPlayedChannelSounded,
-          "every channel that plays notes did so with its selected program");
+          "every channel that plays notes did so with the program in effect at that note");
 
     check(model.getProgramApplyFailureMask() == 0u,
           "no channel recorded a failed program assignment during the rip");
