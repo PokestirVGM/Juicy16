@@ -179,6 +179,15 @@ carries the GM default send.
 - **What the engine does.** FluidSynth 2.5.5's reverb is jjceresa's FDN late
   reverb, which replaced Freeverb in 2.0. Juicy16 adds no DSP of its own; these
   controls set that reverb.
+### Output level
+
+The master trim defaults to **+1.5 dB**, not 0. Juicy16 renders about 10.4 dB
+quieter than VGMTrans plays the same material, and +1.5 dB is the most that can
+be given back without pushing anything past full scale — measured across a
+24-file VGMTrans corpus, the loudest peaks at -1.61 dBFS. Closing the rest of the
+gap would need a limiter, which Beta 1 deliberately does not have. Raise the trim
+per project if you want more; it spans -24 to +12 dB.
+
 - **What you control, and what the MIDI file controls.** You set the reverb.
   The file sets how much of each channel goes into it, through CC91, at that
   event's own timestamp. **A MIDI file cannot change your reverb settings** —

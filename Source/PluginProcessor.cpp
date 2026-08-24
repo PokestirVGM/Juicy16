@@ -129,7 +129,14 @@ AudioProcessorValueTreeState::ParameterLayout JuicySFAudioProcessor::createParam
         juce::ParameterID{"outputLevel", 1}, "master output level",
         juce::NormalisableRange<float>{GuiConstants::outputLevelMinDb,
                                        GuiConstants::outputLevelMaxDb, 0.1f},
-        0.0f,
+        // +1.5 dB, not 0. Juicy16 renders about 10.4 dB quieter than VGMTrans
+        // does the same material, and this is the whole of what can be given back
+        // without pushing anything past full scale: measured across the owner's
+        // 24-rip corpus the loudest file peaks at -1.61 dBFS, so 1.5 dB leaves
+        // every one of them at or just under 0. It is a measured ceiling rather
+        // than a round number, and it does NOT close the gap - see
+        // docs/INVESTIGATION_ENVELOPE_DECAY.md for why the rest needs a limiter.
+        GuiConstants::outputLevelDefaultDb,
         juce::AudioParameterFloatAttributes{}.withLabel("Out")));
 
     // Reverb. FluidSynth has always been running one - `synth.reverb.active`

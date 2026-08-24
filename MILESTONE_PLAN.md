@@ -120,9 +120,46 @@ Use these levels consistently in code reviews, issue tracking, candidate notes, 
 
 No B0 or B1 issue may be open at the Beta 1 gate. Every open B2 issue must appear in the beta release notes with a workaround or impact statement.
 
-## Beta 1 master checklist
+## Beta 1 scope and gate — revised 2026-08-24
 
-This is the high-level candidate dashboard. Check a phase here only after every required exit criterion in that phase is complete or an explicit Beta 1 exception is recorded in the Decision log.
+This supersedes the original checklist below it. The plan was written for a
+formal release process with a QA function behind it; Beta 1 is one developer
+shipping to himself and one tester. The technical bar is unchanged — every
+engineering criterion in Phases 0-10 still applies — but the process ceremony
+around it is retired rather than pretended at. Superseded material is marked, not
+deleted, per this plan's own rule.
+
+**Beta 1 is macOS only.** Windows moves to Beta 2. See the Decision log.
+
+### The gate
+
+Beta 1 ships when all four are true:
+
+1. **`ctest` is green** and `distribute/bundle_macos.sh` produces a package that
+   passes its own validation.
+2. **The owner has played real material** through both AU and VST3, in FL Studio
+   and Cubase, and is satisfied. Not a checkpoint matrix — actual use, looking
+   for anything that feels wrong.
+3. **`docs/KNOWN_ISSUES.md` is current**, including anything found in (2).
+4. **Tag, package, send.**
+
+Everything the original Phase 7 and Phase 8 asked for beyond this — expected/
+actual checkpoint tables, routing screenshots, host-version capture, a formal
+go/no-go ritual, launch monitoring procedures, withdrawal drills — is retired for
+Beta 1. It was process for a team that does not exist here.
+
+### What that leaves genuinely open
+
+- The owner's pass through FL Studio and Cubase (gate item 2).
+- Clean-machine installation, which a friend will do once Beta 1 is out rather
+  than before it.
+- The JUCE licensing position, which is a real distribution question and the one
+  item that is not merely process. See the Decision log.
+
+## Beta 1 master checklist (SUPERSEDED 2026-08-24 — see above)
+
+This is the original high-level candidate dashboard, kept for the record. The
+gate above replaces it.
 
 - [ ] Phase 0: product, platforms, formats, identity, and licensing approved.
 - [ ] Phase 1: real-time MIDI, GM behavior, synchronization, bounds, and thread-safety work complete.
@@ -1307,6 +1344,9 @@ Retain the proven 16-channel host integration while removing assertion-driven or
 
 # Phase 4 — Build reproducible, portable release artifacts
 
+> **Windows moved to Beta 2 on 2026-08-24.** Every Windows item in this phase
+> stays open and stays required — for Beta 2. None of them gate Beta 1.
+
 ## Goal
 
 Produce AU and VST3 bundles that work on clean supported systems rather than only on the developer machine.
@@ -2067,6 +2107,13 @@ Ensure every user-facing and developer-facing surface describes the same impleme
 
 # Phase 7 — Beta-candidate validation
 
+> **SCOPE REVISED 2026-08-24.** Most of this phase is superseded by the
+> four-item gate near the top of this file. What survives: the automated suite
+> and the package must be green, and the owner plays real material in FL Studio
+> and Cubase. The checkpoint matrices, evidence capture and clean-system
+> installation below are retired for Beta 1 — a friend will install on a clean
+> machine *after* release, not as a gate before it.
+
 ## Goal
 
 Prove that the exact Beta 1 candidate artifacts meet the product contract on clean systems and real hosts.
@@ -2373,6 +2420,12 @@ contour.
 ---
 
 # Phase 8 — Beta 1 program readiness and controlled launch
+
+> **SCOPE REVISED 2026-08-24.** The engineering items here are done and
+> evidenced. The program and launch machinery — freeze ritual, go/no-go record,
+> upload/download verification, monitoring and withdrawal procedures, tester
+> contract — is retired for Beta 1 as process for a team that does not exist.
+> Tag, package, send.
 
 ## Goal
 
@@ -3790,6 +3843,11 @@ Record decisions that affect more than one task. Do not delete superseded decisi
 | YYYY-MM-DD | Example: minimum macOS version | Host/support rationale | Name | Proposed/Approved/Superseded |
 | 2026-08-19 | Beta release formats are macOS AU/VST3 and Windows VST3; Standalone is QA-only; VST2/AUv3 are out | Matches the intended multichannel host workflow without advertising development or legacy formats | Product owner | Approved |
 | 2026-08-19 | Apple Silicon is required; Windows ARM64 and Linux are out; Intel macOS is deferred until practical build and physical validation are available | Focuses Beta 1 validation on available hardware | Product owner | Approved |
+| 2026-08-24 | **Beta 1 is macOS only. Windows VST3 moves to Beta 2** | The Windows toolchain has never produced an artifact: the MinGW path is unsupported upstream, the Docker context is broken, and nothing has been host-validated. Holding a macOS beta that is otherwise ready behind a platform that has not started is the wrong trade | Product owner | Approved |
+| 2026-08-24 | **Beta 1 ships ad-hoc signed, with the Gatekeeper workaround documented** | Developer ID and notarization need a paid Apple account and add a release step. For an owner plus one known tester, a documented right-click-Open is proportionate. Revisit before any wider distribution | Product owner | Approved |
+| 2026-08-24 | **Default master trim moves from 0.0 dB to +1.5 dB** | Juicy16 renders ~10.4 dB quieter than VGMTrans on the same material. +1.5 dB is the measured maximum the corpus allows: the loudest of 24 rips peaks at -1.61 dBFS, so anything more pushes it past full scale. This does NOT close the gap; closing it needs a limiter, which is deliberately not in Beta 1 | Product owner | Approved |
+| 2026-08-24 | **Beta 1 process ceremony is retired; the gate is four items** | The plan assumed a release team. Beta 1 is one developer and one tester. Technical criteria are unchanged; checkpoint matrices, evidence capture, go/no-go ritual and launch monitoring are dropped as theatre | Product owner | Approved |
+| 2026-08-24 | Loudness parity with VGMTrans is NOT a Beta 1 goal | Matching it needs a limiter or soft clipper, which is a real design change for a plugin whose claim is faithful playback. Deferred pending real use of 0.6.0-alpha.3 | Product owner | Deferred |
 | 2026-08-19 | Public brand metadata uses Juicy16, Pokestir, pokestir.com, contact@pokestir.com, `com.pokestir.juicy16`, and `Pkst`/`Jc16`; preserve Birchlabs lineage credit | Establishes the Beta 1 identity while acknowledging the original SoundFont-engine base | Product owner | Approved |
 | 2026-08-19 | Fruity LSD comparison is workflow inspiration only | Avoids unsupported exact-emulation or affiliation claims | Product owner | Approved |
 | 2026-08-19 | Beta feedback email uses `[Juicy16 VST]` in the subject | Makes reports identifiable and routable | Product owner | Approved |

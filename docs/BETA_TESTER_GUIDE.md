@@ -126,6 +126,27 @@ that angle are especially useful.
 
 ## Installation
 
+### macOS will block it on first use — this is expected
+
+Beta 1 is **ad-hoc signed**, not signed with an Apple Developer ID and not
+notarized. That is a deliberate choice for a small beta, not an oversight, and it
+means Gatekeeper will refuse the plugin the first time your host scans it. The
+plugin is not damaged and nothing is wrong with the download.
+
+Clear the quarantine flag after copying the bundles into place:
+
+```bash
+xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/Components/Juicy16.component
+xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/Juicy16.vst3
+```
+
+Then rescan plugins in your host. If a host still refuses to load it, quit the
+host, run the two commands again, and reopen — some hosts cache a failed scan.
+
+Verify the checksum first, below: an ad-hoc signature does not tell you the
+download arrived intact, so the SHA-256 matters more here than it would for a
+notarized build.
+
 Verify the download first. The archive ships with a `.sha256` file beside it, and `SHA256SUMS` inside covering every packaged file:
 
 ```bash

@@ -25,6 +25,21 @@
 
 ### Changed
 
+- **Default master trim is now +1.5 dB, not 0.** Juicy16 renders ~10.4 dB quieter
+  than VGMTrans on the same material. +1.5 dB is the measured maximum the corpus
+  allows: the loudest of 24 rips peaks at -1.61 dBFS, so more would push it past
+  full scale. It does not close the gap — that needs a limiter, deliberately not
+  in Beta 1.
+- **Beta 1 is macOS only; Windows VST3 moves to Beta 2.** The Windows toolchain
+  has never produced an artifact, and holding an otherwise-ready macOS beta
+  behind a platform that has not started is the wrong trade.
+- **Beta 1 ships ad-hoc signed.** `docs/BETA_TESTER_GUIDE.md` now documents the
+  Gatekeeper quarantine workaround, which testers will need.
+- **The Beta 1 gate is four items**, not a formal release process. Technical
+  criteria are unchanged; the checkpoint matrices, evidence capture, go/no-go
+  ritual and launch monitoring are retired as process for a team that does not
+  exist. See `MILESTONE_PLAN.md`.
+
 - **The reverb is off by default.** Owner decision. Juicy16's reverb was never
   audible before 0.6.0-alpha.1, so enabling one for everybody changes how every
   existing project sounds without being asked. The controls are ready and every

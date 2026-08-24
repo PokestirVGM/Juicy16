@@ -10,6 +10,9 @@ struct GuiConstants {
     // the point of the control is trim, not a second volume war.
     inline static const float outputLevelMinDb = -24.0f;
     inline static const float outputLevelMaxDb = 12.0f;
+    // Default trim. See PluginProcessor's parameter layout for the measurement
+    // this number comes from.
+    inline static const float outputLevelDefaultDb = 1.5f;
 
     // maxWidth is NOT here: PluginEditor caps it dynamically at the on-screen
     // keyboard's natural full-range width (see its constructor), so the window can
