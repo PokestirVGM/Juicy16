@@ -86,8 +86,9 @@ written, but please do not report it as a defect.
   them selects Custom.
 - The MIDI file sets how much of each channel goes into it, through CC91. It
   cannot change your settings — GS and XG reverb SysEx is deliberately ignored.
-- **A rip that never sends CC91 gets no reverb**, whatever the controls say.
-  Nothing is being sent to it. Please check the file before reporting silence.
+- Every channel starts at the General MIDI default reverb send (CC91 = 40), so
+  the reverb is audible without the file asking for it. A file that sends its own
+  CC91 overrides that, per channel.
 - Chorus is switched off. CC93 still reaches the engine but drives nothing yet.
 
 Nobody has listened to these profiles on real rips yet — they were chosen by

@@ -42,9 +42,9 @@ The remaining 63 are not yet identified and are most likely stock JUCE IDs that
   SysEx is deliberately ignored, so a rip asking for a hall gets whatever profile
   you selected. Report a rip that sounds wrong in a way the manual controls
   cannot fix.
-- **A rip that never sends CC91 gets no reverb**, whatever the controls say —
-  nothing is being sent to the reverb. This is not a defect. `SEQ_BGM_C_03` in
-  the test corpus is such a file.
+- **Channels start at the GM default reverb send (CC91 = 40).** FluidSynth
+  initialises it to 0, which made every reverb control inert on any file that
+  did not explicitly ask for reverb. A file's own CC91 still overrides it.
 - **Chorus does nothing.** It was discarded by the same bug and is now switched
   off explicitly rather than un-muted with defaults nobody chose. CC93 still
   reaches the engine. Chorus will get controls of its own in a later release.

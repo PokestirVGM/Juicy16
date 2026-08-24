@@ -95,6 +95,11 @@ public:
                           bool shouldDrawButtonAsHighlighted,
                           bool shouldDrawButtonAsDown) override;
 
+    // The popover's own chrome. JUCE's default draws a light rounded box with a
+    // light arrow, which is a bright cut-out in a dark plugin.
+    void drawCallOutBoxBackground(juce::CallOutBox&, juce::Graphics&,
+                                  const juce::Path&, juce::Image&) override;
+
     void drawTableHeaderBackground(juce::Graphics&, juce::TableHeaderComponent&) override;
     void drawTableHeaderColumn(juce::Graphics&, juce::TableHeaderComponent&,
                                const juce::String& columnName, int columnId,

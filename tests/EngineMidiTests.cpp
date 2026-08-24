@@ -2334,6 +2334,64 @@ int main(int argc, char** argv)
             return energy;
         }};
 
+        // The case a user actually meets: play a note, send NO CC91 at all, and
+        // the reverb controls must still do something. FluidSynth initialises
+        // the reverb send to 0, so before the GM default was seeded this was
+        // silence and every reverb control was inert on any file that did not
+        // explicitly ask for reverb - which is most of them.
+        {
+            JuicySFAudioProcessor plain;
+            plain.prepareToPlay(48000.0, blockSize);
+            const auto plainState{makeState(argv[1])};
+            plain.setStateInformation(
+                plainState.getData(), static_cast<int>(plainState.getSize()));
+            juce::AudioBuffer<float> plainAudio{2, blockSize};
+            int send{-1};
+            juce::MidiBuffer none;
+            render(plain, plainAudio, none);
+            const bool defaultSendApplied{
+                plain.getFluidSynthModel().getControllerValue(0, 91, send)
+                && send == MidiConstants::defaultReverbSend};
+
+            const auto plainTail{[&](bool reverbOn) {
+                if (auto* p{findBoolParameter(plain, "reverbOn")}) *p = reverbOn;
+                juce::MidiBuffer quiet;
+                addAllSoundOff(quiet);
+                render(plain, plainAudio, quiet);
+                for (int block = 0; block < 12; ++block) {
+                    juce::MidiBuffer empty;
+                    render(plain, plainAudio, empty);
+                }
+                juce::MidiBuffer note;
+                note.addEvent(juce::MidiMessage::programChange(1, 0), 0);
+                note.addEvent(
+                    juce::MidiMessage::noteOn(1, 60, static_cast<juce::uint8>(110)), 1);
+                render(plain, plainAudio, note);
+                juce::MidiBuffer off;
+                off.addEvent(juce::MidiMessage::noteOff(1, 60), 0);
+                render(plain, plainAudio, off);
+                double energy{0.0};
+                for (int block = 0; block < 40; ++block) {
+                    juce::MidiBuffer empty;
+                    render(plain, plainAudio, empty);
+                    if (block < 8)
+                        continue;
+                    for (int ch = 0; ch < 2; ++ch)
+                        for (int i = 0; i < blockSize; ++i) {
+                            const float v{plainAudio.getSample(ch, i)};
+                            energy += static_cast<double>(v) * v;
+                        }
+                }
+                return energy;
+            }};
+            const double plainWet{plainTail(true)};
+            const double plainDry{plainTail(false)};
+            std::printf("    no CC91 anywhere: reverb on %.8f  bypassed %.8f\n",
+                        plainWet, plainDry);
+            check(defaultSendApplied && plainWet > plainDry * 2.0,
+                  "a channel starts at the GM default reverb send, so the reverb is audible on material that never sends CC91");
+        }
+
         const double wet{tailEnergy(true, 100)};
         const double dry{tailEnergy(false, 100)};
         std::printf("    tail energy: reverb on %.8f  bypassed %.8f\n", wet, dry);
@@ -2559,6 +2617,14 @@ int main(int argc, char** argv)
             mixerState.getData(), static_cast<int>(mixerState.getSize()));
         auto& mixerModel{mixer.getFluidSynthModel()};
         juce::AudioBuffer<float> mixerAudio{2, blockSize};
+
+        // Bypassed: these assertions ask "did THIS channel's note sound", and a
+        // reverb tail outlives All Sound Off by design - muting a channel must
+        // not cut the reverb that other channels are still feeding. Left on, the
+        // tail of the previous measurement leaks into the next one and every
+        // silence check reads as audio. The reverb has its own section.
+        if (auto* reverbOn{findBoolParameter(mixer, "reverbOn")})
+            *reverbOn = false;
 
         // Silence everything and let the buffer actually reach zero, so the next
         // measurement is about the note it plays and not the release tail of the

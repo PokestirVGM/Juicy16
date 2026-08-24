@@ -3218,11 +3218,20 @@ Two consequences fell out of it:
   Turning the bus on would have un-muted a chorus nobody chose. It is switched
   off explicitly instead; CC93 still reaches the engine. Chorus stays off until
   it has controls of its own.
-- **Rips that never send CC91 get no reverb**, whatever the controls say.
-  `SEQ_BGM_C_03`, a real VGMTrans rip in this repository's own corpus, sends no
-  CC91 at all — its controllers are CC1, 6, 7, 10, 11, 38, 100 and 101. The claim
-  below that "game rips send CC91 continuously" does not hold for that file, and
-  should not be relied on for others without checking.
+- **Rips that never send CC91.** `SEQ_BGM_C_03`, a real VGMTrans rip in this
+  repository's own corpus, sends no CC91 at all — its controllers are CC1, 6, 7,
+  10, 11, 38, 100 and 101. The claim below that "game rips send CC91
+  continuously" does not hold for that file, and should not be relied on for
+  others without checking.
+
+  This initially meant such a file got NO reverb whatever the controls said,
+  which the owner reported as "the reverb doesn't do anything" — correctly, and
+  it is the same class of defect as mute-under-solo: a control that visibly
+  engages and changes nothing. The cause was that FluidSynth initialises CC91 to
+  0, while General MIDI System Level 1 specifies a channel default of 40 (GS and
+  XG agree). Juicy16 now seeds the documented default, exactly as it already
+  seeded volume 100 and pan 64, and a reset returns it to 40 rather than 0. A
+  file's own CC91 still overrides it per channel at its own timestamp.
 
 The original text is kept below rather than rewritten, so the record of what was
 believed at planning time survives.

@@ -380,6 +380,16 @@ void PluginLookAndFeel::drawToggleButton(juce::Graphics& g,
     }
 }
 
+void PluginLookAndFeel::drawCallOutBoxBackground(juce::CallOutBox&,
+                                                 juce::Graphics& g,
+                                                 const juce::Path& path,
+                                                 juce::Image&) {
+    g.setColour(findColour(panelBackgroundColourId));
+    g.fillPath(path);
+    g.setColour(findColour(borderColourId));
+    g.strokePath(path, juce::PathStrokeType{1.0f});
+}
+
 void PluginLookAndFeel::drawTableHeaderBackground(juce::Graphics& g,
                                             juce::TableHeaderComponent& header) {
     g.fillAll(header.findColour(juce::TableHeaderComponent::backgroundColourId));

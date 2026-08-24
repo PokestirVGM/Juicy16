@@ -159,6 +159,23 @@ false premise and uncovered a real bug. See "The reverb was never audible" below
     and JUCE does not re-send a look-and-feel change to a child added afterwards.
     The editor now sends one explicitly once every child is in place, which also
     protects any component added later.
+- **The reverb controls did nothing on most material.** Reported as "the reverb
+  doesn't do anything", and correct: FluidSynth initialises each channel's reverb
+  send (CC91) to 0, while General MIDI System Level 1 specifies a default of 40
+  and GS and XG agree. With nothing being sent to the reverb, every control was
+  inert on any file that did not explicitly ask for reverb — which is most of
+  them, including `SEQ_BGM_C_03` in this repository's own corpus. Juicy16 now
+  seeds the documented default, exactly as it already seeded volume 100 and pan
+  64, and a GM/GS/XG reset returns it to 40 rather than to zero. A file's own
+  CC91 still overrides it, per channel, at the event's own timestamp. Measured:
+  with no CC91 anywhere, the tail after note-off went from identical-to-dry to
+  7.3x the bypassed energy.
+- **The settings popover looked like debug output.** The build facts were a bare
+  four-line label — "Standalone" and "48000 Hz" with nothing saying what either
+  one was — and JUCE's default callout chrome drew a light box in a dark plugin.
+  It is now a themed popover with colour swatches for the accent (the selected
+  one ringed, its name beside the heading), a divider, and labelled key/value
+  rows for version, engine, format and sample rate.
 - **The reverb was never audible, and now is.** FluidSynth's reverb has always
   been running — `synth.reverb.active` defaults to on — but Juicy16 asked for
   audio with `fluid_synth_process(synth, n, 0, nullptr, 2, out)`, which renders

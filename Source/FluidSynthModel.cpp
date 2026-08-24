@@ -344,6 +344,12 @@ void FluidSynthModel::createSynth() {
     // parameters rather than from FluidSynth's own defaults.
     resetReverbToParameters();
 
+    // ...and every channel starts at the GM default reverb send, which
+    // FluidSynth does not apply. See MidiConstants::defaultReverbSend.
+    for (int ch = 0; ch < kNumChannels; ++ch)
+        fluid_synth_cc(synth.get(), ch, static_cast<int>(EFFECTS_DEPTH1),
+                       MidiConstants::defaultReverbSend);
+
     // No modulators are installed here any more.
     //
     // Juicy16 used to add its own CC71-79 -> filter/volume-envelope modulators,
@@ -1664,6 +1670,12 @@ void FluidSynthModel::dispatchSysEx(const uint8_t* payload, int payloadBytes) {
             fluid_synth_cc(
                 synth.get(), ch, static_cast<int>(ccIndexOrder[idx]),
                 engineCc[ch][idx].load(std::memory_order_relaxed));
+        // A GM/GS/XG reset returns the reverb send to its specified default,
+        // which is 40 rather than FluidSynth's 0. Unlike volume and pan, there
+        // is no plugin-owned value to restore here: the spec's default IS the
+        // right answer after a reset.
+        fluid_synth_cc(synth.get(), ch, static_cast<int>(EFFECTS_DEPTH1),
+                       MidiConstants::defaultReverbSend);
     }
 }
 

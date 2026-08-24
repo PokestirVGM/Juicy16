@@ -85,15 +85,70 @@ std::unique_ptr<juce::Drawable> makeGearDrawable(juce::Colour colour) {
     return drawable;
 }
 
+// One accent choice, drawn as the colour it selects. A row of names in coloured
+// text was hard to scan and hard to name accessibly; a swatch says what it does
+// without reading.
+class AccentSwatch final : public juce::Button {
+public:
+    AccentSwatch(Juicy16::Accent accentToUse, const String& accentName)
+    : juce::Button{accentName + " accent"}
+    , accent{accentToUse}
+    {
+        setTitle(accentName + " accent");
+        setDescription(String{"Use the "} + accentName + " accent colour");
+        setTooltip(getDescription());
+        setClickingTogglesState(true);
+        setRadioGroupId(1);
+        setWantsKeyboardFocus(true);
+    }
+
+private:
+    void paintButton(Graphics& g, bool isMouseOver, bool isDown) override {
+        const auto area{getLocalBounds().toFloat().reduced(1.0f)};
+        juce::Colour fill{Juicy16::accentColour(accent)};
+        if (isDown)
+            fill = fill.darker(0.15f);
+        g.setColour(fill.withMultipliedAlpha(getToggleState() || isMouseOver ? 1.0f : 0.72f));
+        g.fillRoundedRectangle(area, GuiConstants::cornerRadius);
+
+        // The selected swatch is ringed rather than ticked: a tick would have to
+        // be legible on four different hues.
+        if (getToggleState()) {
+            g.setColour(findColour(Juicy16::textPrimaryColourId));
+            g.drawRoundedRectangle(area.reduced(0.5f), GuiConstants::cornerRadius, 1.6f);
+        }
+        if (hasKeyboardFocus(false)) {
+            g.setColour(findColour(Juicy16::focusRingColourId));
+            g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(0.5f),
+                                   GuiConstants::cornerRadius, 1.0f);
+        }
+    }
+
+    Juicy16::Accent accent;
+};
+
 // The settings popover: the accent choice, plus the engine facts worth quoting
 // in a bug report. It exists so later settings have somewhere to land instead of
 // being bolted onto the header one at a time.
+//
+// The facts are KEY/VALUE rows, not a block of text. As a bare four-line label
+// they read as debug output: "Standalone" and "48000 Hz" with nothing saying
+// what either one is.
 class SettingsPanel final : public Component {
 public:
+    struct Fact { String key; String value; };
+
+    // accentName() is an identifier, stored in state; the popover shows a label.
+    static String displayName(Juicy16::Accent accent) {
+        const String name{Juicy16::accentName(accent)};
+        return name.substring(0, 1).toUpperCase() + name.substring(1);
+    }
+
     SettingsPanel(Juicy16::Accent current,
-                  const String& engineFacts,
+                  std::vector<Fact> factsToShow,
                   std::function<void(Juicy16::Accent)> onAccentChosen)
-    : chooseAccent{std::move(onAccentChosen)}
+    : facts{std::move(factsToShow)}
+    , chooseAccent{std::move(onAccentChosen)}
     {
         setName("Settings");
         setTitle("Settings");
@@ -104,84 +159,126 @@ public:
         accentHeading.setAccessible(false);
         addAndMakeVisible(accentHeading);
 
+        // The chosen accent is named beside the heading, so the swatches do not
+        // each need a caption under them.
+        accentName.setFont(Font{juce::FontOptions{GuiConstants::labelFontHeight}});
+        accentName.setJustificationType(Justification::centredRight);
+        accentName.setAccessible(false);
+        addAndMakeVisible(accentName);
+
+        buildHeading.setText("BUILD", dontSendNotification);
+        buildHeading.setFont(Font{juce::FontOptions{GuiConstants::labelFontHeight}});
+        buildHeading.setAccessible(false);
+        addAndMakeVisible(buildHeading);
+
         for (const auto accent : {Juicy16::Accent::sage, Juicy16::Accent::amber,
                                   Juicy16::Accent::terracotta, Juicy16::Accent::neutral}) {
-            const String label{Juicy16::accentName(accent)};
-            auto button{std::make_unique<juce::TextButton>(
-                label.substring(0, 1).toUpperCase() + label.substring(1))};
-            const String name{Juicy16::accentName(accent) + " accent"};
-            button->setName(name);
-            button->setTitle(name);
-            button->setDescription(String{"Use the "} + name);
-            button->setTooltip(button->getDescription());
-            button->setClickingTogglesState(true);
-            button->setRadioGroupId(1);
-            button->setWantsKeyboardFocus(true);
-            button->setToggleState(accent == current, dontSendNotification);
-            // The swatch IS the button: its own accent fills it when chosen and
-            // colours its label when not, so the choice is visible rather than
-            // described.
-            button->setColour(juce::TextButton::buttonOnColourId,
-                              Juicy16::accentColour(accent));
-            button->setColour(juce::TextButton::textColourOffId,
-                              Juicy16::accentColour(accent));
-            button->onClick = [this, accent] {
+            auto swatch{std::make_unique<AccentSwatch>(accent, Juicy16::accentName(accent))};
+            swatch->setToggleState(accent == current, dontSendNotification);
+            swatch->onClick = [this, accent] {
+                accentName.setText(displayName(accent), dontSendNotification);
                 if (chooseAccent != nullptr)
                     chooseAccent(accent);
             };
-            addAndMakeVisible(*button);
-            accentButtons.add(std::move(button));
+            addAndMakeVisible(*swatch);
+            swatches.add(std::move(swatch));
+        }
+        accentName.setText(displayName(current), dontSendNotification);
+
+        for (const auto& fact : facts) {
+            auto key{std::make_unique<Label>()};
+            key->setText(fact.key, dontSendNotification);
+            key->setFont(Font{juce::FontOptions{GuiConstants::valueFontHeight}});
+            key->setAccessible(false);
+            addAndMakeVisible(*key);
+            factKeys.add(std::move(key));
+
+            auto value{std::make_unique<Label>()};
+            value->setText(fact.value, dontSendNotification);
+            value->setFont(Font{juce::FontOptions{GuiConstants::valueFontHeight}});
+            value->setJustificationType(Justification::centredRight);
+            value->setMinimumHorizontalScale(0.8f);
+            // The value carries the key as its accessible name, so a screen
+            // reader announces "Engine: FluidSynth 2.5.5" rather than a bare
+            // version string.
+            value->setName(fact.key);
+            value->setTitle(fact.key);
+            value->setDescription(fact.key + ": " + fact.value);
+            addAndMakeVisible(*value);
+            factValues.add(std::move(value));
         }
 
-        facts.setText(engineFacts, dontSendNotification);
-        facts.setFont(Font{juce::FontOptions{GuiConstants::valueFontHeight}});
-        facts.setJustificationType(Justification::topLeft);
-        facts.setName("Build information");
-        facts.setTitle("Build information");
-        facts.setDescription("Juicy16 version and engine details");
-        addAndMakeVisible(facts);
-
-        setSize(232, 182);
+        setSize(kWidth,
+                GuiConstants::padding * 2
+                    + kHeadingHeight + kHeadingGap + kSwatchHeight
+                    + GuiConstants::groupGap + 1 + GuiConstants::groupGap
+                    + kHeadingHeight + kHeadingGap
+                    + static_cast<int>(facts.size()) * kFactRowHeight);
     }
 
     void paint(Graphics& g) override {
         g.fillAll(findColour(Juicy16::panelBackgroundColourId));
+        g.setColour(findColour(Juicy16::subtleBorderColourId));
+        g.fillRect(GuiConstants::padding, dividerY,
+                   getWidth() - GuiConstants::padding * 2, 1);
     }
 
-    // Resolved here, not in the constructor: the panel is built before it is
-    // given the plugin's LookAndFeel, and the default one has never heard of
-    // Juicy16's ColourIds - it asserts and returns black.
     void lookAndFeelChanged() override {
         auto& lookAndFeel{getLookAndFeel()};
-        accentHeading.setColour(Label::textColourId,
-                                lookAndFeel.findColour(Juicy16::textLabelColourId));
-        facts.setColour(Label::textColourId,
-                        lookAndFeel.findColour(Juicy16::textValueColourId));
+        const Colour label{lookAndFeel.findColour(Juicy16::textLabelColourId)};
+        for (Label* heading : {&accentHeading, &buildHeading})
+            heading->setColour(Label::textColourId, label);
+        accentName.setColour(Label::textColourId,
+                             lookAndFeel.findColour(Juicy16::textPrimaryColourId));
+        for (Label* key : factKeys)
+            key->setColour(Label::textColourId, label);
+        for (Label* value : factValues)
+            value->setColour(Label::textColourId,
+                             lookAndFeel.findColour(Juicy16::textPrimaryColourId));
     }
 
     void resized() override {
         Rectangle<int> r{getLocalBounds().reduced(GuiConstants::padding)};
-        accentHeading.setBounds(r.removeFromTop(14));
-        r.removeFromTop(6);
-        // Two rows of two: four accent names do not fit side by side at the
-        // popover's width, and a truncated colour name is worse than a wrap.
-        const int width{(r.getWidth() - 6) / 2};
-        for (int pair = 0; pair < 2; ++pair) {
-            Rectangle<int> row{r.removeFromTop(24)};
-            for (int column = 0; column < 2; ++column) {
-                accentButtons[pair * 2 + column]->setBounds(row.removeFromLeft(width));
-                row.removeFromLeft(6);
-            }
-            r.removeFromTop(6);
+
+        Rectangle<int> accentRow{r.removeFromTop(kHeadingHeight)};
+        accentName.setBounds(accentRow.removeFromRight(accentRow.getWidth() / 2));
+        accentHeading.setBounds(accentRow);
+        r.removeFromTop(kHeadingGap);
+
+        Rectangle<int> swatchRow{r.removeFromTop(kSwatchHeight)};
+        const int gap{6};
+        const int width{(swatchRow.getWidth() - gap * (swatches.size() - 1))
+                        / juce::jmax(1, swatches.size())};
+        for (auto* swatch : swatches) {
+            swatch->setBounds(swatchRow.removeFromLeft(width));
+            swatchRow.removeFromLeft(gap);
         }
-        r.removeFromTop(GuiConstants::innerPadding);
-        facts.setBounds(r);
+
+        r.removeFromTop(GuiConstants::groupGap);
+        dividerY = r.removeFromTop(1).getY();
+        r.removeFromTop(GuiConstants::groupGap);
+
+        buildHeading.setBounds(r.removeFromTop(kHeadingHeight));
+        r.removeFromTop(kHeadingGap);
+        for (int i = 0; i < factKeys.size(); ++i) {
+            Rectangle<int> row{r.removeFromTop(kFactRowHeight)};
+            factValues[i]->setBounds(row.removeFromRight(row.getWidth() * 3 / 5));
+            factKeys[i]->setBounds(row);
+        }
     }
 
 private:
-    Label accentHeading;
-    juce::OwnedArray<juce::TextButton> accentButtons;
-    Label facts;
+    static constexpr int kWidth{252};
+    static constexpr int kHeadingHeight{14};
+    static constexpr int kHeadingGap{8};
+    static constexpr int kSwatchHeight{26};
+    static constexpr int kFactRowHeight{18};
+
+    std::vector<Fact> facts;
+    Label accentHeading, accentName, buildHeading;
+    juce::OwnedArray<AccentSwatch> swatches;
+    juce::OwnedArray<Label> factKeys, factValues;
+    int dividerY{0};
     std::function<void(Juicy16::Accent)> chooseAccent;
 };
 
@@ -302,15 +399,19 @@ void JuicySFAudioProcessorEditor::applyAccentFromState() {
 }
 
 void JuicySFAudioProcessorEditor::showSettings() {
-    const String facts{
-        String::fromUTF8("Juicy16 " JUICY16_VERSION "\n")
-        + "FluidSynth " + String(FLUIDSYNTH_VERSION) + "\n"
-        + processor.getWrapperTypeDescription(processor.wrapperType) + "\n"
-        + String(processor.getSampleRate(), 0) + " Hz"};
+    // Named facts, in the order a bug report wants them.
+    std::vector<SettingsPanel::Fact> facts{
+        SettingsPanel::Fact{"Version", JUICY16_VERSION},
+        SettingsPanel::Fact{"Engine", "FluidSynth " + String(FLUIDSYNTH_VERSION)},
+        SettingsPanel::Fact{"Format",
+                            processor.getWrapperTypeDescription(processor.wrapperType)},
+        SettingsPanel::Fact{"Sample rate",
+                            String(processor.getSampleRate(), 0) + " Hz"},
+    };
 
     auto panel{std::make_unique<SettingsPanel>(
         lookAndFeel.getAccent(),
-        facts,
+        std::move(facts),
         [this](Juicy16::Accent accent) {
             valueTreeState.state.getChildWithName("uiState")
                 .setProperty("accent", Juicy16::accentName(accent), nullptr);

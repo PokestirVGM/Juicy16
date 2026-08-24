@@ -185,9 +185,16 @@ but it is an audible change and worth knowing before you reopen old work.
   hall gets whatever profile you selected. That is a scope decision, recorded in
   the milestone plan; tell us if a rip sounds wrong in a way the manual controls
   cannot fix.
-- **A rip that never sends CC91 gets no reverb**, whatever these controls say.
-  That is not a defect: nothing is being sent to the reverb. `SEQ_BGM_C_03`, a
-  real VGMTrans rip in the test corpus, sends no CC91 at all.
+- **Every channel starts at the GM default reverb send.** General MIDI System
+  Level 1 specifies 40; GS and XG agree. FluidSynth initialises it to 0 instead,
+  which meant nothing reached the reverb until a file explicitly asked — so on
+  most material the reverb controls did nothing at all, however far you turned
+  them. Juicy16 seeds the documented default, exactly as it seeds volume 100 and
+  pan 64, and a GM/GS/XG reset returns it to 40 rather than to zero.
+
+  A file that sends its own CC91 still overrides it, per channel, at the event's
+  own timestamp. `SEQ_BGM_C_03`, a real VGMTrans rip in the test corpus, sends no
+  CC91 at all — that file now gets the default send rather than silence.
 - **Bypass is genuine.** Turning the reverb off removes the unit rather than
   turning its level down, so nothing keeps computing a tail. Bypassed output is
   bit-identical to a signal that was never sent to the reverb, which is asserted

@@ -174,6 +174,12 @@ struct MidiConstants {
     // GM channel defaults, matching FluidSynth's own channel initialisation.
     inline static const int defaultChannelVolume = 100; // CC7
     inline static const int centreValue = 64;           // CC10 pan centre
+    // CC91 Reverb Send. General MIDI System Level 1 specifies 40 as a channel's
+    // default; GS and XG agree. FluidSynth initialises it to 0 instead, which
+    // means nothing reaches the reverb until a file explicitly asks - so a user
+    // turning up the reverb controls hears nothing at all. Juicy16 seeds the
+    // documented default, exactly as it seeds volume 100 and pan 64.
+    inline static const int defaultReverbSend = 40;     // CC91
     // SF2 2.04 section 7.2 limits a file's wBank to 0-127 melodic plus 128
     // percussion, and that is what a font's own bank numbering contains. The
     // runtime channel bank is wider: on a drum channel FluidSynth adds its 128
