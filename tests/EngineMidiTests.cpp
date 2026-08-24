@@ -4118,7 +4118,7 @@ int main(int argc, char** argv)
             accessibleMetadata = accessibleMetadata && itemValid;
         }
         check(accessibleMetadata,
-              "bank picker, channel table, keyboard, status, and all three sliders expose named accessible metadata and built-in control roles");
+              "bank picker, channel rack, keyboard, status, settings, bank readout, and the reverb and master controls expose named accessible metadata and built-in control roles");
 
         // Keyboard routing. The on-screen MIDI keyboard defaults to wanting
         // focus, which would swallow typed input meant for the controls, so the

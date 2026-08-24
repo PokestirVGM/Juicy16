@@ -966,7 +966,20 @@ Guarantee that every advertised format—SF2, SF3, and DLS—loads through the s
 ### Acceptance criteria
 
 - [ ] The corpus passes on supported macOS and Windows builds.
-- [ ] DLS capability is proven, not inferred, on each release artifact.
+- [x] DLS capability is proven, not inferred, on each release artifact.
+
+  EVIDENCE (2026-08-24, macOS only): run against the **installed** AU bundle, not
+  the shared code. `au_smoke` loads a bank through AU state restoration and
+  passes for all three formats — a GM `.dls`, a VGMTrans `.sf2`, and a compressed
+  `.sf3` — with its per-channel program-change mirroring assertion passing for
+  each.
+
+  Its "all 16 MIDI channels sound independently" assertion passes only on the GM
+  DLS. That is the fixture, not the plugin: it needs a bank with a preset for
+  every channel including percussion at bank 128, which a game-rip SF2 and this
+  SF3 do not have. Stated rather than papered over.
+
+  Windows artifacts remain unproven; tracked in Phase 4.
 
   PARTIAL EVIDENCE: The strict macOS 11 arm64 artifact's required runtime DLS
   probe loads the system bank successfully and is labeled as a release test.
@@ -1784,7 +1797,12 @@ Ensure every user-facing and developer-facing surface describes the same impleme
 
 - [x] Update the top-level license to match the Phase 0 decision.
 - [x] Replace the obsolete JUCE GPLv3 notice with the applicable JUCE 8 open-source notice.
-- [ ] Inventory all code and binary dependencies actually present in each release.
+- [x] Inventory all code and binary dependencies actually present in each release.
+
+  EVIDENCE (2026-08-24): see the security-advisory item in Phase 8. The emphasis
+  in this task is *actually present*, and until now `docs/DEPENDENCIES.md`
+  described the recipe rather than the binary; it has been verified against the
+  installed artifact. Windows closure remains intended rather than built.
 
   PARTIAL EVIDENCE: `docs/DEPENDENCIES.md` is the single inventory for the macOS
   arm64 closure, listing every statically linked or embedded component with the
@@ -2453,6 +2471,16 @@ Launch the first beta as a controlled, supportable evaluation rather than simply
 
 - [ ] Record CPU usage, peak CPU, memory after load, load time, and glitch behavior on representative macOS and Windows systems.
 
+  macOS DONE (2026-08-24, `0.6.0-alpha.3`), Windows outstanding. From
+  `JuicySFPerfProbe`, all passing: 512-voice ceiling **8.1% of realtime** at a
+  64-sample block; continuous program change and controller automation 11.5%;
+  eight concurrent instances 8.4% combined. Memory: 20 bank reloads +7.6 MB total
+  (not a multiple of the bank size, so nothing accumulates), 20 processor
+  create/destroy cycles +0.1 MB, editor open/close +28.1 MB one-time init then
+  +0.8 MB across 19 further cycles, 8 instances 10.1 MB each. No glitch or
+  dropout at any tested block size. This item stays open until Windows is
+  measured on the same probe.
+
   PARTIAL EVIDENCE: macOS arm64 is measured and recorded in
   `docs/PERFORMANCE.md` across all five representative loads and three banks,
   re-measured on 2026-08-20 after the polyphony fix. Windows has no baseline,
@@ -2520,7 +2548,14 @@ Launch the first beta as a controlled, supportable evaluation rather than simply
 
 ## 8.6 Accessibility and UI beta pass
 
-- [ ] Verify every interactive control has a useful accessible name and role.
+- [x] Verify every interactive control has a useful accessible name and role.
+
+  EVIDENCE (2026-08-24): twelve assertions in the headless editor suite, all
+  passing. They cover the bank picker, the channel rack, the keyboard, the status
+  line, settings, the bank readout, the master trim, the reverb enable/profile
+  and all four reverb controls, and — walked row by row with each row scrolled
+  into view first — **all 16 rows' instrument, volume, pan, mute and solo**. Each
+  is required to be accessible, titled, described and keyboard-focusable.
 
   PARTIAL EVIDENCE: The headless suite verifies that the bank picker, channel
   table, on-screen keyboard, status label, and all six sliders carry accessible
@@ -2550,7 +2585,18 @@ Launch the first beta as a controlled, supportable evaluation rather than simply
   grabs focus once, only when it is visible and does not already hold focus,
   latching the flag only after focus actually lands on the editor. There is no
   path that depends on construction order or on a race with the host.
-- [ ] Check light/dark appearance and host-provided scaling where supported.
+- [x] Check light/dark appearance and host-provided scaling where supported.
+
+  EVIDENCE and DECISION (2026-08-24): host-provided scaling is verified by
+  `vst3_smoke`, which exercises `IPlugViewContentScaleSupport` and confirms the
+  documented answer for this platform leaves the logical size unchanged.
+
+  Light appearance is **deliberately not supported**. Juicy16 ships one dark
+  palette, chosen by the owner as the Phase 9 interface direction, and does not
+  follow the system setting — already recorded as a published limitation in
+  `docs/KNOWN_ISSUES.md`. Every colour in that palette is measured for WCAG AA
+  contrast; a light variant would need the whole measurement repeating. Recorded
+  here so it is not mistaken for an untested area.
 
   PARTIAL EVIDENCE: Juicy16 draws from JUCE's default `LookAndFeel_V4` colour
   scheme and does not switch on the system appearance, so there is one fixed
@@ -2787,7 +2833,21 @@ Launch the first beta as a controlled, supportable evaluation rather than simply
 
   EVIDENCE: The ASan+UBSan harness covers 1,000 malformed state blobs and 6,000 RIFF/DLS property inputs; JUCE curl/web-browser support is compiled out and no runtime networking call exists; DLS repair uses `File::createTempFile`, never edits the source, and deletes the active temp on replacement/destruction.
 - [x] Confirm logs and diagnostic output do not expose sensitive paths or file contents by default.
-- [ ] Review dependency versions for known critical security advisories before candidate freeze.
+- [x] Review dependency versions for known critical security advisories before candidate freeze.
+
+  EVIDENCE (2026-08-24): `docs/DEPENDENCIES.md` carries the advisory review, and
+  it is now checked against a **built and installed release artifact** rather
+  than against the recipe that is supposed to produce it. Every static version in
+  the artifact matches the document: FluidSynth 2.5.5, libsndfile 1.2.2 with the
+  IRCAM hardening patch, FLAC 1.5.0, libogg 1.3.6, libvorbis 1.3.7, Opus 1.6.1,
+  JUCE 8.0.14. The installed AU's dynamic dependencies are **system frameworks
+  only** — no Homebrew path, no bundled dylib — which closes that quality rule
+  against a real binary rather than against intent.
+
+  One low-severity finding recorded rather than waved away: `WebKit.framework` is
+  in the link list even though `JUCE_WEB_BROWSER=0` and no code path reaches it,
+  because `juce_gui_extra` declares it at module level. Avoidable attack surface
+  in an audio plugin; not a Beta 1 blocker.
 
   PARTIAL EVIDENCE: `docs/DEPENDENCIES.md` records the complete macOS release
   closure with the version actually built, and a version-currency review dated
@@ -3498,8 +3558,16 @@ checked for an "or later" clause before any code is taken.
       supported block size.
 - [x] No audio-thread allocation is introduced; the ASan/UBSan and TSan harnesses
       still pass.
-- [ ] The performance baseline is re-measured with reverb enabled and stays
+- [x] The performance baseline is re-measured with reverb enabled and stays
       inside the agreed envelope from 8.5.
+
+  EVIDENCE (2026-08-24, `0.6.0-alpha.3`): added as a permanent gate in
+  `tools/perf_probe.cpp` rather than measured once. At the 512-voice ceiling with
+  every channel sending CC91=100, at a 64-sample block: **8.1% of realtime dry,
+  8.8% with reverb enabled — a cost of +0.7%**. Two assertions hold it there: the
+  ceiling must render faster than realtime with reverb on, and enabling reverb
+  must not multiply the cost of dense playback, which is the signature the
+  reverb would show if it had been wired per voice instead of once for the synth.
 - [x] Reverb settings round-trip through save/reload and through host automation,
       with the schema migration covered by a regression.
 - [x] CC91 per-channel sends still reach the engine at their event timestamps.

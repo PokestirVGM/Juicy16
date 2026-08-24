@@ -266,6 +266,58 @@ int main(int argc, char** argv)
               "the voice ceiling renders faster than realtime at the smallest tested block");
     }
 
+    // Phase 10 exit criterion: the envelope has to hold with the reverb running,
+    // not only on the dry path. Reverb ships OFF, so every measurement above is
+    // dry; this one enables it and compares the cost of the same work.
+    std::printf("\n-- voice ceiling with reverb enabled --\n");
+    {
+        constexpr int blockSize{64};
+        double dryMs{0.0}, wetMs{0.0}, audioMs{0.0};
+        for (int pass = 0; pass < 2; ++pass) {
+            const bool reverbOn{pass == 1};
+            JuicySFAudioProcessor processor;
+            processor.prepareToPlay(sampleRate, blockSize);
+            const auto state{stateFor(bank.getFullPathName())};
+            processor.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
+            for (auto* parameter : processor.getParameters())
+                if (auto* b{dynamic_cast<juce::AudioParameterBool*>(parameter)};
+                    b != nullptr && b->paramID == "reverbOn")
+                    *b = reverbOn;
+
+            juce::AudioBuffer<float> audio{2, blockSize};
+            juce::MidiBuffer opening;
+            // Every channel sending reverb, so the reverb bus is actually fed.
+            for (int channel = 1; channel <= 16; ++channel)
+                opening.addEvent(juce::MidiMessage::controllerEvent(channel, 91, 100), 0);
+            addVoiceCeilingChords(opening, blockSize, true);
+            audio.clear();
+            processor.processBlock(audio, opening);
+
+            const int blocks{static_cast<int>(sampleRate * 5.0 / blockSize)};
+            const double start{juce::Time::getMillisecondCounterHiRes()};
+            for (int block = 0; block < blocks; ++block) {
+                juce::MidiBuffer empty;
+                audio.clear();
+                processor.processBlock(audio, empty);
+            }
+            const double elapsedMs{juce::Time::getMillisecondCounterHiRes() - start};
+            audioMs = blocks * blockSize * 1000.0 / sampleRate;
+            (reverbOn ? wetMs : dryMs) = elapsedMs;
+            std::printf("  reverb %-3s block %4d: %6.0f ms cpu for %6.0f ms audio (%.1f%% of realtime)\n",
+                        reverbOn ? "on" : "off", blockSize, elapsedMs, audioMs,
+                        100.0 * elapsedMs / audioMs);
+        }
+        std::printf("  reverb cost at the voice ceiling: %+.1f%% of realtime\n",
+                    100.0 * (wetMs - dryMs) / audioMs);
+        check(wetMs < audioMs,
+              "the voice ceiling renders faster than realtime with reverb enabled");
+        // The reverb is one stereo FDN for the whole synth, not per voice, so its
+        // cost must not scale with polyphony. A large multiple here would mean it
+        // had been wired per voice by mistake.
+        check(wetMs < dryMs * 1.5 + 0.05 * audioMs,
+              "enabling reverb does not multiply the cost of dense playback");
+    }
+
     std::printf("\n-- program change and controller automation --\n");
     {
         constexpr int blockSize{64};

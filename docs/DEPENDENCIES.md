@@ -165,6 +165,38 @@ defined-behavior consequences on an ordinary build.
 | --- | --- |
 | libsndfile 1.2.2 — MPEG memory leak, MPEG reachable assertion | Not reachable; `ENABLE_MPEG=OFF`, no `mpeg_l3` symbols in the artifact |
 
+## Artifact verification — 2026-08-24 (`0.6.0-alpha.3`)
+
+The table above is now checked against a **built and installed release artifact**
+rather than against the recipe that is supposed to produce it. Method: read the
+version from every `.pc` in the pinned dependency prefix the Release build
+actually linked against, and read the dynamic link list from the installed AU
+binary.
+
+Static closure linked into the artifact — every version matches this document:
+
+```
+flac 1.5.0   fluidsynth 2.5.5   ogg 1.3.6   opus 1.6.1
+sndfile 1.2.2 (+ IRCAM hardening patch)     vorbis 1.3.7
+```
+
+Dynamic dependencies of the installed AU: **system frameworks only**. No
+Homebrew path, no bundled dylib, nothing from the developer machine. That closes
+the "release artifacts must not depend on developer-machine Homebrew paths"
+quality rule against a real binary.
+
+### Finding: WebKit is linked but unused
+
+`otool -L` shows `WebKit.framework` in the installed AU's link list even though
+the build sets `JUCE_WEB_BROWSER=0` and the plugin never creates a browser
+component. JUCE's `juce_gui_extra` declares the framework at module level, so it
+is linked regardless of the compile-time flag.
+
+Severity: **low**. It is a system framework, it is not dlopen'd, and no Juicy16
+code path reaches it — but it is avoidable attack surface in an audio plugin and
+it enlarges the load-time dependency set for no benefit. Worth removing before
+1.0 by dropping `juce_gui_extra` if nothing else needs it. Not a Beta 1 blocker.
+
 ## Attack surface notes
 
 The parsing surface reachable from a user-selected file is FluidSynth's SF2/SF3/DLS loaders and, for SF3, libsndfile with its FLAC/Ogg/Vorbis/Opus codecs. That is the highest-risk area in the closure, since the input is arbitrary and user-supplied.

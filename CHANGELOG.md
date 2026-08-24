@@ -2,6 +2,15 @@
 
 ## 0.6.0-alpha.3 — unreleased
 
+### Added
+
+- **Reverb performance gate.** `perf_probe` now measures the 512-voice ceiling
+  with the reverb enabled and every channel sending CC91, not only dry: 8.1% of
+  realtime dry, 8.8% with reverb, a cost of +0.7%. Two assertions hold it — the
+  ceiling must stay faster than realtime with reverb on, and enabling reverb must
+  not multiply the cost of dense playback, which is what a per-voice reverb would
+  look like. This was Phase 10's last open exit criterion.
+
 ### Notes
 
 - **Found: Juicy16 plays ~10.4 dB quieter than VGMTrans.** Measured end to end
