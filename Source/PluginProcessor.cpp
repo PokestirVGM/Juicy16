@@ -138,8 +138,13 @@ AudioProcessorValueTreeState::ParameterLayout JuicySFAudioProcessor::createParam
     // are a control surface over that existing reverb: no new DSP, no new
     // dependency, no new licence obligation. Per-channel CC91 sends still reach
     // the engine at their own timestamps and feed the reverb these controls set.
+    // OFF by default, by owner decision on 2026-08-23. Juicy16's reverb was
+    // never audible before this release, so switching it on by default would
+    // change how every existing project sounds without the user asking. The
+    // controls are there and the GM default send feeds them the moment it is
+    // switched on; the choice to add reverb is the user's to make.
     layout.add(make_unique<juce::AudioParameterBool>(
-        juce::ParameterID{"reverbOn", 1}, "reverb enabled", true,
+        juce::ParameterID{"reverbOn", 1}, "reverb enabled", false,
         juce::AudioParameterBoolAttributes{}.withLabel("Reverb")));
     layout.add(make_unique<juce::AudioParameterChoice>(
         juce::ParameterID{"reverbProfile", 1}, "reverb profile",

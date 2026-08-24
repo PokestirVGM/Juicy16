@@ -45,6 +45,22 @@ The remaining 63 are not yet identified and are most likely stock JUCE IDs that
 - **Channels start at the GM default reverb send (CC91 = 40).** FluidSynth
   initialises it to 0, which made every reverb control inert on any file that
   did not explicitly ask for reverb. A file's own CC91 still overrides it.
+- **Some tracks' volume or attack may sound different from other players.**
+  Reported on 0.6.0-alpha.2 and not fully explained. What has been ruled out by
+  measurement against stock FluidSynth on the same bank: velocity response
+  (within 0.3 dB), CC7 channel volume (within 0.22 dB), CC10 pan (exact), and
+  the amplitude envelope — attack time is identical at 37.7 ms and unaffected by
+  CC73, so the removed CC71-79 modulators are genuinely gone. Two candidates
+  remain:
+  1. **Reverb was on by default in 0.6.0-alpha.2**, at the GM default send. It
+     was the first Juicy16 release in which the reverb was audible at all, and
+     reverb both raises perceived level unevenly between instruments and smears
+     attacks. It is **off by default** from the next build, which should settle
+     this one way or the other.
+  2. **Chorus is off** (below), while stock FluidSynth and most other players
+     have it on. A file that sends CC93 will sound thinner here than elsewhere.
+  If it persists with reverb off, the useful report is a specific MIDI, the
+  channel, and the instrument — that can be measured rather than guessed at.
 - **Chorus does nothing.** It was discarded by the same bug and is now switched
   off explicitly rather than un-muted with defaults nobody chose. CC93 still
   reaches the engine. Chorus will get controls of its own in a later release.

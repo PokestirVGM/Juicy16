@@ -162,13 +162,14 @@ the call Juicy16 used and 7.467 through one that mixes the effects in. The
 effects bus is now mixed into the output, so material that asks for reverb gets
 it.
 
-**This changes how existing projects sound.** A rip that sends CC91 will now have
-reverb where it previously had none. That is the file being played as written,
-but it is an audible change and worth knowing before you reopen old work.
+**The reverb is off by default.** Juicy16 never had an audible reverb before, so
+switching one on for everybody would change how every existing project sounds
+without being asked. Turn it on and it works immediately — every channel already
+carries the GM default send.
 
 | Control | Parameter | Range | Universal | Soft |
 |---|---|---|---|---|
-| Enable | `reverbOn` | on/off | on | on |
+| Enable | `reverbOn` | on/off | **off by default** | — |
 | Profile | `reverbProfile` | Universal / Soft / Custom | — | — |
 | Size | `reverbSize` | 0–1 | 0.45 | 0.20 |
 | Damp | `reverbDamp` | 0–1 | 0.35 | 0.60 |

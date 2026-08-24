@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.6.0-alpha.3 — unreleased
+
+### Changed
+
+- **The reverb is off by default.** Owner decision. Juicy16's reverb was never
+  audible before 0.6.0-alpha.1, so enabling one for everybody changes how every
+  existing project sounds without being asked. The controls are ready and every
+  channel already carries the GM default send, so switching it on works
+  immediately — the choice is the user's.
+
+### Notes
+
+- **Host validation, owner-reported:** multichannel playback works in **both FL
+  Studio and Cubase, in both AU and VST3**, with MIDI events transferring
+  correctly. That is the workflow this architecture exists for, confirmed for the
+  first time since the Phase 9/10 rework. Phase 7's items stay open pending the
+  evidence artefacts it asks for (host versions, an expected/actual matrix, the
+  repeat-after-transport passes), but whether the mechanism works is no longer in
+  question.
+- **Open:** some tracks' volume and some instruments' attack reported as sounding
+  off. Measured against stock FluidSynth on the same bank, Juicy16 matches
+  velocity response within 0.3 dB, CC7 within 0.22 dB, CC10 pan exactly, and has
+  an identical 37.7 ms attack unaffected by CC73 — so the engine's level and
+  envelope are not the cause. The two remaining candidates are reverb-on-by-
+  default in alpha.2 (now off) and chorus being disabled while other players
+  enable it. See `docs/KNOWN_ISSUES.md`.
+
 ## 0.6.0-alpha.2 — unreleased
 
 Owner feedback from running alpha.1. Two of the reports were defects rather than

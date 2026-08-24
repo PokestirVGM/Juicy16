@@ -329,7 +329,7 @@ private:
     // Reverb. Targets are written from the message thread or a host automation
     // thread; the smoothers and the applied state live on the audio thread only,
     // exactly like outputLevel.
-    std::atomic<bool> reverbEnabledTarget{true};
+    std::atomic<bool> reverbEnabledTarget{false};
     std::atomic<float> reverbTarget[numReverbParams];
     bool reverbEnabledApplied{false};
     bool reverbEverApplied{false};

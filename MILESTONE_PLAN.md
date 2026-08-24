@@ -2038,6 +2038,28 @@ fixture's.
 
 ### macOS AU
 
+OWNER REPORT (2026-08-23, `0.6.0-alpha.2`): the owner tested the installed
+candidate and reports that **multichannel playback works in both FL Studio and
+Cubase, in both AU and VST3**, and that the functions tested — including MIDI
+event transfer — behave correctly. That covers the critical workflow this whole
+architecture exists for, and it is the first host confirmation since the Phase 9
+and 10 rework.
+
+Recorded as an owner report rather than as completed Phase 7 evidence, because
+7.2 asks for artefacts this does not yet have: exact host and OS versions, the
+routing configuration used, an expected/actual matrix at defined checkpoints,
+and the repeat-after-stop/start/rewind/loop/reload passes. The items below stay
+open until that evidence is captured; what is NOT in doubt any more is whether
+the mechanism works.
+
+One defect is open from the same session: the owner reports some tracks' volume
+sounding off and some instruments' attack sounding slightly wrong. Measured
+against stock FluidSynth with `tools/dynamics_probe.cpp` on the same bank,
+Juicy16 tracks velocity within 0.3 dB, CC7 within 0.22 dB, CC10 pan exactly, and
+its attack time is identical at 37.7 ms and unaffected by CC73 — so the engine's
+level and envelope behaviour are not the cause. See the reverb note in
+`docs/KNOWN_ISSUES.md` for the two remaining candidates.
+
 - [ ] Logic Pro: discovery, load, 16-channel MIDI, Program Change, state restore, UI resize, file restore.
 - [ ] At least one additional AU host, such as FL Studio: the same critical workflow.
 

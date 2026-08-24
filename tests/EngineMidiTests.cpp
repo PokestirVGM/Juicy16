@@ -2349,6 +2349,7 @@ int main(int argc, char** argv)
             int send{-1};
             juce::MidiBuffer none;
             render(plain, plainAudio, none);
+            if (auto* p{findBoolParameter(plain, "reverbOn")}) *p = true;
             const bool defaultSendApplied{
                 plain.getFluidSynthModel().getControllerValue(0, 91, send)
                 && send == MidiConstants::defaultReverbSend};
@@ -3593,11 +3594,14 @@ int main(int argc, char** argv)
             double engineLevel{-1.0};
             opened.getFluidSynthModel().getReverbSetting(
                 FluidSynthModel::reverbLevel, engineLevel);
-            check(on != nullptr && on->get()
+            // Reverb is OFF by default, so a project written before the reverb
+            // existed opens sounding exactly as it did - the settings are ready
+            // on the Universal profile, but nothing is added until asked.
+            check(on != nullptr && !on->get()
                       && std::abs(engineLevel
                           - FluidSynthModel::reverbProfiles[0]
                               .values[FluidSynthModel::reverbLevel]) < 1.0e-3,
-                  "a save written before the reverb existed opens on the Universal profile and reaches the engine");
+                  "a save written before the reverb existed opens with the reverb off and the Universal profile ready");
         }
 
         // A save from a FUTURE schema is still refused rather than half-applied.
