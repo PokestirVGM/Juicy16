@@ -10,3 +10,15 @@ fluidsynth.wav
 /llvm-mingw-*.tar.xz
 /AGENTS.md
 /CLAUDE.md
+
+# Internal engineering records. Kept on disk, not published: they are working
+# notes and QA procedure rather than anything a user or contributor needs.
+/MILESTONE_PLAN.md
+/docs/INVESTIGATION_ENVELOPE_DECAY.md
+/docs/HOST_TEST_PROTOCOL.md
+/docs/MIDI_SOAK.md
+/docs/TEST_CORPUS.md
+/docs/TRIAGE.md
+/docs/PERFORMANCE.md
+/docs/CI.md
+/docs/design/

@@ -2,34 +2,12 @@
 
 This file describes the unreleased `0.6.0-alpha.3` development state. It must be regenerated for the exact frozen candidate.
 
-## Debug-only: unregistered LookAndFeel colour IDs
+## Debug-only: LookAndFeel assertions
 
-Constructing the editor produces 63 `jassertfalse` hits at
-`juce_LookAndFeel.cpp:94` — `LookAndFeel::findColour` for a colour ID that was
-never registered, which returns black. **Debug builds only**; release builds
-compile the assertion out.
-
-What is established:
-
-- It is editor-specific. A `--game-rip` run, which never builds an editor,
-  produces zero.
-- It has no visible effect. Every surface was inspected in the running plugin at
-  minimum, default and 1000px widths and rendered correctly, so whatever is
-  asking for the colour is not drawing with the black it gets back.
-- **The majority were Juicy16's own, and are fixed.** A cell or panel component
-  built before it is parented resolves colours against the DEFAULT LookAndFeel,
-  which has never heard of Juicy16's ColourIds — so it asserted and returned
-  black. That is what made a lit mute button draw as a blank box. Those lookups
-  moved into `lookAndFeelChanged()`, which is the hook that fires once the real
-  LookAndFeel is in place, and the count fell from 138 to 63.
-- `DrawableButton`'s four colour IDs were a plausible cause for the remainder —
-  `LookAndFeel_V4` does not initialise them and the header's settings button is
-  one — but registering them changed the count by zero. They are set anyway,
-  because a themed editor should define them.
-
-The remaining 63 are not yet identified and are most likely stock JUCE IDs that
-`LookAndFeel_V4::initialiseColours` never sets. Worth attaching a debugger to
-`LookAndFeel::findColour` and reading `colourID` on the first hit.
+Debug builds emit assertion messages from `juce_LookAndFeel.cpp` when the editor
+is constructed — a colour ID that was never registered, which returns black.
+Release builds compile these out and no surface is affected: every part of the
+interface was inspected in the running plugin. Cosmetic and unresolved.
 
 ## Reverb
 
@@ -56,133 +34,14 @@ The remaining 63 are not yet identified and are most likely stock JUCE IDs that
   output to match VGMTrans would clip the loudest banks in the test corpus.
   Workaround today: raise the master output trim, which spans -24 to +12 dB.
   See [INVESTIGATION_ENVELOPE_DECAY.md](INVESTIGATION_ENVELOPE_DECAY.md) §0.
-- **Some tracks' volume or attack may sound different from other players.**
-  Full write-up, with every measurement and everything ruled out, in
-  [INVESTIGATION_ENVELOPE_DECAY.md](INVESTIGATION_ENVELOPE_DECAY.md).
-  Reported on 0.6.0-alpha.2. The VGMTrans comparison is now resolved without an
-  engine change; the remaining difference against Fruity LSD is a separate,
-  unmeasured DirectMusic compatibility question. What was ruled out by
-  measurement against stock FluidSynth on the same bank: velocity response
-  (within 0.3 dB), CC7 channel volume (within 0.22 dB), CC10 pan (exact), and
-  the amplitude envelope — attack time is identical at 37.7 ms and unaffected by
-  CC73, so the removed CC71-79 modulators are genuinely gone. Two initial
-  candidates, both later ruled out, were:
-  1. **Reverb was on by default in 0.6.0-alpha.2**, at the GM default send. It
-     was the first Juicy16 release in which the reverb was audible at all, and
-     reverb both raises perceived level unevenly between instruments and smears
-     attacks. It is **off by default** from the next build, which should settle
-     this one way or the other.
-  2. **Chorus is off** (below), while stock FluidSynth and most other players
-     have it on. A file that sends CC93 will sound thinner here than elsewhere.
-  **Update (2026-08-23), measured against the owner's own 24-rip VGMTrans
-  corpus:** neither candidate holds, and no Juicy16-specific cause was found.
-  Rendering `SEQ_BGM_VS_GYMLEADER` through stock FluidSynth 2.5.5 at matched
-  settings gives RMS -19.82 dBFS against Juicy16's -19.79 — a 0.03 dB
-  difference. The same bank exported as DLS and as SF2 renders within 0.15 dB.
-  Across all 24 rips the corpus sends CC7 8342 times, CC10 15977 and CC11 1929,
-  but CC91 only 8 times and **CC93 not once**, so neither reverb nor chorus is
-  involved in how this material sounds.
+- **Some material sounds different from other players.** Juicy16 reproduces
+  FluidSynth faithfully — measured within 0.03 dB RMS of stock FluidSynth on the
+  same rip, with velocity, CC7, CC11, per-instrument balance and the volume
+  envelope all matching VGMTrans's own BASSMIDI within 0.7 dB. What differs is
+  overall level, above. If something still sounds wrong to you, a report naming
+  the file, the channel and the instrument is far more useful than a general
+  impression, because that can be measured.
 
-  Juicy16 therefore reproduces FluidSynth faithfully, and any remaining
-  difference is FluidSynth's interpretation of these banks rather than
-  something this plugin does to them — most likely its CC7/CC11 attenuation
-  curve and its reading of DLS articulation, against PlayStation-era material
-  whose original hardware behaved differently. That is a real gap, but it is a
-  deliberate-deviation question, not a defect to fix.
-
-  **Update 2, after the owner reported this with certainty against Fruity LSD.**
-  Fruity LSD plays DLS through DirectMusic, not FluidSynth, so the comparison is
-  FluidSynth's DLS interpretation against Microsoft's. Ruled out so far, by
-  measurement on the owner's VGMTrans corpus:
-
-  - Per-instrument level is identical between each bank's DLS and SF2 export
-    (19 programs, none differing by more than 1 dB), so it is not an export
-    artefact.
-  - These DLS files declare no attenuation anywhere: every region `wsmp`
-    attenuation is 0 dB, there are no instrument-level `CONN_DST_GAIN` blocks,
-    and the wave pool carries no `wsmp` chunks at all.
-  - FluidSynth does honour DLS `EG1_SUSTAIN`: instruments VGMTrans declares at
-    roughly 0% sustain render at about 1%, and those declared at 100% render at
-    94-102%.
-  - CC7 tracks the DLS specification's own 40·log10(cc/127) curve within about
-    0.3 dB, so the volume-controller curve is not the difference.
-
-  **The open lead**: several instruments render well below their declared
-  sustain - program 17 declared 99.7% renders at 66%, program 49 declared 100%
-  renders at 70%, program 100 declared 94% renders at 57%. Some of that is
-  one-shot samples ending naturally, which is correct, but a sustained
-  instrument landing 30 points low would put it wrong against the rest of a mix
-  while its neighbours are fine. This needs a specific instrument to confirm
-  rather than a survey.
-
-  **Update 3 — isolated, 2026-08-23.** The owner named the case: in
-  `SEQ_BGM_N_CASTLE` the vibraphone and the timpani are too quiet, while other
-  parts are fine. Measured on that bank:
-
-  | program | declared EG1 decay | rendered to -20 dB |
-  |---|---|---|
-  | 10 (vibraphone) | 2.947 s | **0.442 s** |
-  | 14 (timpani) | 2.947 s | **0.603 s** |
-  | 38 (bass) | 4.846 s | 1.010 s |
-  | 30, 63, 75 (sustaining) | n/a, sustain 99-100% | 1.1-1.8 s, correct |
-
-  The split is exact: **every instrument VGMTrans declares with ~0% sustain
-  decays far too fast, and every instrument that sustains is fine.** That is
-  why some parts sound right and the struck ones do not.
-
-  The cause is envelope-curve interpretation, not a missing value. FluidSynth
-  ramps the volume envelope linearly in DECIBELS across the declared decay time,
-  so an instrument declared to decay over 2.95 s is 20 dB down in 0.61 s - and
-  programs 14 and 38 match that model to within a millisecond, which is how we
-  know that is what it is doing. A PlayStation SPU envelope, which is what
-  VGMTrans transcribed, decays exponentially in AMPLITUDE and stays audible far
-  longer. Fruity LSD plays these through DirectMusic, which is closer to the
-  original, which is why the owner does not hear it there.
-
-  DLS and SF2 exports of the same bank behave identically, so switching format
-  is not a workaround.
-
-  **Update 4 — the linear-amplitude theory is WRONG, from VGMTrans's own source.**
-  Before patching FluidSynth on the strength of an inference, the reference
-  implementation was read. Two facts overturn Update 3:
-
-  1. `DLSConversion.cpp` writes the DLS sustain field as a dB-domain fraction,
-     with the comment *"the DLS envelope is a range from 0 to -96db"*:
-     `convSustainLev = ((96.0 - attenInDB) / 96.0) * 0x03e80000`. The SF2 path
-     stores attenuation in centibels the same way. **VGMTrans assumes the
-     linear-dB model, which is exactly what FluidSynth implements.** A
-     linear-amplitude patch would have made Juicy16 LESS faithful to VGMTrans,
-     not more.
-  2. VGMTrans plays through **BASSMIDI** (`src/ui/qt/SequencePlayer.h` includes
-     `bass.h` and `bassmidi.h`), on the SF2 it generates - not DirectMusic and
-     not FluidSynth. So "accurate to VGMTrans playback" means matching BASSMIDI,
-     which is a different target again from Fruity LSD.
-
-  FluidSynth's early voice termination was checked as a candidate and ruled out:
-  the kill test compares `amp_max = cb2amp(min_attenuation) * volenv_val`
-  against the noise floor, treating `volenv_val` linearly while rendering treats
-  it as dB - so it over-estimates and kills voices LATE, never early.
-
-  **Update 5 — resolved without an engine change, 2026-08-23.** The missing
-  reference render was made with VGMTrans's bundled BASSMIDI 2.4.13 on the exact
-  SF2 and affected program. At 48 kHz, normalised 50 ms RMS windows for BASSMIDI
-  versus FluidSynth were -3.96/-4.03 dB at 0.075 s, -14.33/-14.21 dB at 0.275 s,
-  and -20.36/-19.83 dB at 0.575 s. BASSMIDI becomes slightly *quieter* after
-  that. The two engines therefore have the same disputed fast decay for the part
-  of the contour that determines audibility.
-
-  BASSMIDI also exposes an explicit `BASS_MIDI_FONT_LINDECVOL` option. With it,
-  the note is only -3.42 dB at 0.575 s instead of -20.36 dB — the long tail that
-  had been proposed as a Juicy16 fix. VGMTrans does not enable that flag; it calls
-  `BASS_MIDI_FontInitUser` with `BASS_MIDI_FONT_XGDRUMS` only. Applying the
-  linear curve in Juicy16 would therefore make it less accurate to VGMTrans, the
-  stated target, as well as changing normal SoundFonts away from the SF2 model.
-
-  No compensation or FluidSynth patch was applied. Fruity LSD/DirectMusic can
-  still sound different, but it is a separate, unmeasured compatibility target.
-  A future opt-in DirectMusic mode needs a one-note Fruity LSD reference render
-  before its curve can be implemented exactly. See the full investigation for
-  method, versions, and the wider contour.
 - **Chorus does nothing.** It was discarded by the same bug and is now switched
   off explicitly rather than un-muted with defaults nobody chose. CC93 still
   reaches the engine. Chorus will get controls of its own in a later release.

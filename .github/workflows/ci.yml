@@ -1,6 +1,6 @@
 name: CI
 
-# Quality gates for Phase 5.2 of MILESTONE_PLAN.md. Each job delegates to
+# Quality gates for Phase 5.2 of ROADMAP.md. Each job delegates to
 # tools/ci_gates.sh so the hosted run and a developer's local run cannot drift
 # apart. See docs/CI.md for what a passing run does and does not prove.
 
@@ -201,7 +201,7 @@ jobs:
   windows-vst3:
     name: Windows VST3 (x64, unvalidated)
     runs-on: windows-2022
-    # Phase 4.3 of MILESTONE_PLAN.md is open. The dependency closure below is
+    # Phase 4.3 of ROADMAP.md is open. The dependency closure below is
     # now the approved pinned one rather than an ad-hoc vcpkg install, but the
     # recipe has never been executed and no Windows artifact has been
     # host-validated. This job reports status only and must not gate a release

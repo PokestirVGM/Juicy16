@@ -2,7 +2,7 @@
 // Juicy16's single visual system: one palette, expressed as named tokens, and
 // one LookAndFeel that every control takes its appearance from.
 //
-// Rule this file exists to enforce (MILESTONE_PLAN.md, phase 9.3): no component
+// Rule this file exists to enforce (ROADMAP.md, phase 9.3): no component
 // may name a colour. `Colours::` literals belong here and nowhere else, and a
 // control added later inherits the theme without being styled individually.
 //

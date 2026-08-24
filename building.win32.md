@@ -3,7 +3,7 @@
 Windows VST3 is an intended Beta 1 format. This document now records a concrete,
 pinned recipe rather than only a status — but **the recipe has never been
 executed**. Nothing here is a validated release procedure until the CI job runs
-green and Phase 4.3 of [MILESTONE_PLAN.md](MILESTONE_PLAN.md) completes. Treat
+green and Phase 4.3 of [ROADMAP.md](ROADMAP.md) completes. Treat
 every command below as a proposal under test.
 
 ## What is pinned

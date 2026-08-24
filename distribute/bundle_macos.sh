@@ -96,9 +96,9 @@ COPYFILE_DISABLE=1 cp -R "$vst3_source" "$staging_dir/VST3/"
 cp "$repo_dir/LICENSE.txt" "$repo_dir/NOTICE.md" "$repo_dir/README.md" \
    "$repo_dir/CHANGELOG.md" "$repo_dir/PRIVACY.txt" \
    "$repo_dir/building.macos.md" "$staging_dir/"
-for document in BETA_TESTER_GUIDE.md BETA1_IDENTITY_CONTRACT.md KNOWN_ISSUES.md \
-                DEPENDENCIES.md DLS_REPAIR.md LICENSING.md PERFORMANCE.md \
-                STATE_COMPATIBILITY.md SUPPORT_MATRIX.md TROUBLESHOOTING.md; do
+for document in BETA_TESTER_GUIDE.md COMPATIBILITY.md KNOWN_ISSUES.md \
+                DEPENDENCIES.md TROUBLESHOOTING.md LICENSING.md PERFORMANCE.md \
+                COMPATIBILITY.md ../README.md TROUBLESHOOTING.md; do
   cp "$repo_dir/docs/$document" "$staging_dir/docs/"
 done
 for notice in JUCE-framework_AGPL3.txt JUCE-AudioUnitSDK.txt JUCE-HarfBuzz.txt \

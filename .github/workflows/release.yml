@@ -2,7 +2,7 @@ name: Release candidate
 
 # Builds a beta candidate from a tag. The quality gates run again here rather
 # than trusting an earlier run, so a tag can only produce artifacts from a
-# commit that passes them. Phase 5.2 of MILESTONE_PLAN.md also requires branch
+# commit that passes them. Phase 5.2 of ROADMAP.md also requires branch
 # protection on the tag pattern; see docs/CI.md.
 
 on:

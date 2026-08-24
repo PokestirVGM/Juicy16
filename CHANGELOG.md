@@ -38,7 +38,7 @@
 - **The Beta 1 gate is four items**, not a formal release process. Technical
   criteria are unchanged; the checkpoint matrices, evidence capture, go/no-go
   ritual and launch monitoring are retired as process for a team that does not
-  exist. See `MILESTONE_PLAN.md`.
+  exist. See `ROADMAP.md`.
 
 - **The reverb is off by default.** Owner decision. Juicy16's reverb was never
   audible before 0.6.0-alpha.1, so enabling one for everybody changes how every
@@ -64,7 +64,7 @@
   host's sandbox, and the Standalone simply is not sandboxed, which grants more
   access rather than less — but the build claims a sandbox that is not in force.
   Not changed, because both the fix and its consequences need a sandboxed host to
-  verify. See `MILESTONE_PLAN.md` Phase 2.
+  verify. See `ROADMAP.md` Phase 2.
 - **Finding: WebKit is linked but unused**, despite `JUCE_WEB_BROWSER=0`.
   Low severity, avoidable attack surface. See `docs/DEPENDENCIES.md`.
 
@@ -309,7 +309,7 @@ The two defects the owner declined to ship as documented limitations on 2026-08-
 ### Changed
 
 - **State schema 3 to 4.** Parameters are saved normalised, so widening `bank` changed what a stored value means: the 1.0 that meant bank 128 under 0-128 would restore as 255 under 0-255, silently moving every existing drum channel to a bank no font defines. A version 3 save's bank is rescaled through the bank number on the way in. Per-channel bank values are plain integers and need no rescaling. Pinned by a regression that writes a v3 envelope and reads it back.
-- `docs/BETA1_IDENTITY_CONTRACT.md` now records parameter *ranges* as part of the frozen surface, not just IDs and order — the omission is what let this argument run twice.
+- `docs/COMPATIBILITY.md` now records parameter *ranges* as part of the frozen surface, not just IDs and order — the omission is what let this argument run twice.
 
 ## 0.5.1-alpha.5 — unreleased
 
@@ -323,7 +323,7 @@ Fixes the "dynamics sound wrong" report. Two independent causes, both found by m
 ### Changed
 
 - **The six sound-control sliders are replaced by Volume, Pan, and Output Level.** The retired sliders drove the modulators above, so with those gone they would have done nothing. Volume and Pan edit the selected channel's CC7/CC10 and follow the same rule as the instrument dropdowns: what you set is a starting point, and the next CC7/CC10 on that channel replaces it at the event's timestamp and moves the slider. Output Level is a master trim in decibels (-24 to +12, default 0), applied after rendering with 20 ms smoothing so host automation cannot step the gain mid-block; it is not a MIDI controller, so nothing in a MIDI file moves it.
-- Parameter set: 24 to 21 (`bank`, `preset`, `volume`, `pan`, `outputLevel`, `progCh1`-`progCh16`). State schema: version 2 to **3**. A pre-v3 save restores its bank and per-channel instruments; the retired sound-controller values are ignored rather than migrated, and those channels open at the GM defaults (volume 100, pan centre). Pre-Beta session compatibility was already explicitly waived. `docs/BETA1_IDENTITY_CONTRACT.md` carries the new frozen VST3 ParamIDs.
+- Parameter set: 24 to 21 (`bank`, `preset`, `volume`, `pan`, `outputLevel`, `progCh1`-`progCh16`). State schema: version 2 to **3**. A pre-v3 save restores its bank and per-channel instruments; the retired sound-controller values are ignored rather than migrated, and those channels open at the GM defaults (volume 100, pan centre). Pre-Beta session compatibility was already explicitly waived. `docs/COMPATIBILITY.md` carries the new frozen VST3 ParamIDs.
 
 ### Fixed (packaging)
 
@@ -350,7 +350,7 @@ Keyboard operation of the whole editor, and the libsndfile advisory found in the
 
 ### Documented
 
-- The tester guide now opens with a four-row "is your setup supported?" check — operating system, CPU, plugin format, bank format — with the commands that reveal chip and architecture on each OS, the ad-hoc signing consequence stated *before* download rather than after, and the distinction between approved scope and an actually validated host. `SUPPORT_MATRIX.md` already held the answer, but nothing a tester reads first pointed at it: the guide told them not to download an unsupported candidate without telling them how to tell.
+- The tester guide now opens with a four-row "is your setup supported?" check — operating system, CPU, plugin format, bank format — with the commands that reveal chip and architecture on each OS, the ad-hoc signing consequence stated *before* download rather than after, and the distinction between approved scope and an actually validated host. `../README.md` already held the answer, but nothing a tester reads first pointed at it: the guide told them not to download an unsupported candidate without telling them how to tell.
 
 ### Security
 
@@ -400,7 +400,7 @@ Cross-bank Bank Select coverage, a FluidSynth polyphony fix found by the new den
 
 ## 0.5.1-alpha.1
 
-Deliberately labelled alpha, not beta. The engine, build, packaging, and automated gates are in good shape, but the Beta 1 bar in [MILESTONE_PLAN.md](MILESTONE_PLAN.md) has not been met: no DAW host has run this build, no Windows artifact exists, and no hosted CI run has occurred.
+Deliberately labelled alpha, not beta. The engine, build, packaging, and automated gates are in good shape, but the Beta 1 bar in [ROADMAP.md](ROADMAP.md) has not been met: no DAW host has run this build, no Windows artifact exists, and no hosted CI run has occurred.
 
 ### Changed
 
@@ -497,4 +497,4 @@ Deliberately labelled alpha, not beta. The engine, build, packaging, and automat
 
 ### Required before public Beta 1
 
-See [MILESTONE_PLAN.md](MILESTONE_PLAN.md). Major remaining gates include final qualified license/package review, a licensed SF3 corpus fixture, a first hosted CI run, real-host validation, the Windows MSVC pipeline and DLS proof, Developer ID/notarization policy, minimum-OS runtime checks, and clean-machine installation.
+See [ROADMAP.md](ROADMAP.md). Major remaining gates include final qualified license/package review, a licensed SF3 corpus fixture, a first hosted CI run, real-host validation, the Windows MSVC pipeline and DLS proof, Developer ID/notarization policy, minimum-OS runtime checks, and clean-machine installation.

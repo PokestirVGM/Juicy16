@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     One-shot Windows verification for Juicy16, capturing everything Phase 4.3 of
-    MILESTONE_PLAN.md needs into a single pasteable report.
+    ROADMAP.md needs into a single pasteable report.
 
 .DESCRIPTION
     Runs the whole Windows path end to end: the pinned dependency closure, a
@@ -160,5 +160,5 @@ Write-Report ''
 Write-Report "$failed step(s) failed."
 Write-Report ''
 Write-Report "Report written to: $report"
-Write-Report 'Paste that file back. Every Windows claim in MILESTONE_PLAN.md stays'
+Write-Report 'Paste that file back. Every Windows claim in ROADMAP.md stays'
 Write-Report 'marked unproven until it shows a clean run.'

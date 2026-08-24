@@ -14,7 +14,7 @@
 
     UNPROVEN: this recipe has not been executed. It is written from the macOS
     recipe and FluidSynth's documented Windows options, and every claim about
-    the artifact it produces stays open in MILESTONE_PLAN.md Phase 4.3 until a
+    the artifact it produces stays open in ROADMAP.md Phase 4.3 until a
     real run and host validation.
 
 .PARAMETER InstallPrefix
@@ -101,7 +101,7 @@ try {
             '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded',
             '-DCMAKE_POLICY_DEFAULT_CMP0091=NEW',
             # Windows 10 version 1607 is the approved API floor; see
-            # MILESTONE_PLAN.md Phase 4.1 and CMakeLists.txt. CMake's own MSVC
+            # ROADMAP.md Phase 4.1 and CMakeLists.txt. CMake's own MSVC
             # defaults are repeated because setting these variables replaces them.
             '-DCMAKE_C_FLAGS=/DWIN32 /D_WINDOWS /DWINVER=0x0A00 /D_WIN32_WINNT=0x0A00 /DNTDDI_VERSION=0x0A000002',
             '-DCMAKE_CXX_FLAGS=/DWIN32 /D_WINDOWS /DWINVER=0x0A00 /D_WIN32_WINNT=0x0A00 /DNTDDI_VERSION=0x0A000002'

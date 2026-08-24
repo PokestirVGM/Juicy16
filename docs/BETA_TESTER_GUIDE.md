@@ -32,7 +32,7 @@ Two further limits worth knowing before you spend time on this:
   list is untested rather than known-good.
 
 The full matrix — including sample rates, bank-format evidence, and what is
-explicitly out of scope — is [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md). Known
+explicitly out of scope — is [../README.md](../README.md). Known
 limitations you should read before reporting a bug are in
 [KNOWN_ISSUES.md](KNOWN_ISSUES.md).
 
@@ -218,7 +218,7 @@ On macOS, remove only the Juicy16 bundles installed for the Beta from:
 
 On Windows, remove only `Juicy16.vst3` from the VST3 directory used during installation. Rescan the DAW afterward. Restore the prior backed-up bundle if rollback is required; never overwrite the backup. Projects saved with Beta-specific state may not work in an older build, so restore the corresponding project backup too.
 
-Beta 2 and the first stable release are expected to read Beta 1 schema-v2 state. Older betas deliberately reject newer schemas rather than guessing at their meaning. See [STATE_COMPATIBILITY.md](STATE_COMPATIBILITY.md) for the versioning and identifier policy.
+Beta 2 and the first stable release are expected to read Beta 1 schema-v2 state. Older betas deliberately reject newer schemas rather than guessing at their meaning. See this document for the versioning and identifier policy.
 
 No uninstaller should delete user DLS/SF2/SF3 files or DAW projects. Temporary repaired DLS copies are stored in the operating system temporary area and normally removed with the plugin instance.
 

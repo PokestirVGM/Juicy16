@@ -49,8 +49,8 @@ cp -R "$REPO_DIR/licenses_of_dependencies" "$STAGING_DIR/"
 cp "$REPO_DIR/LICENSE.txt" "$REPO_DIR/NOTICE.md" "$REPO_DIR/README.md" \
    "$REPO_DIR/CHANGELOG.md" "$REPO_DIR/PRIVACY.txt" \
    "$REPO_DIR/building.win32.md" "$STAGING_DIR/"
-for document in BETA_TESTER_GUIDE.md BETA1_IDENTITY_CONTRACT.md KNOWN_ISSUES.md \
-                DLS_REPAIR.md LICENSING.md STATE_COMPATIBILITY.md SUPPORT_MATRIX.md \
+for document in BETA_TESTER_GUIDE.md COMPATIBILITY.md KNOWN_ISSUES.md \
+                TROUBLESHOOTING.md LICENSING.md COMPATIBILITY.md ../README.md \
                 TROUBLESHOOTING.md; do
   cp "$REPO_DIR/docs/$document" "$STAGING_DIR/docs/"
 done

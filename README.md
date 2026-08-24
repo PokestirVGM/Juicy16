@@ -2,7 +2,7 @@
 
 Juicy16 is a 16-channel multitimbral DLS/SoundFont player inspired by the automatic patch-selection workflow of Fruity LSD. Load one `.dls`, `.sf2`, or `.sf3` bank, send a multichannel MIDI file to one plugin instance, and its Bank Select and Program Change events select instruments independently on MIDI channels 1–16. All channels mix to one stereo output.
 
-The current development version is `0.6.0-alpha.3`. It is an alpha: the engine, build, and automated gates are in good shape, but the Beta 1 readiness bar has not been met, so it is deliberately not labelled beta. The authoritative readiness checklist is [MILESTONE_PLAN.md](MILESTONE_PLAN.md).
+The current development version is `0.6.0-alpha.3`. It is an alpha: the engine, build, and automated gates are in good shape, but the Beta 1 readiness bar has not been met, so it is deliberately not labelled beta. The authoritative readiness checklist is [ROADMAP.md](ROADMAP.md).
 
 ## What is implemented
 
@@ -14,7 +14,7 @@ The current development version is `0.6.0-alpha.3`. It is an alpha: the engine, 
 - Full CC forwarding to FluidSynth. CC7 (volume) and CC10 (pan) are also mirrored into the selected-channel controls and saved per-channel state.
 - Full unnormalized 14-bit pitch bend and MIDI RPN pitch-bend range handling through FluidSynth.
 - Transactional bank replacement: a failed replacement reports an error and leaves the previous working bank active.
-- Safe temporary repair of a narrow class of malformed DLS RIFF-size fields. The original file is never modified; the exact limits are documented in [docs/DLS_REPAIR.md](docs/DLS_REPAIR.md).
+- Safe temporary repair of a narrow class of malformed DLS RIFF-size fields. The original file is never modified; the exact limits are documented in [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 - 7th-order FluidSynth interpolation, 512-voice polyphony, and correct host-rate rendering through FluidSynth's 96 kHz ceiling.
 
 ## Formats and current validation status
@@ -27,7 +27,11 @@ The current development version is `0.6.0-alpha.3`. It is an alpha: the engine, 
 | Desktop | Standalone | Development/QA only | Built for local testing; not a primary release format |
 | Desktop | VST2 | Out of scope | Not configurable or built by the Beta 1 CMake project |
 
-Beta 1 is macOS 11 or later on Apple Silicon (`arm64`), AU and VST3. Windows 10 1607+ on `x86_64` with VST3 is planned for Beta 2. Intel macOS, Windows ARM64, and Linux are out of scope. Standalone remains a development/QA build only. See the [support matrix](docs/SUPPORT_MATRIX.md) and the exact [MIDI controller support contract](docs/CONTROLLER_SUPPORT.md).
+Beta 1 is macOS 11 or later on Apple Silicon (`arm64`), AU and VST3. Windows 10 1607+ on `x86_64` with VST3 is planned for Beta 2. Intel macOS, Windows ARM64, Windows 32-bit, Linux, VST2 and AUv3 are out of scope.
+
+Bank formats: **SF2** and **SF3** are supported on every advertised platform; **DLS** is supported and proven on macOS and unproven on Windows. Some DLS files written by third-party editors declare RIFF sizes FluidSynth rejects — Juicy16 loads those through a bounded, read-only repair of a temporary copy, never modifying the original. A bank with no playable preset is rejected rather than loaded empty, and a rejected bank never replaces the one already playing.
+
+Sample rates: the automated suite verifies pitch-correct rendering at 44.1, 48, 88.2 and 96 kHz. FluidSynth 2.5.5 accepts 8–96 kHz; above 96 kHz Juicy16 renders at the largest fraction it accepts and interpolates up, and below 8 kHz it fails safely to silence rather than playing at the wrong pitch. Standalone remains a development/QA build only. See the exact [MIDI controller support contract](docs/CONTROLLER_SUPPORT.md).
 
 ## Using it with multichannel MIDI
 
@@ -58,8 +62,8 @@ Host routing is not hard-coded to FL Studio or Cubase. AU hosts can deliver norm
 - Windows status and intended path: [building.win32.md](building.win32.md)
 - CI quality gates: [docs/CI.md](docs/CI.md)
 - DAW host test protocol and MIDI fixtures: [docs/HOST_TEST_PROTOCOL.md](docs/HOST_TEST_PROTOCOL.md)
-- VST3/Cubase architecture: [docs/VST3_MULTITIMBRAL_DESIGN.md](docs/VST3_MULTITIMBRAL_DESIGN.md)
-- Beta state compatibility: [docs/STATE_COMPATIBILITY.md](docs/STATE_COMPATIBILITY.md)
+- VST3/Cubase architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- Beta state compatibility: [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)
 
 The local automated gate is:
 

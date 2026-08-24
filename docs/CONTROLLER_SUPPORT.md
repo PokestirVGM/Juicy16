@@ -179,15 +179,6 @@ carries the GM default send.
 - **What the engine does.** FluidSynth 2.5.5's reverb is jjceresa's FDN late
   reverb, which replaced Freeverb in 2.0. Juicy16 adds no DSP of its own; these
   controls set that reverb.
-### Output level
-
-The master trim defaults to **+1.5 dB**, not 0. Juicy16 renders about 10.4 dB
-quieter than VGMTrans plays the same material, and +1.5 dB is the most that can
-be given back without pushing anything past full scale — measured across a
-24-file VGMTrans corpus, the loudest peaks at -1.61 dBFS. Closing the rest of the
-gap would need a limiter, which Beta 1 deliberately does not have. Raise the trim
-per project if you want more; it spans -24 to +12 dB.
-
 - **What you control, and what the MIDI file controls.** You set the reverb.
   The file sets how much of each channel goes into it, through CC91, at that
   event's own timestamp. **A MIDI file cannot change your reverb settings** —
@@ -280,7 +271,14 @@ modulator listening for them.
 ## Master output level
 
 `outputLevel` is not a MIDI controller and is not per channel. It is a master
-trim in decibels (-24 to +12, default 0) applied to the rendered output with
-20 ms smoothing, so host automation cannot step the gain mid-block. Nothing in a
-MIDI file changes it. FluidSynth's own `synth.gain` stays at its documented
-default of 0.2.
+trim in decibels, spanning -24 to +12, applied to the rendered output with 20 ms
+smoothing so host automation cannot step the gain mid-block. Nothing in a MIDI
+file changes it. FluidSynth's own `synth.gain` stays at its documented default of
+0.2.
+
+The trim **defaults to +1.5 dB**, not 0. Juicy16 renders about 10.4 dB quieter
+than VGMTrans plays the same material, and +1.5 dB is the most that can be given
+back without pushing anything past full scale — across a 24-file corpus the
+loudest rip peaks at -1.61 dBFS. It does not close the gap; that would need a
+limiter, which Beta 1 deliberately does not have. Raise the trim per project if
+you want more.
