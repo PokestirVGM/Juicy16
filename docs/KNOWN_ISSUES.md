@@ -127,6 +127,35 @@ The remaining 63 are not yet identified and are most likely stock JUCE IDs that
   DLS and SF2 exports of the same bank behave identically, so switching format
   is not a workaround.
 
+  **Update 4 — the linear-amplitude theory is WRONG, from VGMTrans's own source.**
+  Before patching FluidSynth on the strength of an inference, the reference
+  implementation was read. Two facts overturn Update 3:
+
+  1. `DLSConversion.cpp` writes the DLS sustain field as a dB-domain fraction,
+     with the comment *"the DLS envelope is a range from 0 to -96db"*:
+     `convSustainLev = ((96.0 - attenInDB) / 96.0) * 0x03e80000`. The SF2 path
+     stores attenuation in centibels the same way. **VGMTrans assumes the
+     linear-dB model, which is exactly what FluidSynth implements.** A
+     linear-amplitude patch would have made Juicy16 LESS faithful to VGMTrans,
+     not more.
+  2. VGMTrans plays through **BASSMIDI** (`src/ui/qt/SequencePlayer.h` includes
+     `bass.h` and `bassmidi.h`), on the SF2 it generates - not DirectMusic and
+     not FluidSynth. So "accurate to VGMTrans playback" means matching BASSMIDI,
+     which is a different target again from Fruity LSD.
+
+  FluidSynth's early voice termination was checked as a candidate and ruled out:
+  the kill test compares `amp_max = cb2amp(min_attenuation) * volenv_val`
+  against the noise floor, treating `volenv_val` linearly while rendering treats
+  it as dB - so it over-estimates and kills voices LATE, never early.
+
+  The cause is therefore still open, and is now a FluidSynth-versus-BASSMIDI
+  difference on the same SF2. Settling it needs one reference render: a single
+  sustained note of the affected program, rendered by VGMTrans. Dividing that
+  amplitude contour by Juicy16's render of the same note cancels the sample
+  content and leaves only the ratio of the two envelope curves, which is a
+  measurement rather than a fit. A full-track bounce will not do - it is a mix,
+  and no single instrument's envelope can be recovered from it.
+
   **Not a Juicy16 defect, but it is Juicy16's problem** - the plugin reproduces
   FluidSynth exactly, as measured, and the material still sounds wrong. Fixing it
   means rendering a decay shape the SF2 model does not describe, which is a
