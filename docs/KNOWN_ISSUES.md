@@ -46,6 +46,8 @@ The remaining 63 are not yet identified and are most likely stock JUCE IDs that
   initialises it to 0, which made every reverb control inert on any file that
   did not explicitly ask for reverb. A file's own CC91 still overrides it.
 - **Some tracks' volume or attack may sound different from other players.**
+  Full write-up, with every measurement and everything ruled out, in
+  [INVESTIGATION_ENVELOPE_DECAY.md](INVESTIGATION_ENVELOPE_DECAY.md).
   Reported on 0.6.0-alpha.2 and not fully explained. What has been ruled out by
   measurement against stock FluidSynth on the same bank: velocity response
   (within 0.3 dB), CC7 channel volume (within 0.22 dB), CC10 pan (exact), and
