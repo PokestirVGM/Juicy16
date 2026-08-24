@@ -23,7 +23,7 @@ project(JUICY16 VERSION 0.6.0)
 # copy, so a stale one is worse than none. Editing this line now wins everywhere;
 # -DJUICYSF_PRERELEASE_LABEL=... on the command line still overrides it, and keeps
 # overriding it for that build directory until the cache entry is removed.
-set(JUICYSF_PRERELEASE_LABEL_DEFAULT "alpha.1")
+set(JUICYSF_PRERELEASE_LABEL_DEFAULT "alpha.2")
 if (NOT DEFINED JUICYSF_PRERELEASE_LABEL)
   set(JUICYSF_PRERELEASE_LABEL "${JUICYSF_PRERELEASE_LABEL_DEFAULT}")
 endif ()

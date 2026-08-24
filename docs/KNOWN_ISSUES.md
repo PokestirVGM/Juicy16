@@ -1,6 +1,6 @@
 # Beta 1 known issues and unverified areas
 
-This file describes the unreleased `0.6.0-alpha.1` development state. It must be regenerated for the exact frozen candidate.
+This file describes the unreleased `0.6.0-alpha.2` development state. It must be regenerated for the exact frozen candidate.
 
 ## Debug-only: unregistered LookAndFeel colour IDs
 

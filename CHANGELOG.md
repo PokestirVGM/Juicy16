@@ -1,10 +1,88 @@
 # Changelog
 
+## 0.6.0-alpha.2 — unreleased
+
+Owner feedback from running alpha.1. Two of the reports were defects rather than
+taste: solo silenced fifteen channels without showing it on any of them, and the
+reverb controls did nothing at all on most material.
+
+### Fixed
+
+- **Interface corrections from the first look at the running plugin.**
+  - A lit mute drew as a near-white box with a dark letter, which read as a blank
+    white rectangle. Mute now keeps its own warm red in every accent and solo
+    takes the accent, so the two are never told apart by position alone.
+  - **Soloing a channel did not visibly do anything to the other fifteen.** A
+    silenced row — muted, or not soloed while something else is — now recedes,
+    so solo shows its effect on the rows it affects rather than only on the
+    button that was pressed.
+  - **Mute and solo semantics changed: mute now wins over solo.** The old rule
+    let solo override mute entirely, which meant pressing mute on the only
+    soloed channel did nothing at all. A channel now sounds if it is not muted
+    and either nothing is soloed or it is one of the soloed ones. Four new
+    assertions pin the edge cases, including that soloing every channel is the
+    same as soloing none.
+  - **Custom colours were resolving to black.** A cell or panel built before it
+    is parented asks the DEFAULT LookAndFeel, which has never heard of Juicy16's
+    ColourIds, so it asserted and returned black — which is what made a lit mute
+    a blank box. Colours are now resolved in `lookAndFeelChanged`. This also
+    removed most of a Debug assertion flood: 138 hits down to 63.
+  - **Focus and hover are neutral, not accent.** A green ring appeared around
+    whatever the mouse last touched. The accent now means "this is the value" —
+    a knob's arc, a lit solo, the selected row, a held key — and focus uses a
+    neutral ring.
+  - Small text was too dim: the label, value and faint tokens were raised
+    (7.6:1, 9.4:1 and 4.9:1 on the panel), and the label and value type went from
+    11px to 12px.
+  - The right-hand panel pinned its bank summary to the bottom, leaving a void
+    between it and the reverb. The three sections now stack from the top.
+  - Rows, mute/solo buttons and row knobs were cramped; row height went 26 → 28
+    and the columns widened to match.
+  - **Row groups had no consistent gap.** The instrument dropdown butted
+    straight against the solo button — 0px on one side of the mute/solo pair and
+    8px on the other. Every row cell now insets itself by half the group gap, so
+    two adjacent cells produce a full 12px between their contents without any
+    cell knowing what sits beside it. The header wordmark also sat too close to
+    the bank field.
+  - **The folder and settings icons were two different icon families.** The
+    folder was a hollow outline whose tab notch sat on the wrong side, reading as
+    a dog-eared page; the gear was a solid fill, and `DrawableButton::ImageFitted`
+    scaled it to fill the whole button, giving it a 2.3px stroke beside the
+    folder's 1.17px. Both are now stroked line art traced on the same 24-unit
+    grid at matching weight, and the gear has six teeth rather than eight —
+    a stroked gear has two outlines per tooth, and eight of them left barely a
+    pixel between the flanks at header size.
+  - **"No bank loaded" was drawing in black, not grey.** `lookAndFeelChanged()`
+    never fired for the right-hand panel: the editor installs its LookAndFeel as
+    the first statement of its constructor, before the panel is added as a child,
+    and JUCE does not re-send a look-and-feel change to a child added afterwards.
+    The editor now sends one explicitly once every child is in place, which also
+    protects any component added later.
+- **The reverb controls did nothing on most material.** Reported as "the reverb
+  doesn't do anything", and correct: FluidSynth initialises each channel's reverb
+  send (CC91) to 0, while General MIDI System Level 1 specifies a default of 40
+  and GS and XG agree. With nothing being sent to the reverb, every control was
+  inert on any file that did not explicitly ask for reverb — which is most of
+  them, including `SEQ_BGM_C_03` in this repository's own corpus. Juicy16 now
+  seeds the documented default, exactly as it already seeded volume 100 and pan
+  64, and a GM/GS/XG reset returns it to 40 rather than to zero. A file's own
+  CC91 still overrides it, per channel, at the event's own timestamp. Measured:
+  with no CC91 anywhere, the tail after note-off went from identical-to-dry to
+  7.3x the bypassed energy.
+- **The settings popover looked like debug output.** The build facts were a bare
+  four-line label — "Standalone" and "48000 Hz" with nothing saying what either
+  one was — and JUCE's default callout chrome drew a light box in a dark plugin.
+  It is now a themed popover with colour swatches for the accent (the selected
+  one ringed, its name beside the heading), a divider, and labelled key/value
+  rows for version, engine, format and sample rate.
+
 ## 0.6.0-alpha.1 — unreleased
 
 Phases 9 and 10 of the Beta 1 plan: the interface redesign the owner approved on
 2026-08-23, and the reverb control surface — which turned out to start from a
 false premise and uncovered a real bug. See "The reverb was never audible" below.
+This is the build that was installed for the owner to try; what came back from
+that is in 0.6.0-alpha.2 above.
 
 ### Added
 
@@ -109,73 +187,6 @@ false premise and uncovered a real bug. See "The reverb was never audible" below
 
 ### Fixed
 
-- **Interface corrections from the first look at the running plugin.**
-  - A lit mute drew as a near-white box with a dark letter, which read as a blank
-    white rectangle. Mute now keeps its own warm red in every accent and solo
-    takes the accent, so the two are never told apart by position alone.
-  - **Soloing a channel did not visibly do anything to the other fifteen.** A
-    silenced row — muted, or not soloed while something else is — now recedes,
-    so solo shows its effect on the rows it affects rather than only on the
-    button that was pressed.
-  - **Mute and solo semantics changed: mute now wins over solo.** The old rule
-    let solo override mute entirely, which meant pressing mute on the only
-    soloed channel did nothing at all. A channel now sounds if it is not muted
-    and either nothing is soloed or it is one of the soloed ones. Four new
-    assertions pin the edge cases, including that soloing every channel is the
-    same as soloing none.
-  - **Custom colours were resolving to black.** A cell or panel built before it
-    is parented asks the DEFAULT LookAndFeel, which has never heard of Juicy16's
-    ColourIds, so it asserted and returned black — which is what made a lit mute
-    a blank box. Colours are now resolved in `lookAndFeelChanged`. This also
-    removed most of a Debug assertion flood: 138 hits down to 63.
-  - **Focus and hover are neutral, not accent.** A green ring appeared around
-    whatever the mouse last touched. The accent now means "this is the value" —
-    a knob's arc, a lit solo, the selected row, a held key — and focus uses a
-    neutral ring.
-  - Small text was too dim: the label, value and faint tokens were raised
-    (7.6:1, 9.4:1 and 4.9:1 on the panel), and the label and value type went from
-    11px to 12px.
-  - The right-hand panel pinned its bank summary to the bottom, leaving a void
-    between it and the reverb. The three sections now stack from the top.
-  - Rows, mute/solo buttons and row knobs were cramped; row height went 26 → 28
-    and the columns widened to match.
-  - **Row groups had no consistent gap.** The instrument dropdown butted
-    straight against the solo button — 0px on one side of the mute/solo pair and
-    8px on the other. Every row cell now insets itself by half the group gap, so
-    two adjacent cells produce a full 12px between their contents without any
-    cell knowing what sits beside it. The header wordmark also sat too close to
-    the bank field.
-  - **The folder and settings icons were two different icon families.** The
-    folder was a hollow outline whose tab notch sat on the wrong side, reading as
-    a dog-eared page; the gear was a solid fill, and `DrawableButton::ImageFitted`
-    scaled it to fill the whole button, giving it a 2.3px stroke beside the
-    folder's 1.17px. Both are now stroked line art traced on the same 24-unit
-    grid at matching weight, and the gear has six teeth rather than eight —
-    a stroked gear has two outlines per tooth, and eight of them left barely a
-    pixel between the flanks at header size.
-  - **"No bank loaded" was drawing in black, not grey.** `lookAndFeelChanged()`
-    never fired for the right-hand panel: the editor installs its LookAndFeel as
-    the first statement of its constructor, before the panel is added as a child,
-    and JUCE does not re-send a look-and-feel change to a child added afterwards.
-    The editor now sends one explicitly once every child is in place, which also
-    protects any component added later.
-- **The reverb controls did nothing on most material.** Reported as "the reverb
-  doesn't do anything", and correct: FluidSynth initialises each channel's reverb
-  send (CC91) to 0, while General MIDI System Level 1 specifies a default of 40
-  and GS and XG agree. With nothing being sent to the reverb, every control was
-  inert on any file that did not explicitly ask for reverb — which is most of
-  them, including `SEQ_BGM_C_03` in this repository's own corpus. Juicy16 now
-  seeds the documented default, exactly as it already seeded volume 100 and pan
-  64, and a GM/GS/XG reset returns it to 40 rather than to zero. A file's own
-  CC91 still overrides it, per channel, at the event's own timestamp. Measured:
-  with no CC91 anywhere, the tail after note-off went from identical-to-dry to
-  7.3x the bypassed energy.
-- **The settings popover looked like debug output.** The build facts were a bare
-  four-line label — "Standalone" and "48000 Hz" with nothing saying what either
-  one was — and JUCE's default callout chrome drew a light box in a dark plugin.
-  It is now a themed popover with colour swatches for the accent (the selected
-  one ringed, its name beside the heading), a divider, and labelled key/value
-  rows for version, engine, format and sample rate.
 - **The reverb was never audible, and now is.** FluidSynth's reverb has always
   been running — `synth.reverb.active` defaults to on — but Juicy16 asked for
   audio with `fluid_synth_process(synth, n, 0, nullptr, 2, out)`, which renders
