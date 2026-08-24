@@ -1,6 +1,11 @@
-# Closed investigation: decaying instruments sound too quiet
+# Investigation: decaying instruments sound too quiet
 
-Status: **resolved without an engine change (2026-08-23)**. Juicy16's decay is
+Status: **REOPENED and answered (2026-08-24)** — the cause is a uniform **10.4 dB
+output level deficit against VGMTrans**, not the envelope. See
+[§0 The actual cause](#0-the-actual-cause-2026-08-24). The envelope analysis
+below stands and is still correct; it was simply not the problem.
+
+Previous status: resolved without an engine change (2026-08-23). Juicy16's decay is
 not the source of a VGMTrans playback mismatch. VGMTrans's bundled BASSMIDI was
 finally measured on the affected SF2 and uses substantially the same fast,
 concave decay as FluidSynth. Its optional linear-volume mode produces the longer
@@ -16,6 +21,79 @@ Everything below that is labelled *measured* was measured in this repository wit
 the tools named. Everything labelled *inferred* is not proven. One earlier
 inference in this investigation was confidently wrong and nearly produced a bad
 patch; see [What was disproved](#what-was-disproved).
+
+
+---
+
+## 0. The actual cause (2026-08-24)
+
+The owner reported the problem persisted after the envelope investigation
+closed. It did. Every *relative* axis had been checked; **absolute level had
+not**, because every comparison until this point was FluidSynth against
+FluidSynth, or a single note normalised to its own peak.
+
+Measured end to end on `SEQ_BGM_N_CASTLE`, whole piece:
+
+| | peak | RMS |
+|---|---:|---:|
+| VGMTrans (BASSMIDI, as it configures it) | -0.18 dBFS | **-16.99 dBFS** |
+| Juicy16 (shipping configuration) | -10.24 dBFS | **-27.41 dBFS** |
+
+**Juicy16 is 10.4 dB quieter than VGMTrans.**
+
+Per-instrument single notes give the same answer: the BASSMIDI-minus-FluidSynth
+delta across seven programs is 9.86 to 10.52 dB, a spread of **0.66 dB** — a
+uniform offset, not a per-instrument error.
+
+### Why a uniform deficit reads as "some instruments are quiet"
+
+It does not attenuate the loud parts perceptually — they stay well above the
+threshold of attention. It removes the quiet ones. In this piece the vibraphone
+sits at average velocity 56 (every other channel is 70-100) and the timpani
+plays 22 sparse notes. Those are precisely the two the owner named.
+
+### Everything relative was verified to match BASSMIDI
+
+Same SF2, same program, BASSMIDI configured exactly as VGMTrans configures it
+(`BASS_MIDI_FONT_XGDRUMS`, no `BASS_MIDI_FONT_LINDECVOL`):
+
+| axis | agreement |
+|---|---|
+| Volume envelope decay contour | within 0.53 dB to 0.575 s |
+| Velocity response, 8 steps | within **0.26 dB** |
+| CC7 channel volume, 8 steps | within **0.23 dB** |
+| CC11 expression, 8 steps | within **0.23 dB** |
+| Per-instrument balance, 7 programs | **0.66 dB** spread |
+
+Both engines follow `40*log10(x/127)` for velocity, CC7 and CC11.
+
+### Where the 10 dB comes from, and the trade-off
+
+Juicy16 sets `synth.gain = 0.2`, FluidSynth's documented default. That was
+chosen deliberately in 0.5.1-alpha.5, when gain was 1.0 and a real rip peaked
+**+7.32 dBFS with 0.39% of samples past full scale**. BASSMIDI runs roughly
+10 dB hotter, and on this piece peaks at -0.18 dBFS — essentially at the
+ceiling, with no headroom left.
+
+Simply matching VGMTrans is therefore not safe across the corpus. Measured peaks
+at the current gain: `Majestic Castle` -11.50 dBFS, `BGM_SHIRO` -14.77,
+`SEQ_BGM_N_CASTLE` -10.24, `SEQ_BGM_VS_GYMLEADER` -4.63, `SEQ_BGM_VS_ACHROMA`
+**-3.37**. Adding 10 dB would clip the last two badly. VGMTrans has the same
+exposure and simply does not defend against it.
+
+**This is a gain-staging product decision, not a defect**, and the options are:
+
+1. **Leave the default and document it.** The `outputLevel` trim spans -24 to
+   +12 dB, so a user can dial in +10 dB per project. Costs nothing, but the
+   plugin sounds wrong out of the box against every other player.
+2. **Raise the default output level** by a fixed amount. Anything above about
+   +3 dB clips the loudest material in this corpus.
+3. **Raise it and add a limiter or soft clipper.** Matches VGMTrans's loudness
+   without the clipping VGMTrans would produce, at the cost of a processing
+   stage this plugin does not currently have and a claim it would have to
+   defend.
+
+Owner decision required.
 
 ---
 

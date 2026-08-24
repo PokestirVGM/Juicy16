@@ -45,6 +45,17 @@ The remaining 63 are not yet identified and are most likely stock JUCE IDs that
 - **Channels start at the GM default reverb send (CC91 = 40).** FluidSynth
   initialises it to 0, which made every reverb control inert on any file that
   did not explicitly ask for reverb. A file's own CC91 still overrides it.
+- **Juicy16 plays about 10 dB quieter than VGMTrans.** Measured end to end on
+  `SEQ_BGM_N_CASTLE`: VGMTrans/BASSMIDI renders it at -16.99 dBFS RMS, Juicy16 at
+  -27.41. The offset is uniform - relative balance between instruments matches
+  BASSMIDI within 0.66 dB, and velocity, CC7 and CC11 curves all match within
+  0.26 dB - but a uniform deficit still reads as "the quiet instruments are too
+  quiet", because the loud ones stay prominent and the quiet ones fall away.
+  Juicy16 uses FluidSynth's documented `synth.gain` default of 0.2, chosen in
+  0.5.1-alpha.5 after gain 1.0 clipped a real rip at +7.32 dBFS. Raising the
+  output to match VGMTrans would clip the loudest banks in the test corpus.
+  Workaround today: raise the master output trim, which spans -24 to +12 dB.
+  See [INVESTIGATION_ENVELOPE_DECAY.md](INVESTIGATION_ENVELOPE_DECAY.md) §0.
 - **Some tracks' volume or attack may sound different from other players.**
   Full write-up, with every measurement and everything ruled out, in
   [INVESTIGATION_ENVELOPE_DECAY.md](INVESTIGATION_ENVELOPE_DECAY.md).

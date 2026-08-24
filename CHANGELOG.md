@@ -2,6 +2,18 @@
 
 ## 0.6.0-alpha.3 — unreleased
 
+### Notes
+
+- **Found: Juicy16 plays ~10.4 dB quieter than VGMTrans.** Measured end to end
+  and per instrument against VGMTrans's own BASSMIDI on the same SF2. Relative
+  behaviour matches — envelope, velocity, CC7, CC11 and per-instrument balance
+  all agree within 0.66 dB — so this is a uniform level offset from
+  `synth.gain = 0.2`, the conservative headroom chosen in 0.5.1-alpha.5. It reads
+  as "some instruments are too quiet" because a uniform deficit removes the quiet
+  parts while the loud ones stay prominent. No code changed yet: closing the gap
+  fully would clip the loudest banks in the corpus, so it is a gain-staging
+  decision. See `docs/INVESTIGATION_ENVELOPE_DECAY.md` §0.
+
 ### Changed
 
 - **The reverb is off by default.** Owner decision. Juicy16's reverb was never
