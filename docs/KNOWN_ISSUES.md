@@ -127,12 +127,20 @@ The remaining 63 are not yet identified and are most likely stock JUCE IDs that
   DLS and SF2 exports of the same bank behave identically, so switching format
   is not a workaround.
 
-  **This is FluidSynth's DLS envelope conversion, not a Juicy16 defect** - the
-  plugin reproduces FluidSynth exactly, as measured. Making struck instruments
-  ring correctly means deliberately deviating from FluidSynth's envelope, which
-  is a product decision rather than a bug fix, and is not taken here without the
-  owner's call. Options if it is taken: correct the decay generator per voice on
-  DLS banks, or carry a patched FluidSynth.
+  **Not a Juicy16 defect, but it is Juicy16's problem** - the plugin reproduces
+  FluidSynth exactly, as measured, and the material still sounds wrong. Fixing it
+  means rendering a decay shape the SF2 model does not describe, which is a
+  product decision. Options, neither taken without the owner's call:
+
+  1. **Decay compensation.** `fluid_synth_set_gen(GEN_VOLENVDECAY)` applies a
+     per-channel timecent offset on top of each preset's value, so a single
+     setting can lengthen every decay. It only approximates a linear-amplitude
+     curve with a longer linear-dB one, and it cannot be exact, but it is small,
+     reversible, and needs no dependency change. Instruments that sustain are
+     unaffected, because their decay segment never runs.
+  2. **Patch FluidSynth's volume envelope** to offer a linear-amplitude decay for
+     banks transcribed from hardware that used one. Correct rather than
+     approximate, at the cost of a second vendored patch to carry.
 - **Chorus does nothing.** It was discarded by the same bug and is now switched
   off explicitly rather than un-muted with defaults nobody chose. CC93 still
   reaches the engine. Chorus will get controls of its own in a later release.
