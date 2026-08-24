@@ -31,7 +31,7 @@
 - Compare the expected engine semantics with [CONTROLLER_SUPPORT.md](CONTROLLER_SUPPORT.md); exact delivery does not make every controller audible in every bank.
 - Pitch bend is 14-bit with center 8192. Bend range is normally selected using RPN 0,0 (CC101/100 followed by Data Entry CC6/38) and is independent per channel.
 - The audible effect of pressure and many CCs depends on modulators in the loaded bank even though the MIDI is forwarded.
-- The six UI sound controls use CC71, 72, 73, 74, 75, and 79. Value 64 is neutral; they are per channel.
+- CC71-79 are forwarded to the engine but drive nothing: Juicy16's own modulators for them were removed in 0.5.1-alpha.5 because no other SoundFont player applies them. The per-channel controls the UI exposes are CC7 volume and CC10 pan.
 - Compare playback from the beginning with playback from the middle to isolate host chase behavior.
 
 ## A bank does not load

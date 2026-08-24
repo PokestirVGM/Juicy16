@@ -141,7 +141,7 @@ if (JUICYSF_RELEASE_VALIDATION)
   endif ()
 endif ()
 
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/Modules/")
+
 
 # How FluidSynth is found. pkg-config is the macOS path and produced every
 # recorded macOS result. MSVC has no pkg-config by default, while the pinned

@@ -87,17 +87,10 @@ int FluidSynthModel::defaultParamValue(const String& parameterID) {
 // anything - they are designed settings over FluidSynth's own FDN reverb - so
 // neither carries a console or hardware name. "Custom" is not a preset; it is
 // what the selection reads as once the user has moved a control.
-// Chosen by measurement on a real VGMTrans rip (SEQ_BGM_C_03, DLS and SF2) at
-// CC91 = 80, a representative game-rip send, on 2026-08-23. Change against dry:
-//
-//   FluidSynth's inherited 0.50/0.30/0.80/0.70   +1.64 dB   (the swamped end)
-//   Universal              0.45/0.35/0.85/0.55   +0.92 dB
-//   Soft                   0.20/0.60/1.00/0.55   +0.47 dB
-//
-// Universal is a present but not dominant space, a little over half the wetness
-// FluidSynth's own defaults produce. Soft is half of Universal again, with a much
-// smaller room and full width: the owner's brief was width without a long tail.
-// Neither clips, and both leave the peak where dry material left it.
+// Chosen by measurement against real game-rip material rather than taken from
+// FluidSynth's defaults, which are roughly twice as wet as Universal. Soft is a
+// much smaller room at full width: width without a long tail. Figures in
+// docs/CONTROLLER_SUPPORT.md.
 const FluidSynthModel::ReverbProfile FluidSynthModel::reverbProfiles[]{
     // size  damp  width level
     {"Universal", {0.45f, 0.35f, 0.85f, 0.55f}},
@@ -954,25 +947,11 @@ void FluidSynthModel::setChannelControllerValue(int channelToWrite, int controll
 
 unsigned int FluidSynthModel::deriveSilencedMask(unsigned int mutes, unsigned int solos) {
     // A channel sounds if it is NOT muted AND (nothing is soloed OR it is one of
-    // the soloed ones). Mute always wins; solo only restricts which channels are
-    // candidates.
-    //
-    // The obvious alternative - solo overrides mute entirely - was tried first
-    // and is worse, because it has a case where pressing a button does nothing:
-    // solo channel 5, press mute on channel 5, and the mute is ignored because a
-    // solo is active. A control that visibly engages and changes nothing is the
-    // worst kind of wrong. Under this rule every press of M does exactly what it
-    // says, always.
-    //
-    // Consequences, all of them intended:
-    //  - Muting the only soloed channel produces silence. The row shows a lit
-    //    mute and recedes, so the reason is visible rather than mysterious.
-    //  - Soloing a channel that is muted also produces silence, for the same
-    //    reason and with the same visible explanation.
-    //  - Soloing every channel is the same as soloing none: the solo set stops
-    //    excluding anything and only the mutes remain.
-    //  - Clearing the last solo restores exactly the mute picture the user left
-    //    behind, because solo never altered it.
+    // the soloed ones). Mute always wins; solo only restricts the candidates, so
+    // every press of M does something. Consequences, all intended: muting the
+    // only soloed channel is silent, soloing a muted channel is silent, soloing
+    // everything equals soloing nothing, and clearing the last solo restores the
+    // mute picture untouched.
     constexpr unsigned int all{(1u << kNumChannels) - 1u};
     return (mutes | (solos != 0 ? ~solos : 0u)) & all;
 }
@@ -1774,21 +1753,12 @@ void FluidSynthModel::dispatchMidiEvent(const MidiMessage& m, int samplePosition
 
 // The one place FluidSynth is asked for audio.
 //
-// It is called with an EFFECTS bus and the effects are mixed in here. That is a
-// bug fix, not a refinement: `fluid_synth_process(synth, n, 0, nullptr, 2, out)`
-// — what this used to call — renders the dry voices into `out` and DISCARDS the
-// reverb and chorus buses. Measured against FluidSynth directly on 2026-08-23
-// with reverb on, level 1.0, room 0.9 and CC91=127: the tail energy after
-// note-off was 0.0000046 through `nfx=0` and 7.467 through `write_float`, which
-// mixes the effects in. So Juicy16's reverb has never been audible, and the
-// premise this phase started from — that generic reverb defaults were being
-// applied to every rip — was wrong in the way that matters. They were being
-// computed and thrown away.
-//
-// Requesting `nfx=2` gives one stereo effects bus carrying reverb AND chorus.
-// Chorus is switched off in createSynth rather than silently un-muted here: an
-// unchosen default is exactly what this phase exists to stop, and chorus has its
-// own parameters to design before it can be turned on deliberately.
+// It must be called with an EFFECTS bus: `fluid_synth_process(synth, n, 0,
+// nullptr, 2, out)` renders the dry voices and DISCARDS the reverb and chorus
+// buses, which is why Juicy16's reverb was inaudible before 0.6.0-alpha.1.
+// `nfx=2` returns one stereo bus carrying reverb and chorus together; chorus is
+// switched off in createSynth so enabling this did not un-mute an effect nobody
+// chose.
 void FluidSynthModel::renderSamples(AudioBuffer<float>& buffer, int startSample, int numSamples) {
     if (numSamples <= 0)
         return;

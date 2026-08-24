@@ -6,7 +6,7 @@ The current development version is `0.6.0-alpha.3`. It is an alpha: the engine, 
 
 ## What is implemented
 
-- Sixteen independent MIDI channels with per-channel bank, preset, and exposed sound-controller state.
+- Sixteen independent MIDI channels, each with its own bank, preset, volume, pan, mute and solo, all visible and editable at once.
 - Timestamped notes, controllers, Program Changes, pitch bends, pressure, and supported SysEx; events are applied at their sample offsets rather than at the beginning of every audio block.
 - General MIDI percussion default on channel 10 (FluidSynth bank 128), with melodic bank 0 on the other channels.
 - Automatic Program Change handling for game-rip MIDI playback, including later changes during a song.
@@ -23,11 +23,11 @@ The current development version is `0.6.0-alpha.3`. It is an alpha: the engine, 
 | --- | --- | --- | --- |
 | macOS | AU | Release format | Builds and passes strict signature/dependency checks and `auval` locally; DAW and minimum-OS matrices remain required |
 | macOS | VST3 | Release format | Automated 16-channel VST3 unit/mapping smoke test passes; Cubase end-to-end retest remains required |
-| Windows | VST3 | Release format | Intended, but the legacy cross-build pipeline is not yet Beta-ready or host-validated |
+| Windows | VST3 | **Beta 2** | Moved out of Beta 1 on 2026-08-24: the cross-build pipeline has never produced a host-validated artifact |
 | Desktop | Standalone | Development/QA only | Built for local testing; not a primary release format |
 | Desktop | VST2 | Out of scope | Not configurable or built by the Beta 1 CMake project |
 
-The approved scope is macOS 11 or later on Apple Silicon (`arm64`) with AU/VST3, and Windows 10 version 1607 or later on `x86_64` with VST3. Intel macOS, Windows ARM64, and Linux are outside Beta 1. Standalone remains a development/QA build only. See the [support matrix](docs/SUPPORT_MATRIX.md) and the exact [MIDI controller support contract](docs/CONTROLLER_SUPPORT.md).
+Beta 1 is macOS 11 or later on Apple Silicon (`arm64`), AU and VST3. Windows 10 1607+ on `x86_64` with VST3 is planned for Beta 2. Intel macOS, Windows ARM64, and Linux are out of scope. Standalone remains a development/QA build only. See the [support matrix](docs/SUPPORT_MATRIX.md) and the exact [MIDI controller support contract](docs/CONTROLLER_SUPPORT.md).
 
 ## Using it with multichannel MIDI
 

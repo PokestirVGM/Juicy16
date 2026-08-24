@@ -24,17 +24,9 @@ void FolderIconButton::paintButton(Graphics& g, bool isMouseOverButton, bool isB
     else if (isMouseOverButton)
         colour = colour.withAlpha(0.8f);
 
-    // The folder from the approved header design, drawn to its own geometry
-    // rather than approximated.
-    //
-    // The previous attempt put the tab's step on the RIGHT of a square outline,
-    // which reads as a dog-eared page rather than a folder: a folder's tab sits
-    // at the top LEFT and the back edge steps UP to meet it. It is also wider
-    // than it is tall - a 1:1 outline reads as a document.
-    //
-    // Traced in the design's own 24x24 coordinates and scaled to the button, so
-    // the proportions hold at any size. Corner rounds are quadratics rather than
-    // true arcs, which is indistinguishable at a 14px icon.
+    // The folder from the approved header design, traced in its own 24x24
+    // coordinates so the proportions hold at any size. Corner rounds are
+    // quadratics rather than true arcs; indistinguishable at a 14px icon.
     juce::Path folder;
     folder.startNewSubPath(3.0f, 7.0f);
     folder.quadraticTo(3.0f, 5.0f, 5.0f, 5.0f);   // top-left round

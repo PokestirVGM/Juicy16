@@ -119,10 +119,10 @@ of juicysfplugin, and its purpose is playing game-rip MIDI + bank pairs.
 
 The material is **VGMTrans** output: a `.mid` sequence plus a bank exported as
 both `.dls` and `.sf2` from the same source data. The owner's corpus is 24 such
-pairs at `~/Documents/Game MIDI Rips/Tools/VGMTrans Output`. The affected file is
+pairs held outside this repository (game rips are not redistributable). The affected file is
 `SEQ_BGM_N_CASTLE.{mid,dls,sf2}`.
 
-VGMTrans source is available locally at `~/Documents/_Repositories/vgmtrans`.
+VGMTrans is open source; its exporter and player are the reference for §5 and §6.
 
 ## 3. The mechanism, isolated
 

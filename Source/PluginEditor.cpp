@@ -14,18 +14,9 @@
 
 namespace {
 
-// A gear, drawn rather than shipped as a second asset.
-//
-// Two attempts failed before this one, both instructive. A star polygon - eight
-// points joined straight to eight valleys - reads as an asterisk, because a gear
-// has flat-topped teeth, not spikes. Overlapping rounded-rectangle teeth on a
-// hub disc looked right until the even-odd rule needed for the bore cancelled
-// every overlap, detaching the teeth into petals.
-//
-// So the silhouette is ONE closed outline with no self-overlap: around the
-// circle, alternating between the root radius and the tooth radius with a short
-// flat top on each tooth. Even-odd then punches only the bore, because the bore
-// is the only subpath that overlaps anything.
+// A gear, drawn rather than shipped as a second asset. One closed outline with
+// no self-overlap - alternating root and tooth radius with a flat top on each
+// tooth - so the even-odd rule punches only the bore.
 std::unique_ptr<juce::Drawable> makeGearDrawable(juce::Colour colour) {
     // Six teeth, not eight: a STROKED gear has two outlines per tooth, and at
     // header size seven of them left barely a pixel of gap between the flanks,

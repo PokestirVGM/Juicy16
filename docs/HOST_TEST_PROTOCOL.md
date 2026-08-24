@@ -116,20 +116,22 @@ reject the candidate.
 
 ## Test B — controllers, pitch bend, pedals, channel mode
 
-Play `host_controllers.mid`. **Select channel 1's row in the plugin** first: the
-six sound sliders show the selected channel's controller values, which is how you
-read exact numbers without an event trace.
+Play `host_controllers.mid`. Channel 1's row shows that channel's volume and pan
+as numbers beside their knobs, which is how you read exact values for those two
+without an event trace. The CC71-79 steps below are **forwarded but inaudible** -
+Juicy16's modulators for them were removed in 0.5.1-alpha.5 - so verify them from
+an event trace or `getLastDispatchedController`, not by ear.
 
 | Bar | Time | Step | What must happen |
 | --- | --- | --- | --- |
-| 1 | 0:00 | SETUP - reset all 16 channels | All channels take a program; sliders sit at 64 |
-| 2 | 0:02 | CC74 Filter cutoff 0-64-127 | The **Cut** slider moves to 0, then 64, then 127; the held note gets brighter |
-| 3 | 0:04 | CC71 Filter resonance 0-64-127 | The **Res** slider moves to 0, 64, 127 |
-| 4 | 0:06 | CC73 Attack 0-64-127 | The **Att** slider moves to 0, 64, 127; each retriggered note starts slower |
-| 5 | 0:08 | CC75 Decay 0-64-127 | The **Dec** slider moves to 0, 64, 127 |
-| 6 | 0:10 | CC79 Sustain level 0-64-127 | The **Sus** slider moves to 0, 64, 127 |
-| 7 | 0:12 | CC72 Release 0-64-127 | The **Rel** slider moves to 0, 64, 127; tails lengthen |
-| 8 | 0:14 | CC7 volume, then CC11 expression | Loud, half, quiet; then expression does the same |
+| 1 | 0:00 | SETUP - reset all 16 channels | All channels take a program |
+| 2 | 0:02 | CC74 Filter cutoff 0-64-127 | Delivered to the engine; no audible change (see above) |
+| 3 | 0:04 | CC71 Filter resonance 0-64-127 | Delivered; no audible change |
+| 4 | 0:06 | CC73 Attack 0-64-127 | Delivered; no audible change |
+| 5 | 0:08 | CC75 Decay 0-64-127 | Delivered; no audible change |
+| 6 | 0:10 | CC79 Sustain level 0-64-127 | Delivered; no audible change |
+| 7 | 0:12 | CC72 Release 0-64-127 | Delivered; no audible change |
+| 8 | 0:14 | CC7 volume, then CC11 expression | Loud, half, quiet, and channel 1's **Vol** knob follows CC7; then expression does the same |
 | 9 | 0:16 | CC10 pan | Hard left, centre, hard right |
 | 10 | 0:18 | CC1 mod, CC91 reverb, CC93 chorus | Each audibly engages then disengages (depends on the bank's modulators) |
 | 11 | 0:20 | CC64 sustain pedal | A note released at beat 2 keeps ringing until the pedal lifts at beat 4 |
