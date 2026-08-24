@@ -2052,13 +2052,19 @@ and the repeat-after-stop/start/rewind/loop/reload passes. The items below stay
 open until that evidence is captured; what is NOT in doubt any more is whether
 the mechanism works.
 
-One defect is open from the same session: the owner reports some tracks' volume
-sounding off and some instruments' attack sounding slightly wrong. Measured
-against stock FluidSynth with `tools/dynamics_probe.cpp` on the same bank,
-Juicy16 tracks velocity within 0.3 dB, CC7 within 0.22 dB, CC10 pan exactly, and
-its attack time is identical at 37.7 ms and unaffected by CC73 — so the engine's
-level and envelope behaviour are not the cause. See the reverb note in
-`docs/KNOWN_ISSUES.md` for the two remaining candidates.
+The same session reported some tracks' volume and some instruments' attack as
+sounding wrong against Fruity LSD. The envelope-decay branch of that report is
+now closed without a code change. `tools/dynamics_probe.cpp` first proved
+Juicy16 tracks stock FluidSynth on velocity, CC7, CC10, attack, and the complete
+one-note waveform. The missing reference experiment then rendered the affected
+program through VGMTrans's bundled BASSMIDI 2.4.13: its normal path was -20.36 dB
+in the 0.575 s RMS window where FluidSynth was -19.83 dB. BASSMIDI's optional
+linear-volume mode gave the proposed long tail (-3.42 dB), but VGMTrans does not
+enable that option. Juicy16 therefore already matches the stated VGMTrans target;
+a global or DLS-only linear envelope would be an unverified Fruity
+LSD/DirectMusic compatibility change and would regress ordinary SoundFonts. See
+`docs/INVESTIGATION_ENVELOPE_DECAY.md` for the recorded flags, versions, and
+contour.
 
 - [ ] Logic Pro: discovery, load, 16-channel MIDI, Program Change, state restore, UI resize, file restore.
 - [ ] At least one additional AU host, such as FL Studio: the same critical workflow.
@@ -3604,6 +3610,7 @@ Record decisions that affect more than one task. Do not delete superseded decisi
 | 2026-08-23 | A reverb profile may not be named after hardware it does not emulate | The Nintendo DS has no reverb hardware to model, so a "DS" profile would be a designed ambience wearing a hardware name. Names that imply emulation are reserved for profiles that emulate — the documented PlayStation SPU and SNES S-DSP algorithms | Product owner | Approved |
 | 2026-08-23 | The Beta 1 interface is the mixer-rack direction: per-channel volume and pan knobs on every row, mute/solo, and a 236px right-hand panel for master and reverb | Chosen by the owner from four drawn directions. It fixes the actual defect — that both controls edit only the selected channel — and gives reverb somewhere to live that does not require redrawing the window again when Phase 10 lands. Recorded in `docs/design/` so the decision survives this session | Product owner | Approved |
 | 2026-08-23 | Plugin settings live in a popover behind a header gear, starting with accent choice, engine facts, and version | The owner rejected a bare accent control in the chrome. A single settings surface also stops later options being bolted onto the header one at a time | Product owner | Approved |
+| 2026-08-23 | Do not patch or compensate the volume-envelope decay for Beta 1 | The affected one-note contour was measured through VGMTrans's own bundled BASSMIDI: its default decay agrees with FluidSynth through the audible portion and VGMTrans does not enable BASSMIDI's optional linear-volume mode. Changing Juicy16 would regress the approved VGMTrans target and ordinary SF2 behavior; Fruity LSD/DirectMusic needs a separate isolated reference before any opt-in compatibility mode is exact | Engineering | Approved by existing VGMTrans-target contract; evidence recorded in `docs/INVESTIGATION_ENVELOPE_DECAY.md` |
 
 # Risk register
 

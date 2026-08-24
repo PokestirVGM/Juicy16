@@ -1,8 +1,16 @@
-# Open investigation: decaying instruments sound too quiet
+# Closed investigation: decaying instruments sound too quiet
 
-Status: **unresolved**. Cause isolated to a class of instrument and a mechanism,
-but the responsible difference has not been identified. Written as a self-
-contained brief so another engineer or agent can pick it up cold.
+Status: **resolved without an engine change (2026-08-23)**. Juicy16's decay is
+not the source of a VGMTrans playback mismatch. VGMTrans's bundled BASSMIDI was
+finally measured on the affected SF2 and uses substantially the same fast,
+concave decay as FluidSynth. Its optional linear-volume mode produces the longer
+tail originally proposed as a fix, but VGMTrans does not enable that mode.
+
+The remaining audible difference against Fruity LSD is a comparison with a
+different synth target (DirectMusic on the DLS), whose contour has not been
+captured. Changing Juicy16 globally, or only for DLS, would therefore be an
+unverified compatibility mode and would regress the stated goal of matching
+VGMTrans playback. No FluidSynth patch or decay compensation was applied.
 
 Everything below that is labelled *measured* was measured in this repository with
 the tools named. Everything labelled *inferred* is not proven. One earlier
@@ -90,8 +98,7 @@ Measured for program 38: predicted 1.009 s, measured **1.010 s** — exact.
 
 So FluidSynth is implementing the SF2 model correctly, and Juicy16 reproduces
 FluidSynth exactly (see §4). The material simply *is* 20 dB down in 0.6 s under
-that model. Whether that is what the music should sound like is the open
-question.
+that model. Section 7 confirms that VGMTrans's player behaves the same way.
 
 Program 10 renders faster than the model predicts (0.442 s vs 0.589 s). Not
 explained; possibly the sample itself is short or unlooped. **Worth checking.**
@@ -151,27 +158,45 @@ Three different synths are in play, and they are not the same target:
 
 The owner's stated goal is "100% accurate to VGMTrans playback", which means
 matching **BASSMIDI on the SF2**. Their evidence of wrongness comes from **Fruity
-LSD**, which is a *third* engine. These may or may not agree with each other.
-**Nobody has yet measured either reference.**
+LSD**, which is a *third* engine. BASSMIDI has now been measured and agrees with
+FluidSynth on the disputed behavior; DirectMusic has not been measured.
 
-## 7. The open question
+## 7. Reference experiment completed
 
-> On the same SF2, with `decayVolEnv = 2.947 s` and `sustainVolEnv = 100 dB`,
-> what amplitude contour does BASSMIDI (and/or DirectMusic) produce, and how does
-> it differ from FluidSynth's linear-dB ramp?
+Measured on the local VGMTrans checkout at commit
+`e82843e23db56b76054e314f121d9b6f1eaf47e5`, using its bundled BASS 2.4.16.7 and
+BASSMIDI 2.4.13 libraries. A small offline decoder rendered MIDI note 60 at
+velocity 100 through program 10 of `SEQ_BGM_N_CASTLE.sf2`, with effects disabled,
+at 48 kHz. The same process rendered FluidSynth 2.5.5 and a second BASSMIDI font
+handle with `BASS_MIDI_FONT_LINDECVOL` enabled. Each contour was normalised to
+its first 50 ms RMS window.
 
-Until that is measured, any change to Juicy16's envelope is a guess.
+| window centre | BASSMIDI as VGMTrans uses it | FluidSynth | BASSMIDI linear option |
+|---|---:|---:|---:|
+| 0.075 s | -3.96 dB | -4.03 dB | -2.45 dB |
+| 0.275 s | -14.33 dB | -14.21 dB | -6.70 dB |
+| 0.575 s | -20.36 dB | -19.83 dB | -3.42 dB |
+| 1.025 s | -39.46 dB | -38.27 dB | -9.29 dB |
+| 1.525 s | -51.95 dB | -50.07 dB | -7.24 dB |
 
-### The experiment that settles it
+The default BASSMIDI and FluidSynth contours stay within 0.53 dB through the
+first 0.575 s and cross -20 dB in the same window. BASSMIDI is then slightly
+*quieter*, not louder, than FluidSynth. That small difference cannot explain a
+report that Juicy16's struck instruments are too quiet relative to VGMTrans.
 
-Render **one sustained note of program 10** from `SEQ_BGM_N_CASTLE.sf2` through
-VGMTrans (BASSMIDI), and the same note through Juicy16 or stock FluidSynth.
-Divide one amplitude contour by the other. Because the **sample content is
-identical in both**, it cancels, and what remains is purely the ratio of the two
-envelope curves. That is a direct measurement, not a curve fit.
+The linear option is the proposed long-tail behavior, and is dramatically
+different: it is only 3.42 dB down when the normal VGMTrans path is 20.36 dB
+down. But VGMTrans calls `BASS_MIDI_FontInitUser` with only
+`BASS_MIDI_FONT_XGDRUMS`; it does **not** pass `BASS_MIDI_FONT_LINDECVOL`.
+BASSMIDI's own documentation also describes linear decay/release as an explicit
+font-init option, not the default. Enabling the equivalent behavior in Juicy16
+would therefore move it away from VGMTrans.
 
-A full-track bounce will **not** work — it is a mix, and no single instrument's
-envelope can be recovered from it. This was raised and is correct.
+DirectMusic/Fruity LSD may still use a different contour. If Fruity LSD
+compatibility is promoted to a product target later, the required evidence is
+still a one-note bounce of this exact program from Fruity LSD. A full-track bounce
+will not isolate an envelope. Until that reference exists, a DirectMusic mode
+would still be a guess.
 
 ## 8. How to reproduce everything here
 
@@ -189,12 +214,12 @@ fluidsynth -ni -g 0.2 -R 0 -C 0 -r 48000 -F /tmp/stock.wav "<bank>.dls" "<rip>.m
 ./build/JuicySFEngineMidiTests --game-rip "<bank>.dls" "<rip>.mid"
 ```
 
-The one-note MIDI generator, the DLS articulation parser, the SF2 `igen` parser
-and the decay-measurement script used above were written ad hoc in `/tmp` during
-the investigation and are not committed. They are small; regenerating them is
-straightforward, and the numbers they produced are all quoted above.
+The one-note MIDI generator, DLS articulation parser, SF2 `igen` parser, original
+decay-measurement script, and BASSMIDI comparison decoder were written ad hoc in
+`/tmp` during the investigation and are not committed. They are small; the exact
+inputs, flags, versions, and resulting contour points are recorded above.
 
-## 9. Constraints on any fix
+## 9. Why no fix was applied
 
 Stated by the owner:
 
@@ -222,6 +247,17 @@ From the repository:
   SoundFonts where linear-dB is correct per spec. Deviating would make Juicy16
   render normal SoundFonts differently from every other player. If a change is
   made it should almost certainly be a setting, not the default.
+
+The measurement closes this issue under the current product contract: the exact
+reference named by that contract does not use the proposed curve. A future
+Fruity LSD/DirectMusic compatibility setting would require all of the following:
+
+1. a captured one-note DirectMusic contour proving its curve;
+2. a non-default, clearly named mode so ordinary SF2/SF3 banks stay conformant;
+3. a pinned FluidSynth patch with its base/result hashes in both dependency
+   recipes and `dependency_patch_contract`;
+4. audio-domain regression coverage for decay and release; and
+5. an explicit Beta parameter/state compatibility decision.
 
 ## 10. Related records
 

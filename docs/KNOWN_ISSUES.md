@@ -48,12 +48,14 @@ The remaining 63 are not yet identified and are most likely stock JUCE IDs that
 - **Some tracks' volume or attack may sound different from other players.**
   Full write-up, with every measurement and everything ruled out, in
   [INVESTIGATION_ENVELOPE_DECAY.md](INVESTIGATION_ENVELOPE_DECAY.md).
-  Reported on 0.6.0-alpha.2 and not fully explained. What has been ruled out by
+  Reported on 0.6.0-alpha.2. The VGMTrans comparison is now resolved without an
+  engine change; the remaining difference against Fruity LSD is a separate,
+  unmeasured DirectMusic compatibility question. What was ruled out by
   measurement against stock FluidSynth on the same bank: velocity response
   (within 0.3 dB), CC7 channel volume (within 0.22 dB), CC10 pan (exact), and
   the amplitude envelope — attack time is identical at 37.7 ms and unaffected by
-  CC73, so the removed CC71-79 modulators are genuinely gone. Two candidates
-  remain:
+  CC73, so the removed CC71-79 modulators are genuinely gone. Two initial
+  candidates, both later ruled out, were:
   1. **Reverb was on by default in 0.6.0-alpha.2**, at the GM default send. It
      was the first Juicy16 release in which the reverb was audible at all, and
      reverb both raises perceived level unevenly between instruments and smears
@@ -150,28 +152,26 @@ The remaining 63 are not yet identified and are most likely stock JUCE IDs that
   against the noise floor, treating `volenv_val` linearly while rendering treats
   it as dB - so it over-estimates and kills voices LATE, never early.
 
-  The cause is therefore still open, and is now a FluidSynth-versus-BASSMIDI
-  difference on the same SF2. Settling it needs one reference render: a single
-  sustained note of the affected program, rendered by VGMTrans. Dividing that
-  amplitude contour by Juicy16's render of the same note cancels the sample
-  content and leaves only the ratio of the two envelope curves, which is a
-  measurement rather than a fit. A full-track bounce will not do - it is a mix,
-  and no single instrument's envelope can be recovered from it.
+  **Update 5 — resolved without an engine change, 2026-08-23.** The missing
+  reference render was made with VGMTrans's bundled BASSMIDI 2.4.13 on the exact
+  SF2 and affected program. At 48 kHz, normalised 50 ms RMS windows for BASSMIDI
+  versus FluidSynth were -3.96/-4.03 dB at 0.075 s, -14.33/-14.21 dB at 0.275 s,
+  and -20.36/-19.83 dB at 0.575 s. BASSMIDI becomes slightly *quieter* after
+  that. The two engines therefore have the same disputed fast decay for the part
+  of the contour that determines audibility.
 
-  **Not a Juicy16 defect, but it is Juicy16's problem** - the plugin reproduces
-  FluidSynth exactly, as measured, and the material still sounds wrong. Fixing it
-  means rendering a decay shape the SF2 model does not describe, which is a
-  product decision. Options, neither taken without the owner's call:
+  BASSMIDI also exposes an explicit `BASS_MIDI_FONT_LINDECVOL` option. With it,
+  the note is only -3.42 dB at 0.575 s instead of -20.36 dB — the long tail that
+  had been proposed as a Juicy16 fix. VGMTrans does not enable that flag; it calls
+  `BASS_MIDI_FontInitUser` with `BASS_MIDI_FONT_XGDRUMS` only. Applying the
+  linear curve in Juicy16 would therefore make it less accurate to VGMTrans, the
+  stated target, as well as changing normal SoundFonts away from the SF2 model.
 
-  1. **Decay compensation.** `fluid_synth_set_gen(GEN_VOLENVDECAY)` applies a
-     per-channel timecent offset on top of each preset's value, so a single
-     setting can lengthen every decay. It only approximates a linear-amplitude
-     curve with a longer linear-dB one, and it cannot be exact, but it is small,
-     reversible, and needs no dependency change. Instruments that sustain are
-     unaffected, because their decay segment never runs.
-  2. **Patch FluidSynth's volume envelope** to offer a linear-amplitude decay for
-     banks transcribed from hardware that used one. Correct rather than
-     approximate, at the cost of a second vendored patch to carry.
+  No compensation or FluidSynth patch was applied. Fruity LSD/DirectMusic can
+  still sound different, but it is a separate, unmeasured compatibility target.
+  A future opt-in DirectMusic mode needs a one-note Fruity LSD reference render
+  before its curve can be implemented exactly. See the full investigation for
+  method, versions, and the wider contour.
 - **Chorus does nothing.** It was discarded by the same bug and is now switched
   off explicitly rather than un-muted with defaults nobody chose. CC93 still
   reaches the engine. Chorus will get controls of its own in a later release.

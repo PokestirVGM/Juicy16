@@ -19,13 +19,16 @@
   evidence artefacts it asks for (host versions, an expected/actual matrix, the
   repeat-after-transport passes), but whether the mechanism works is no longer in
   question.
-- **Open:** some tracks' volume and some instruments' attack reported as sounding
-  off. Measured against stock FluidSynth on the same bank, Juicy16 matches
-  velocity response within 0.3 dB, CC7 within 0.22 dB, CC10 pan exactly, and has
-  an identical 37.7 ms attack unaffected by CC73 — so the engine's level and
-  envelope are not the cause. The two remaining candidates are reverb-on-by-
-  default in alpha.2 (now off) and chorus being disabled while other players
-  enable it. See `docs/KNOWN_ISSUES.md`.
+- **Envelope-decay investigation closed without an engine change.** Juicy16
+  already matches the stated VGMTrans playback target on the affected material.
+  A one-note render through VGMTrans's bundled BASSMIDI 2.4.13 reaches -20.36 dB
+  in the same 0.575 s window where FluidSynth reaches -19.83 dB. BASSMIDI's
+  optional linear-volume mode produces the proposed longer tail, but VGMTrans
+  does not enable it. No compensation or global FluidSynth patch was applied,
+  because either would regress normal SoundFonts and VGMTrans accuracy. Fruity
+  LSD/DirectMusic remains a distinct compatibility target that needs its own
+  isolated reference render before an exact opt-in mode can be designed. See
+  `docs/INVESTIGATION_ENVELOPE_DECAY.md`.
 
 ## 0.6.0-alpha.2 — unreleased
 
