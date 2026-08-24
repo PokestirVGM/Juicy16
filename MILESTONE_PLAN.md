@@ -12,7 +12,7 @@ Complete these fields before producing the first candidate. The per-candidate
 ones (commit, build date) are filled in by `BUILD_INFO.txt` when the package is
 built, not typed in here by hand.
 
-- Working version: `0.6.0-alpha.2`. Deliberately not `beta` — the Beta 1 bar below has not been met, and the label should not claim otherwise. The minor version moved from 0.5 to 0.6 because Phases 9 and 10 moved the parameter surface (21 → 89) and the state schema (4 → 6), and Beta 1 ships as `0.6.0-beta.1`. Rename to `0.6.0-beta.1` when the technical gate passes.
+- Working version: `0.6.0-alpha.3`. Deliberately not `beta` — the Beta 1 bar below has not been met, and the label should not claim otherwise. The minor version moved from 0.5 to 0.6 because Phases 9 and 10 moved the parameter surface (21 → 89) and the state schema (4 → 6), and Beta 1 ships as `0.6.0-beta.1`. Rename to `0.6.0-beta.1` when the technical gate passes.
 - Candidate number: `BC1` initially; increment for every rebuilt candidate.
 - Candidate commit:
 - Candidate build date:

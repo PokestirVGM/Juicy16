@@ -2,7 +2,7 @@
 
 Juicy16 is a 16-channel multitimbral DLS/SoundFont player inspired by the automatic patch-selection workflow of Fruity LSD. Load one `.dls`, `.sf2`, or `.sf3` bank, send a multichannel MIDI file to one plugin instance, and its Bank Select and Program Change events select instruments independently on MIDI channels 1–16. All channels mix to one stereo output.
 
-The current development version is `0.6.0-alpha.2`. It is an alpha: the engine, build, and automated gates are in good shape, but the Beta 1 readiness bar has not been met, so it is deliberately not labelled beta. The authoritative readiness checklist is [MILESTONE_PLAN.md](MILESTONE_PLAN.md).
+The current development version is `0.6.0-alpha.3`. It is an alpha: the engine, build, and automated gates are in good shape, but the Beta 1 readiness bar has not been met, so it is deliberately not labelled beta. The authoritative readiness checklist is [MILESTONE_PLAN.md](MILESTONE_PLAN.md).
 
 ## What is implemented
 
