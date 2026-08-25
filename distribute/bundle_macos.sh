@@ -96,6 +96,11 @@ COPYFILE_DISABLE=1 cp -R "$vst3_source" "$staging_dir/VST3/"
 cp "$repo_dir/LICENSE.txt" "$repo_dir/NOTICE.md" "$repo_dir/README.md" \
    "$repo_dir/CHANGELOG.md" "$repo_dir/PRIVACY.txt" "$repo_dir/ROADMAP.md" \
    "$repo_dir/building.macos.md" "$staging_dir/"
+# The installer, which must stay executable so a tester can double-click it.
+# SHA256SUMS is generated below and therefore covers it, and the installer
+# checks SHA256SUMS before copying anything.
+cp "$script_dir/install_macos.command" "$staging_dir/"
+chmod +x "$staging_dir/install_macos.command"
 # Every published doc, so that no link inside the package dangles. The list
 # duplicated two entries and copied README.md a second time into docs/; it also
 # copied PERFORMANCE.md, which is no longer tracked, so a clean clone could not

@@ -29,8 +29,8 @@ Two further limits worth knowing before you spend time on this:
 
 - **The candidate is ad-hoc signed**, not Developer ID signed or notarized, so
   macOS will refuse it until you clear quarantine. The exact command is in the
-  Installation section, as step 4. If you are not willing to run one Terminal
-  command, stop here.
+  Installation section. The bundled installer does it for you; by hand it is one
+  Terminal command. If you are not willing to do either, stop here.
 - **Beta 1 is validated in FL Studio and Cubase only**, in both AU and VST3.
   Logic Pro and every other host are untested rather than known-good — approved
   *scope* is not the same as tested. `auval -strict` passes, which is not the
@@ -49,8 +49,27 @@ Send reports to `contact@pokestir.com` with a subject beginning `[Juicy16 VST]` 
 
 ## Installation
 
-Five steps, in this order. Step 4 is not optional: skip it and the plugin will
-simply never appear in your host, with no error to tell you why.
+### The easy way
+
+Unpack the `.zip`, then **double-click `install_macos.command`** inside it.
+
+macOS will refuse to open it the first time and say it is from an unidentified
+developer — that is the same ad-hoc signing situation as the plugin itself. To
+get past it: **right-click the file, choose Open, then click Open** in the
+dialog. You only do this once.
+
+The installer checks the download against its checksums, asks whether you want
+AU, VST3 or both, backs up any Juicy16 already installed, copies the bundles in,
+and clears the quarantine flag that would otherwise make the plugin invisible to
+your host. Then quit your DAW, reopen it, and rescan.
+
+If it reports a problem, it stops before copying anything.
+
+### The manual way
+
+If you would rather not run a script, do the same five things by hand. They are
+in this order for a reason, and step 4 is not optional: skip it and the plugin
+will simply never appear in your host, with no error to tell you why.
 
 ### 1. Verify the download
 
