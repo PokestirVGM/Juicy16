@@ -14,6 +14,7 @@ fluidsynth.wav
 # Internal engineering records. Kept on disk, not published: they are working
 # notes and QA procedure rather than anything a user or contributor needs.
 /MILESTONE_PLAN.md
+/MILESTONE_PLAN.archive-*.md
 /docs/INVESTIGATION_ENVELOPE_DECAY.md
 /docs/HOST_TEST_PROTOCOL.md
 /docs/MIDI_SOAK.md
