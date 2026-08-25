@@ -82,7 +82,7 @@ cmake --build build-release --config Release -j 8
 ctest --test-dir build-release -C Release --output-on-failure
 ```
 
-`-` produces an ad-hoc signature suitable for local testing. An approved Developer ID identity and notarization workflow are still required if the Beta distribution policy calls for them.
+`-` produces an ad-hoc signature. Beta 1 ships ad-hoc by decision; a Developer ID identity and notarization remain required before a public stable release.
 
 The approved Beta 1 target is macOS 11.0 or later on Apple Silicon. Strict release validation deliberately fails unless the deployment target is `11.0`, the architecture is exactly `arm64`, and FluidSynth is linked statically. This proves the artifact's declared target; runtime testing on macOS 11 and the current macOS release is still required before making a support claim.
 
@@ -121,7 +121,6 @@ Do not mark the milestone task complete until the exact packaged candidate passe
 After the strict Release suite passes, build and revalidate a candidate archive with:
 
 ```bash
-JUICY16_REQUIRE_DISTRIBUTION_SIGNATURE=1 \
 distribute/bundle_macos.sh \
   build-release/JuicySFPlugin_artefacts/Release \
   BC1
@@ -129,7 +128,7 @@ distribute/bundle_macos.sh \
 
 The packager rechecks metadata, signatures, architecture, deployment targets, dynamic dependencies, and embedded paths before staging. It includes only AU/VST3 plus the selected documentation/notices, writes internal and external SHA-256 manifests, fixes archive timestamps and ordering, extracts the ZIP to a clean temporary directory, verifies every file hash, and reruns artifact validation there.
 
-It refuses a dirty worktree and, when `JUICY16_REQUIRE_DISTRIBUTION_SIGNATURE=1` is set, refuses ad-hoc signatures. For local workflow testing only, `JUICY16_ALLOW_DIRTY_PACKAGE=1` permits a dirty input and labels the filename `LOCAL-DIRTY`; ad-hoc input is always labelled `ADHOC`. Never publish a package carrying either label.
+It refuses a dirty worktree and, when `JUICY16_REQUIRE_DISTRIBUTION_SIGNATURE=1` is set, refuses ad-hoc signatures. For local workflow testing only, `JUICY16_ALLOW_DIRTY_PACKAGE=1` permits a dirty input and labels the filename `LOCAL-DIRTY`; never publish a package carrying that label. Ad-hoc input is always labelled `ADHOC`, which Beta 1 ships deliberately: no Developer ID identity is held, so the released archive carries it and the tester guide documents the Gatekeeper step it makes necessary. Do not set `JUICY16_REQUIRE_DISTRIBUTION_SIGNATURE=1` for a Beta 1 package; it exists for the first signed release.
 
 ## Architectures
 
