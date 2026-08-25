@@ -29,7 +29,8 @@ Two further limits worth knowing before you spend time on this:
 
 - **The candidate is ad-hoc signed**, not Developer ID signed or notarized, so
   macOS will refuse it until you clear quarantine. The exact command is in the
-  Gatekeeper section below. If you are not willing to do that, stop here.
+  Installation section, as step 4. If you are not willing to run one Terminal
+  command, stop here.
 - **Beta 1 is validated in FL Studio and Cubase only**, in both AU and VST3.
   Logic Pro and every other host are untested rather than known-good — approved
   *scope* is not the same as tested. `auval -strict` passes, which is not the
@@ -45,6 +46,93 @@ limitations you should read before reporting a bug are in
 The first canary should be experienced macOS AU/VST3 users who can preserve 16-channel MIDI routing, identify Bank Select/Program Change events, restore a backup, and submit a minimal reproduction. The group should include FL Studio and Cubase, plus users of SF2, SF3, conventional DLS, and known malformed DLS exports. Logic Pro is not owned and is untested in Beta 1; a Logic report is welcome but is exploring an unvalidated host rather than confirming a tested one.
 
 Send reports to `contact@pokestir.com` with a subject beginning `[Juicy16 VST]` so they can be identified and routed.
+
+## Installation
+
+Five steps, in this order. Step 4 is not optional: skip it and the plugin will
+simply never appear in your host, with no error to tell you why.
+
+### 1. Verify the download
+
+```bash
+shasum -a 256 -c Juicy16-0.6.0-beta.1-BC1-macos-arm64-ADHOC.zip.sha256
+```
+
+You want `OK`. This matters more here than for most downloads: Beta 1 is ad-hoc
+signed rather than Developer ID signed, so the checksum is the only thing
+standing in for a signature that would otherwise vouch for the file. Do not
+continue if it does not match.
+
+Two labels can appear in the filename, and they mean different things:
+
+- **`ADHOC`** — ad-hoc signed. **Expected for Beta 1**, by an explicit release
+  decision. It is why step 4 exists.
+- **`LOCAL-DIRTY`** — built from an uncommitted working tree. **Never install
+  one.** It cannot be traced to a commit, so a bug report against it is
+  unreproducible. You should never receive one of these.
+
+### 2. Quit every DAW
+
+Hosts cache their plugin scans. Installing underneath a running DAW is the most
+common reason a correct install still looks broken.
+
+### 3. Copy in the formats you want
+
+Unpack the archive. It contains `AU/Juicy16.component` and
+`VST3/Juicy16.vst3` — install **either or both**, whichever your host uses:
+
+```bash
+# AU — FL Studio on macOS (also the format Logic and GarageBand use)
+cp -R AU/Juicy16.component ~/Library/Audio/Plug-Ins/Components/
+
+# VST3 — Cubase, and most other hosts
+cp -R VST3/Juicy16.vst3 ~/Library/Audio/Plug-Ins/VST3/
+```
+
+Create those folders if they do not exist. If a Juicy16 bundle is already there,
+move it somewhere safe first — you will want it back if you need to roll away
+from the beta.
+
+### 4. Clear the quarantine flag — required
+
+macOS tags every downloaded file as quarantined, and refuses to load an ad-hoc
+signed plugin that still carries the tag. Run this for whichever formats you
+installed:
+
+```bash
+xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/Components/Juicy16.component
+xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/Juicy16.vst3
+```
+
+Confirm with `xattr -p com.apple.quarantine <bundle>` — it should report that the
+attribute does not exist.
+
+Only ever do this for a bundle whose checksum you verified in step 1. Clearing
+quarantine tells macOS *you* vouch for the file.
+
+### 5. Rescan in your host
+
+Reopen your DAW and rescan plugins. Juicy16 appears as an instrument.
+
+### If it still does not show up
+
+Every symptom below is the same missing step 4:
+
+| Symptom | What it actually means |
+|---|---|
+| Never appears in the plugin list after a rescan | The host silently skipped a quarantined bundle |
+| *"Juicy16 cannot be opened because the developer cannot be verified"* | Quarantine is still set |
+| *"Juicy16 is damaged and can't be opened"* | Also quarantine, not corruption — verify the checksum, then clear it |
+| Logic or GarageBand reports the AU as failing validation | `auval` ran against a quarantined bundle |
+
+Some hosts cache a failed scan, so after fixing it: quit the host completely,
+then reopen and rescan.
+
+If a host still refuses **after** clearing quarantine on a checksum-verified
+bundle, that is a real defect — report it with the exact host and macOS version.
+
+Do not disable System Integrity Protection or turn Gatekeeper off entirely. No
+Juicy16 problem requires that, and we will not ask you to.
 
 ## The window
 
@@ -128,84 +216,6 @@ Screen-reader announcements are untested. Every control carries an accessible
 name, but nobody has yet run Juicy16 under VoiceOver or Narrator, so reports from
 that angle are especially useful.
 
-## Installation
-
-### macOS will block it on first use — this is expected
-
-Beta 1 is **ad-hoc signed**, not signed with an Apple Developer ID and not
-notarized. That is a deliberate choice for a small beta, not an oversight, and it
-means Gatekeeper will refuse the plugin the first time your host scans it. The
-plugin is not damaged and nothing is wrong with the download.
-
-Clear the quarantine flag after copying the bundles into place:
-
-```bash
-xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/Components/Juicy16.component
-xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/Juicy16.vst3
-```
-
-Then rescan plugins in your host. If a host still refuses to load it, quit the
-host, run the two commands again, and reopen — some hosts cache a failed scan.
-
-Verify the checksum first, below: an ad-hoc signature does not tell you the
-download arrived intact, so the SHA-256 matters more here than it would for a
-notarized build.
-
-Verify the download first. The archive ships with a `.sha256` file beside it, and `SHA256SUMS` inside covering every packaged file:
-
-```bash
-shasum -a 256 -c Juicy16-0.6.0-beta.1-BC1-macos-arm64-ADHOC.zip.sha256
-```
-
-Two labels can appear in the filename, and they mean different things:
-
-- `LOCAL-DIRTY` — built from an uncommitted working tree. **Never install one.** It cannot be traced to a commit, so a bug report against it is unreproducible.
-- `ADHOC` — ad-hoc signed rather than Developer ID signed. **Expected for Beta 1**, by an explicit release decision. It is why the Gatekeeper step below is required.
-
-Unpack the archive and copy the bundles into your user plug-in folders:
-
-- macOS AU → `~/Library/Audio/Plug-Ins/Components/Juicy16.component`
-- macOS VST3 → `~/Library/Audio/Plug-Ins/VST3/Juicy16.vst3`
-
-Back up any existing bundle at those paths before replacing it. Close every DAW first, then rescan plug-ins after copying.
-
-### macOS Gatekeeper — required for every Beta 1 install
-
-Beta 1 is **ad-hoc signed by decision**: it carries a valid signature, but not a
-Developer ID one, and it is not notarized. macOS will therefore refuse to load it
-until you clear the quarantine attribute the download added. This is expected, not
-a fault in the download.
-
-**Verify the checksum first**, then:
-
-```bash
-xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/Components/Juicy16.component
-xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/Juicy16.vst3
-```
-
-Only ever do this for a bundle whose checksum you have verified against the one
-published with the candidate. Clearing quarantine tells macOS you vouch for the
-file, so the checksum is the thing standing in for the missing Developer ID
-signature.
-
-What you may see if you skip it:
-
-| Symptom | Meaning |
-|---|---|
-| The plug-in never appears in the DAW's list after a rescan | The host silently skipped a quarantined bundle |
-| *"Juicy16 cannot be opened because the developer cannot be verified"* | Quarantine is still set |
-| *"Juicy16 is damaged and can't be opened"* | Also usually quarantine, not actual corruption — verify the checksum, then clear it |
-| Logic or GarageBand reports the AU as failing validation | `auval` ran against a quarantined bundle |
-
-Confirm it worked with `xattr -p com.apple.quarantine <bundle>`, which should
-report that the attribute does not exist.
-
-If a DAW still refuses to load or validate the plug-in **after** clearing
-quarantine on a checksum-verified bundle, that is a real defect: report it with
-the exact host and macOS version. Do not disable System Integrity Protection or
-switch Gatekeeper off entirely — no Juicy16 problem requires that, and we will not
-ask you to.
-
 ## Support boundary
 
 Beta 1 covers only the operating system, architecture, formats, and hosts named above: macOS 11+ on Apple Silicon, AU and VST3, validated in FL Studio and Cubase. One stereo mix output is intentional. Windows, VST2, AUv3, Linux, Intel Macs, and unlisted architectures are unsupported unless a later approved matrix says otherwise. Bank-specific modulators can change how pressure and controllers sound even when messages are delivered correctly; see the exact [MIDI controller support contract](CONTROLLER_SUPPORT.md).
@@ -221,9 +231,9 @@ On macOS, remove only the Juicy16 bundles installed for the Beta from:
 
 Rescan the DAW afterward. Restore the prior backed-up bundle if rollback is required; never overwrite the backup. Projects saved with Beta-specific state may not work in an older build, so restore the corresponding project backup too.
 
-Beta 2 and the first stable release are expected to read Beta 1 schema-v6 state. Older betas deliberately reject newer schemas rather than guessing at their meaning. See this document for the versioning and identifier policy.
+Beta 2 and the first stable release are expected to read Beta 1 schema-v6 state. Older builds deliberately reject newer schemas rather than guessing at their meaning. The versioning and identifier policy is in [COMPATIBILITY.md](COMPATIBILITY.md).
 
-No uninstaller should delete user DLS/SF2/SF3 files or DAW projects. Temporary repaired DLS copies are stored in the operating system temporary area and normally removed with the plugin instance.
+Removing the bundles never touches your DLS/SF2/SF3 files or DAW projects. Temporary repaired DLS copies are stored in the operating system temporary area and normally removed with the plugin instance.
 
 ## Reporting
 
