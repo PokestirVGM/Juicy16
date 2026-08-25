@@ -28,6 +28,15 @@ tag; `0.6.0-alpha.1` through `alpha.4` were never released separately.
 
 ### Changed
 
+- **The source now lives at `github.com/PokestirVGM/Juicy16`, and it is public.**
+  The repository was renamed from `JuicySF-Rack` to the product name every
+  package, binary and document already carried, and published — which is what
+  makes this archive distributable at all: GPLv3, AGPLv3 and
+  `docs/LICENSING.md` all require the corresponding source to be available at or
+  before the moment a binary is distributed. `distribute/bundle_macos.sh` stamps
+  the new URL into `BUILD_INFO.txt`. The `BC4` archive names the old one, which
+  GitHub 301-redirects, so it resolves and needs no repackage.
+
 - **The accent list shows each colour beside its name**, so an accent can be
   seen before it is chosen rather than only after. Scoped to that one dropdown.
 - **Twelve accent colours, in a dropdown.** Four swatches were both a short list

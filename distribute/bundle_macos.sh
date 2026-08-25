@@ -127,7 +127,7 @@ vst3_hash=$(shasum -a 256 "$vst3_source/Contents/MacOS/Juicy16" | cut -d ' ' -f 
   printf 'Version: %s\n' "$display_version"
   printf 'Candidate: %s\n' "$candidate"
   printf 'Source commit: %s\n' "$commit"
-  printf 'Source: https://github.com/PokestirVGM/JuicySF-Rack\n'
+  printf 'Source: https://github.com/PokestirVGM/Juicy16\n'
   printf 'Dirty worktree: %s\n' "$dirty"
   printf 'Signature: %s\n' "$signature"
   printf 'AU executable SHA-256: %s\n' "$au_hash"
