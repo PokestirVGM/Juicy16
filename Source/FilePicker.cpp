@@ -128,13 +128,13 @@ void FilePicker::filenameComponentChanged (FilenameComponent*) {
     }
 #if JUCE_MAC || JUCE_IOS
     CFUniquePtr<CFStringRef> fileExtensionCF{fileChooser.getCurrentFile().getFullPathName().toCFString()};
-    CFUniquePtr<CFURLRef> cfURL{CFURLCreateWithFileSystemPath(NULL, fileExtensionCF.get(), CFURLPathStyle::kCFURLPOSIXPathStyle, false)};
+    CFUniquePtr<CFURLRef> cfURL{CFURLCreateWithFileSystemPath(nullptr, fileExtensionCF.get(), CFURLPathStyle::kCFURLPOSIXPathStyle, false)};
     CFErrorRef cfError = nullptr;
 
     // CFURLCreateBookmarkData causes this error:
     // cannot open file at line 45340 of [d24547a13b]
     // os_unix.c:45340: (0) open(/var/db/DetachedSignatures) - Undefined error: 0
-    CFUniquePtr<CFDataRef> cfData{CFURLCreateBookmarkData(NULL, cfURL.get(), bookmarkCreationOptions, NULL, NULL, &cfError)};
+    CFUniquePtr<CFDataRef> cfData{CFURLCreateBookmarkData(nullptr, cfURL.get(), bookmarkCreationOptions, nullptr, nullptr, &cfError)};
 
     if (cfData) {
         const UInt8 * cfDataBytePtr{CFDataGetBytePtr(cfData.get())};

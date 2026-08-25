@@ -268,7 +268,7 @@ FluidSynthModel::~FluidSynthModel() {
 void FluidSynthModel::initialise() {
     // deactivate all audio drivers in fluidsynth to avoid FL Studio deadlock when initialising CoreAudio
     // after all: we only use fluidsynth to render blocks of audio. it doesn't output to audio driver.
-    const char *DRV[] {NULL};
+    const char *DRV[] {nullptr};
     fluid_audio_driver_register(DRV);
     
     settings = { new_fluid_settings(), delete_fluid_settings };
@@ -878,14 +878,14 @@ void FluidSynthModel::valueTreePropertyChanged(ValueTree& treeWhosePropertyHasCh
             String bookmarkPath;
             if (bookmark.getBinaryData()->getSize() > 0) {
                 CFUniquePtr<CFDataRef> data{CFDataCreate(
-                    NULL,
+                    nullptr,
                     static_cast<const UInt8 *>(bookmark.getBinaryData()->getData()),
                     static_cast<CFIndex>(bookmark.getBinaryData()->getSize()))};
                 // isStale reports a bookmark that still resolves but whose target
                 // has moved or been replaced. Recorded for diagnostics; the
                 // resolved URL is authoritative either way.
                 Boolean isStale = false;
-                CFUniquePtr<CFURLRef> cfURL{CFURLCreateByResolvingBookmarkData(NULL, data.get(), kCFURLBookmarkResolutionWithSecurityScope, NULL, NULL, &isStale, &cfError)};
+                CFUniquePtr<CFURLRef> cfURL{CFURLCreateByResolvingBookmarkData(nullptr, data.get(), kCFURLBookmarkResolutionWithSecurityScope, nullptr, nullptr, &isStale, &cfError)};
                 if (cfURL) {
                     CFUniquePtr<CFStringRef> cfPath {CFURLCopyFileSystemPath(cfURL.get(), CFURLPathStyle::kCFURLPOSIXPathStyle)};
                     // Must own the string: StringRef would only borrow a pointer

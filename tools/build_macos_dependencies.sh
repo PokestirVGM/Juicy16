@@ -178,8 +178,26 @@ build_and_install "$work_dir/sndfile" "$work_dir/build-sndfile" \
   -DENABLE_EXTERNAL_LIBS=ON \
   -DENABLE_MPEG=OFF
 
+# FluidSynth always builds its CLI, and there is no option to skip it. The CLI
+# links libfluidsynth through CMake targets rather than pkg-config, and
+# libsndfile's static archive does not carry its own codec dependencies through
+# its exported target - so a from-scratch static build failed to link
+# src/fluidsynth on FLAC, vorbis and ogg symbols. Juicy16 itself was never
+# affected: it resolves the closure through `pkg-config --static`, which does
+# list them. Appended through CMAKE_C_STANDARD_LIBRARIES because that lands at
+# the END of the link line, which is where a static archive's dependencies have
+# to be.
+fluidsynth_exe_closure="\
+$install_prefix/lib/libsndfile.a \
+$install_prefix/lib/libFLAC.a \
+$install_prefix/lib/libvorbisenc.a \
+$install_prefix/lib/libvorbis.a \
+$install_prefix/lib/libogg.a \
+$install_prefix/lib/libopus.a"
+
 build_and_install "$work_dir/fluidsynth" "$work_dir/build-fluidsynth" \
   -DCMAKE_PREFIX_PATH="$install_prefix" \
+  -DCMAKE_C_STANDARD_LIBRARIES="$fluidsynth_exe_closure" \
   -DDEFAULT_SOUNDFONT= \
   -DBUILD_SHARED_LIBS=OFF \
   -Dosal=cpp11 \
