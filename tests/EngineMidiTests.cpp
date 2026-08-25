@@ -3093,6 +3093,27 @@ int main(int argc, char** argv)
         check(model.getPitchWheelSensitivity(15, afterNull) && afterNull == ranges.back(),
               "RPN Null prevents later Data Entry from changing pitch-bend range");
 
+        // Under VST3 every CC is a separate host parameter, so the order of
+        // same-timestamp controllers is the host's parameter-queue order and not
+        // the order the MIDI file wrote them in. A Data Entry that overtakes its
+        // own RPN selector would set the range on whatever RPN happened to be
+        // selected before. Insert the sequence backwards, at one timestamp, and
+        // require the asked-for range anyway.
+        constexpr int misorderedChannel{4};
+        constexpr int misorderedRange{9};
+        juce::MidiBuffer misordered;
+        for (const auto [cc, value] : std::array<std::pair<int, int>, 4>{
+                 std::pair{38, 0}, std::pair{6, misorderedRange},
+                 std::pair{100, 0}, std::pair{101, 0}})
+            misordered.addEvent(
+                juce::MidiMessage::controllerEvent(misorderedChannel + 1, cc, value), 64);
+        render(processor, audio, misordered);
+        int misorderedSensitivity{-1};
+        check(model.getPitchWheelSensitivity(misorderedChannel, misorderedSensitivity)
+                  && misorderedSensitivity == misorderedRange,
+              "an RPN Data Entry delivered before its selector at the same timestamp "
+              "still sets the pitch-bend range");
+
         const juce::uint8 gmReset[]{0x7e, 0x7f, 0x09, 0x01};
         juce::MidiBuffer reset;
         reset.addEvent(juce::MidiMessage::createSysExMessage(gmReset, sizeof(gmReset)), 0);
@@ -4016,8 +4037,9 @@ int main(int argc, char** argv)
 
         bool everyTokenLegible{true};
         bool everyAccentVisible{true};
-        for (const auto accent : {Juicy16::Accent::sage, Juicy16::Accent::amber,
-                                  Juicy16::Accent::terracotta, Juicy16::Accent::neutral}) {
+        // Every accent the settings dropdown offers, not a sample of them: a new
+        // hue that fails on one background is exactly what this is here to catch.
+        for (const auto accent : Juicy16::allAccents()) {
             Juicy16::PluginLookAndFeel lookAndFeel;
             lookAndFeel.setAccent(accent);
             for (const auto& background : backgrounds) {
@@ -4050,9 +4072,9 @@ int main(int argc, char** argv)
             }
         }
         check(everyTokenLegible,
-              "every palette text token meets WCAG AA on every background it is drawn on, in all four accents");
+              "every palette text token meets WCAG AA on every background it is drawn on, in every accent");
         check(everyAccentVisible,
-              "the accent meets the 3:1 non-text threshold on every background, in all four accents");
+              "the accent meets the 3:1 non-text threshold on every background, in every accent");
 
         Juicy16::PluginLookAndFeel lookAndFeel;
         const double normalStatus{contrastRatio(
@@ -4119,6 +4141,18 @@ int main(int argc, char** argv)
         }
         check(accessibleMetadata,
               "bank picker, channel rack, keyboard, status, settings, bank readout, and the reverb and master controls expose named accessible metadata and built-in control roles");
+
+        // The wordmark opens settings, and resized() sizes its box from the
+        // logo's own width. Handing the image over AFTER the editor's first
+        // setSize left that box 8px wide, so the wordmark was clipped until the
+        // user resized the window and the layout ran a second time. A first
+        // layout is all this gets, which is exactly the case that broke.
+        auto* settingsControl{editor != nullptr
+            ? findNamedComponent(*editor, "Settings") : nullptr};
+        check(settingsControl != nullptr
+                  && settingsControl->getWidth() > GuiConstants::logoHeight * 2
+                  && settingsControl->getHeight() >= GuiConstants::logoHeight,
+              "the wordmark is laid out at its full width on the editor's first layout");
 
         // Keyboard routing. The on-screen MIDI keyboard defaults to wanting
         // focus, which would swallow typed input meant for the controls, so the

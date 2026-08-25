@@ -23,7 +23,19 @@ project(JUICY16 VERSION 0.6.0)
 # copy, so a stale one is worse than none. Editing this line now wins everywhere;
 # -DJUICYSF_PRERELEASE_LABEL=... on the command line still overrides it, and keeps
 # overriding it for that build directory until the cache entry is removed.
-set(JUICYSF_PRERELEASE_LABEL_DEFAULT "alpha.3")
+set(JUICYSF_PRERELEASE_LABEL_DEFAULT "beta.1")
+# A build directory configured once with -DJUICYSF_PRERELEASE_LABEL=... keeps that
+# label forever, silently, and goes on displaying it in the status bar after the
+# line above has moved on. That is precisely the case the status bar exists to
+# rule out, so say so at configure time rather than letting a stale version ship.
+if (DEFINED CACHE{JUICYSF_PRERELEASE_LABEL}
+    AND NOT "$CACHE{JUICYSF_PRERELEASE_LABEL}" STREQUAL "${JUICYSF_PRERELEASE_LABEL_DEFAULT}")
+  message(WARNING
+    "This build directory pins JUICYSF_PRERELEASE_LABEL="
+    "'$CACHE{JUICYSF_PRERELEASE_LABEL}', so it will build and DISPLAY that label "
+    "instead of the current '${JUICYSF_PRERELEASE_LABEL_DEFAULT}'. Clear it with:\n"
+    "  cmake -B <build-dir> -U JUICYSF_PRERELEASE_LABEL")
+endif ()
 if (NOT DEFINED JUICYSF_PRERELEASE_LABEL)
   set(JUICYSF_PRERELEASE_LABEL "${JUICYSF_PRERELEASE_LABEL_DEFAULT}")
 endif ()
@@ -199,6 +211,32 @@ else ()
   endif ()
 
   pkg_search_module(FLUIDSYNTH REQUIRED IMPORTED_TARGET fluidsynth>=2)
+
+  # CMake's own FindPkgConfig fills <PREFIX>_STATIC_LINK_LIBRARIES only for
+  # libraries it can resolve as shared objects. Against the pinned, static-only
+  # closure it comes back empty, which is silent in both directions: nothing
+  # links FluidSynth, and the per-archive architecture and deployment-target
+  # checks below iterate over an empty list and pass vacuously. Resolve each
+  # archive to an absolute path inside the pinned prefix instead, keeping
+  # pkg-config's order because static link order is significant.
+  if (FLUIDSYNTH_LINK_STATIC AND NOT FLUIDSYNTH_STATIC_LINK_LIBRARIES)
+    set(_juicysf_static_closure "")
+    foreach (_juicysf_lib IN LISTS FLUIDSYNTH_STATIC_LIBRARIES)
+      find_library(_juicysf_archive_${_juicysf_lib}
+                   NAMES ${_juicysf_lib}
+                   PATHS ${FLUIDSYNTH_STATIC_LIBRARY_DIRS}
+                   NO_DEFAULT_PATH)
+      if (_juicysf_archive_${_juicysf_lib})
+        list(APPEND _juicysf_static_closure "${_juicysf_archive_${_juicysf_lib}}")
+      else ()
+        # A system library such as -lm has no archive in the prefix; the linker
+        # resolves it from the SDK, so pass the bare name through.
+        list(APPEND _juicysf_static_closure "${_juicysf_lib}")
+      endif ()
+      unset(_juicysf_archive_${_juicysf_lib} CACHE)
+    endforeach ()
+    set(FLUIDSYNTH_STATIC_LINK_LIBRARIES "${_juicysf_static_closure}")
+  endif ()
 endif ()
 if (JUICYSF_RELEASE_VALIDATION AND NOT FLUIDSYNTH_VERSION VERSION_EQUAL "2.5.5")
   message(FATAL_ERROR
@@ -247,6 +285,23 @@ endif ()
 # Refuse those archives in strict validation instead of producing a binary that
 # merely advertises an older LC_BUILD_VERSION.
 if (JUICYSF_RELEASE_VALIDATION AND APPLE AND FLUIDSYNTH_LINK_STATIC)
+  # An empty or path-less list would make every check below a no-op, which is
+  # how an unvalidated dependency closure could ship while the gate reported
+  # success. Require at least one inspectable archive before trusting the loop.
+  set(_juicysf_inspectable_archives 0)
+  foreach (_dependency IN LISTS FLUIDSYNTH_STATIC_LINK_LIBRARIES)
+    if (IS_ABSOLUTE "${_dependency}" AND _dependency MATCHES "\\.a$")
+      math(EXPR _juicysf_inspectable_archives "${_juicysf_inspectable_archives} + 1")
+    endif ()
+  endforeach ()
+  if (_juicysf_inspectable_archives EQUAL 0)
+    message(FATAL_ERROR
+      "Release validation could not resolve any static FluidSynth archive to an "
+      "absolute path, so the per-archive architecture and deployment-target "
+      "checks would pass without inspecting anything. Check that the pinned "
+      "prefix on PKG_CONFIG_LIBDIR actually contains the .a files.")
+  endif ()
+
   foreach (_dependency IN LISTS FLUIDSYNTH_STATIC_LINK_LIBRARIES)
     if (IS_ABSOLUTE "${_dependency}" AND _dependency MATCHES "\\.a$")
       execute_process(

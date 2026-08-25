@@ -17,105 +17,46 @@ namespace {
 // A gear, drawn rather than shipped as a second asset. One closed outline with
 // no self-overlap - alternating root and tooth radius with a flat top on each
 // tooth - so the even-odd rule punches only the bore.
-std::unique_ptr<juce::Drawable> makeGearDrawable(juce::Colour colour) {
-    // Six teeth, not eight: a STROKED gear has two outlines per tooth, and at
-    // header size seven of them left barely a pixel of gap between the flanks,
-    // which reads as fuzz rather than as teeth. Fewer, larger teeth survive
-    // the scale.
-    constexpr int teeth{6};
-    constexpr float outerRadius{10.4f};
-    constexpr float rootRadius{6.4f};
-    constexpr float boreRadius{3.1f};
-
-    const float step{juce::MathConstants<float>::twoPi / static_cast<float>(teeth)};
-    // Angular half-widths: the tooth is narrower than the gap it stands in, so
-    // the flanks slope outward the way a real tooth's do.
-    const float toothHalf{step * 0.21f};
-    const float rootHalf{step * 0.33f};
-
-    const auto pointAt{[](float radius, float angle) {
-        return juce::Point<float>{std::sin(angle) * radius, -std::cos(angle) * radius};
-    }};
-
-    juce::Path gear;
-    for (int i = 0; i < teeth; ++i) {
-        const float centre{step * static_cast<float>(i)};
-        const juce::Point<float> flankIn{pointAt(rootRadius, centre - rootHalf)};
-        if (i == 0)
-            gear.startNewSubPath(flankIn);
-        else
-            gear.lineTo(flankIn);
-        gear.lineTo(pointAt(outerRadius, centre - toothHalf));
-        gear.lineTo(pointAt(outerRadius, centre + toothHalf));
-        gear.lineTo(pointAt(rootRadius, centre + rootHalf));
-        // Round the root between this tooth and the next, so the valleys are
-        // curved rather than a straight chord across the hub.
-        const float nextCentre{step * static_cast<float>(i + 1)};
-        gear.quadraticTo(pointAt(rootRadius * 1.04f, (centre + nextCentre) * 0.5f),
-                         pointAt(rootRadius, nextCentre - rootHalf));
-    }
-    gear.closeSubPath();
-
-    gear.addEllipse(-boreRadius, -boreRadius, boreRadius * 2.0f, boreRadius * 2.0f);
-    gear.applyTransform(juce::AffineTransform::translation(12.0f, 12.0f));
-
-    auto drawable{std::make_unique<juce::DrawablePath>()};
-    drawable->setPath(gear);
-    // STROKED, not filled. The folder beside it in the same header is line art,
-    // and a solid gear next to a hollow folder is two icon families in one strip
-    // - which is what made the pair look wrong rather than either one alone.
-    // No even-odd rule is needed once it is stroked: the bore is simply a second
-    // circle, drawn rather than punched.
-    drawable->setFill(juce::Colours::transparentBlack);
-    drawable->setStrokeFill(colour);
-    // 1.8 units on the same 24-unit grid the folder is drawn on, so the two
-    // strokes match once both are scaled into the header.
-    drawable->setStrokeType(juce::PathStrokeType{1.6f,
-                                                 juce::PathStrokeType::curved,
-                                                 juce::PathStrokeType::rounded});
-    return drawable;
+// Accent display names live here so both the dropdown and the list that drops
+// out of it spell them the same way.
+String accentDisplayName(Juicy16::Accent accent) {
+    const String name{Juicy16::accentName(accent)};
+    return name.substring(0, 1).toUpperCase() + name.substring(1);
 }
 
-// One accent choice, drawn as the colour it selects. A row of names in coloured
-// text was hard to scan and hard to name accessibly; a swatch says what it does
-// without reading.
-class AccentSwatch final : public juce::Button {
+// Scoped to the accent dropdown alone: every row in the open list carries a
+// swatch of the colour it selects, so the accent can be seen before it is
+// chosen rather than only after. Derives from the plugin's LookAndFeel so
+// scoping this one control does not opt it out of the palette.
+class AccentListLookAndFeel final : public Juicy16::PluginLookAndFeel {
 public:
-    AccentSwatch(Juicy16::Accent accentToUse, const String& accentName)
-    : juce::Button{accentName + " accent"}
-    , accent{accentToUse}
-    {
-        setTitle(accentName + " accent");
-        setDescription(String{"Use the "} + accentName + " accent colour");
-        setTooltip(getDescription());
-        setClickingTogglesState(true);
-        setRadioGroupId(1);
-        setWantsKeyboardFocus(true);
-    }
+    void drawPopupMenuItem(Graphics& g, const Rectangle<int>& area,
+                           bool isSeparator, bool isActive, bool isHighlighted,
+                           bool isTicked, bool hasSubMenu, const String& text,
+                           const String& shortcutKeyText, const juce::Drawable* icon,
+                           const Colour* textColour) override {
+        Juicy16::PluginLookAndFeel::drawPopupMenuItem(
+            g, area, isSeparator, isActive, isHighlighted, isTicked, hasSubMenu,
+            text, shortcutKeyText, icon, textColour);
+        if (isSeparator)
+            return;
 
-private:
-    void paintButton(Graphics& g, bool isMouseOver, bool isDown) override {
-        const auto area{getLocalBounds().toFloat().reduced(1.0f)};
-        juce::Colour fill{Juicy16::accentColour(accent)};
-        if (isDown)
-            fill = fill.darker(0.15f);
-        g.setColour(fill.withMultipliedAlpha(getToggleState() || isMouseOver ? 1.0f : 0.72f));
-        g.fillRoundedRectangle(area, GuiConstants::cornerRadius);
-
-        // The selected swatch is ringed rather than ticked: a tick would have to
-        // be legible on four different hues.
-        if (getToggleState()) {
-            g.setColour(findColour(Juicy16::textPrimaryColourId));
-            g.drawRoundedRectangle(area.reduced(0.5f), GuiConstants::cornerRadius, 1.6f);
-        }
-        if (hasKeyboardFocus(false)) {
-            g.setColour(findColour(Juicy16::focusRingColourId));
-            g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(0.5f),
-                                   GuiConstants::cornerRadius, 1.0f);
+        // Drawn at the trailing edge, where nothing else in the row lands: the
+        // tick and the text both start from the left.
+        for (const auto accent : Juicy16::allAccents()) {
+            if (accentDisplayName(accent) != text)
+                continue;
+            const float size{static_cast<float>(
+                juce::jmin(10, juce::jmax(4, area.getHeight() - 10)))};
+            const Rectangle<float> swatch{
+                static_cast<float>(area.getRight()) - size - GuiConstants::innerPadding,
+                static_cast<float>(area.getCentreY()) - size * 0.5f,
+                size, size};
+            g.setColour(Juicy16::accentColour(accent));
+            g.fillRoundedRectangle(swatch, 2.0f);
+            break;
         }
     }
-
-    Juicy16::Accent accent;
 };
 
 // The settings popover: the accent choice, plus the engine facts worth quoting
@@ -130,9 +71,14 @@ public:
     struct Fact { String key; String value; };
 
     // accentName() is an identifier, stored in state; the popover shows a label.
-    static String displayName(Juicy16::Accent accent) {
-        const String name{Juicy16::accentName(accent)};
-        return name.substring(0, 1).toUpperCase() + name.substring(1);
+    static String displayName(Juicy16::Accent accent) { return accentDisplayName(accent); }
+
+    static int indexOfAccent(Juicy16::Accent accent) {
+        const auto& accents{Juicy16::allAccents()};
+        for (std::size_t i = 0; i < accents.size(); ++i)
+            if (accents[i] == accent)
+                return static_cast<int>(i);
+        return 0;
     }
 
     SettingsPanel(Juicy16::Accent current,
@@ -150,31 +96,36 @@ public:
         accentHeading.setAccessible(false);
         addAndMakeVisible(accentHeading);
 
-        // The chosen accent is named beside the heading, so the swatches do not
-        // each need a caption under them.
-        accentName.setFont(Font{juce::FontOptions{GuiConstants::labelFontHeight}});
-        accentName.setJustificationType(Justification::centredRight);
-        accentName.setAccessible(false);
-        addAndMakeVisible(accentName);
-
         buildHeading.setText("BUILD", dontSendNotification);
         buildHeading.setFont(Font{juce::FontOptions{GuiConstants::labelFontHeight}});
         buildHeading.setAccessible(false);
         addAndMakeVisible(buildHeading);
 
-        for (const auto accent : {Juicy16::Accent::sage, Juicy16::Accent::amber,
-                                  Juicy16::Accent::terracotta, Juicy16::Accent::neutral}) {
-            auto swatch{std::make_unique<AccentSwatch>(accent, Juicy16::accentName(accent))};
-            swatch->setToggleState(accent == current, dontSendNotification);
-            swatch->onClick = [this, accent] {
-                accentName.setText(displayName(accent), dontSendNotification);
-                if (chooseAccent != nullptr)
-                    chooseAccent(accent);
-            };
-            addAndMakeVisible(*swatch);
-            swatches.add(std::move(swatch));
-        }
-        accentName.setText(displayName(current), dontSendNotification);
+        // Twelve accents are too many to swatch across a 252px popover, so the
+        // list carries the names and each row is drawn in the colour it selects.
+        accentBox.setName("Accent colour");
+        accentBox.setTitle("Accent colour");
+        accentBox.setDescription("Choose the accent colour used for knobs, the selected row, and held keys");
+        accentBox.setTooltip(accentBox.getDescription());
+        accentBox.setWantsKeyboardFocus(true);
+        accentBox.setLookAndFeel(&accentListLookAndFeel);
+        int itemId{1};
+        for (const auto accent : Juicy16::allAccents())
+            accentBox.addItem(displayName(accent), itemId++);
+        accentBox.setSelectedId(indexOfAccent(current) + 1, dontSendNotification);
+        accentBox.onChange = [this] {
+            const auto& accents{Juicy16::allAccents()};
+            const int index{accentBox.getSelectedId() - 1};
+            if (index < 0 || index >= static_cast<int>(accents.size()))
+                return;
+            if (chooseAccent != nullptr)
+                chooseAccent(accents[static_cast<std::size_t>(index)]);
+            // The popover is not a child of the editor, so the editor's
+            // sendLookAndFeelChange() does not reach it. It shares the same
+            // LookAndFeel object, so it has to be told separately.
+            sendLookAndFeelChange();
+        };
+        addAndMakeVisible(accentBox);
 
         for (const auto& fact : facts) {
             auto key{std::make_unique<Label>()};
@@ -207,6 +158,12 @@ public:
                     + static_cast<int>(facts.size()) * kFactRowHeight);
     }
 
+    ~SettingsPanel() override {
+        // The scoped LookAndFeel is a member, so it must be off the ComboBox
+        // before either goes away.
+        accentBox.setLookAndFeel(nullptr);
+    }
+
     void paint(Graphics& g) override {
         g.fillAll(findColour(Juicy16::panelBackgroundColourId));
         g.setColour(findColour(Juicy16::subtleBorderColourId));
@@ -219,8 +176,10 @@ public:
         const Colour label{lookAndFeel.findColour(Juicy16::textLabelColourId)};
         for (Label* heading : {&accentHeading, &buildHeading})
             heading->setColour(Label::textColourId, label);
-        accentName.setColour(Label::textColourId,
-                             lookAndFeel.findColour(Juicy16::textPrimaryColourId));
+        // The closed dropdown draws its text in the accent it currently selects,
+        // so the chosen hue is visible without opening the list.
+        accentBox.setColour(juce::ComboBox::textColourId,
+                            lookAndFeel.findColour(Juicy16::accentColourId));
         for (Label* key : factKeys)
             key->setColour(Label::textColourId, label);
         for (Label* value : factValues)
@@ -231,19 +190,9 @@ public:
     void resized() override {
         Rectangle<int> r{getLocalBounds().reduced(GuiConstants::padding)};
 
-        Rectangle<int> accentRow{r.removeFromTop(kHeadingHeight)};
-        accentName.setBounds(accentRow.removeFromRight(accentRow.getWidth() / 2));
-        accentHeading.setBounds(accentRow);
+        accentHeading.setBounds(r.removeFromTop(kHeadingHeight));
         r.removeFromTop(kHeadingGap);
-
-        Rectangle<int> swatchRow{r.removeFromTop(kSwatchHeight)};
-        const int gap{6};
-        const int width{(swatchRow.getWidth() - gap * (swatches.size() - 1))
-                        / juce::jmax(1, swatches.size())};
-        for (auto* swatch : swatches) {
-            swatch->setBounds(swatchRow.removeFromLeft(width));
-            swatchRow.removeFromLeft(gap);
-        }
+        accentBox.setBounds(r.removeFromTop(kSwatchHeight));
 
         r.removeFromTop(GuiConstants::groupGap);
         dividerY = r.removeFromTop(1).getY();
@@ -266,8 +215,9 @@ private:
     static constexpr int kFactRowHeight{18};
 
     std::vector<Fact> facts;
-    Label accentHeading, accentName, buildHeading;
-    juce::OwnedArray<AccentSwatch> swatches;
+    Label accentHeading, buildHeading;
+    AccentListLookAndFeel accentListLookAndFeel;
+    juce::ComboBox accentBox;
     juce::OwnedArray<Label> factKeys, factValues;
     int dividerY{0};
     std::function<void(Juicy16::Accent)> chooseAccent;
@@ -280,13 +230,12 @@ JuicySFAudioProcessorEditor::JuicySFAudioProcessorEditor(
     JuicySFAudioProcessor& p,
     AudioProcessorValueTreeState& state)
 : AudioProcessorEditor{&p}
-, processor{p}
+, audioProcessor{p}
 , valueTreeState{state}
 , midiKeyboard{p.keyboardState, SurjectiveMidiKeyboardComponent::horizontalKeyboard}
 , channelRack{state, p.getFluidSynthModel()}
 , filePicker{state}
-, mixerPanel{state, p.getFluidSynthModel()}
-, settingsButton{"Settings", juce::DrawableButton::ImageFitted}
+, mixerPanel{state}
 {
     // Install the palette before any child is constructed below reads a colour.
     // Set on the editor rather than globally: a host runs several plugins in one
@@ -296,6 +245,11 @@ JuicySFAudioProcessorEditor::JuicySFAudioProcessorEditor(
 
     logo = juce::ImageCache::getFromMemory(BinaryData::juicy16logo_png,
                                      BinaryData::juicy16logo_pngSize);
+    // Handed over BEFORE the first setSize below. resized() sizes the header from
+    // logoButton.logoWidth(), so a logo installed after that first layout left the
+    // wordmark in an 8px box - clipped until the user resized the window and the
+    // layout ran again.
+    logoButton.setLogo(logo);
 
     // Cap the width at the on-screen keyboard's own natural size (its full MIDI
     // range at its fixed key width): resizing wider than that would just add blank
@@ -342,22 +296,12 @@ JuicySFAudioProcessorEditor::JuicySFAudioProcessorEditor(
     addAndMakeVisible(channelRack);
     addAndMakeVisible(filePicker);
 
-    settingsButton.setImages(
-        makeGearDrawable(lookAndFeel.findColour(Juicy16::textLabelColourId)).get());
-    // DrawableButton::ImageFitted scales the path to FILL the button, so a gear
-    // whose outline spans 18.8 of its 24-unit grid rendered at the full 24px
-    // with a 2.3px stroke - visibly bigger and heavier than the 1.17px folder
-    // beside it. The indent brings it to a 12px icon, which puts both strokes at
-    // about 1.2px and both icons at the same visual weight.
-    settingsButton.setEdgeIndent(4);
-    settingsButton.setName("Settings");
-    settingsButton.setTitle("Settings");
-    settingsButton.setDescription("Open Juicy16 settings");
-    settingsButton.setHelpText("Accent colour and build information.");
-    settingsButton.setTooltip(settingsButton.getHelpText());
-    settingsButton.setWantsKeyboardFocus(true);
-    settingsButton.onClick = [this] { showSettings(); };
-    addAndMakeVisible(settingsButton);
+    logoButton.onClick = [this] { showSettings(); };
+    addAndMakeVisible(logoButton);
+
+    // true = also report clicks on nested children, so pressing a knob counts as
+    // mouse use and puts the focus rings away.
+    addMouseListener(this, true);
 
     // status bar: build version and a visible bank-load result
     statusLabel.setFont(Font{juce::FontOptions{GuiConstants::valueFontHeight}});
@@ -395,9 +339,9 @@ void JuicySFAudioProcessorEditor::showSettings() {
         SettingsPanel::Fact{"Version", JUICY16_VERSION},
         SettingsPanel::Fact{"Engine", "FluidSynth " + String(FLUIDSYNTH_VERSION)},
         SettingsPanel::Fact{"Format",
-                            processor.getWrapperTypeDescription(processor.wrapperType)},
+                            audioProcessor.getWrapperTypeDescription(audioProcessor.wrapperType)},
         SettingsPanel::Fact{"Sample rate",
-                            String(processor.getSampleRate(), 0) + " Hz"},
+                            String(audioProcessor.getSampleRate(), 0) + " Hz"},
     };
 
     auto panel{std::make_unique<SettingsPanel>(
@@ -407,15 +351,20 @@ void JuicySFAudioProcessorEditor::showSettings() {
             valueTreeState.state.getChildWithName("uiState")
                 .setProperty("accent", Juicy16::accentName(accent), nullptr);
             lookAndFeel.setAccent(accent);
-            // The palette changed under the whole tree, including the popover.
-            if (auto* top{getTopLevelComponent()})
+            // Not just a repaint. Controls resolve and CACHE their colours in
+            // lookAndFeelChanged() - the mixer panel says so in as many words -
+            // so a bare repaint redrew them in the accent they had cached, and
+            // the new one only appeared where a colour happened to be looked up
+            // live. sendLookAndFeelChange() walks the tree telling every child to
+            // re-resolve, and repaints as it goes.
+            sendLookAndFeelChange();
+            if (auto* top{getTopLevelComponent()}; top != nullptr && top != this)
                 top->repaint();
-            repaint();
         })};
     panel->setLookAndFeel(&lookAndFeel);
     juce::CallOutBox::launchAsynchronously(
         std::move(panel),
-        getLocalArea(&settingsButton, settingsButton.getLocalBounds()),
+        getLocalArea(&logoButton, logoButton.getLocalBounds()),
         this);
 }
 
@@ -457,6 +406,7 @@ void JuicySFAudioProcessorEditor::valueChanged(Value&) {
 
 JuicySFAudioProcessorEditor::~JuicySFAudioProcessorEditor()
 {
+    removeMouseListener(this);
     valueTreeState.state.removeListener(this);
     lastUIWidth.removeListener(this);
     lastUIHeight.removeListener(this);
@@ -475,22 +425,6 @@ void JuicySFAudioProcessorEditor::paint (Graphics& g)
     g.fillRect(header);
     g.setColour(findColour(Juicy16::borderColourId));
     g.fillRect(0, header.getBottom() - 1, width, 1);
-
-    if (logo.isValid()) {
-        // Drawn at the header's own scale, from the source asset's aspect ratio,
-        // so the wordmark is never stretched.
-        const int logoWidth{juce::roundToInt(
-            static_cast<float>(GuiConstants::logoHeight)
-            * static_cast<float>(logo.getWidth())
-            / static_cast<float>(logo.getHeight()))};
-        g.drawImage(
-            logo,
-            Rectangle<int>{GuiConstants::padding,
-                           (GuiConstants::headerHeight - GuiConstants::logoHeight) / 2,
-                           logoWidth,
-                           GuiConstants::logoHeight}.toFloat(),
-            juce::RectanglePlacement::centred);
-    }
 
     Rectangle<int> statusBar{0, getHeight() - GuiConstants::statusBarHeight,
                              width, GuiConstants::statusBarHeight};
@@ -518,23 +452,17 @@ void JuicySFAudioProcessorEditor::resized()
 
     Rectangle<int> header{r.removeFromTop(GuiConstants::headerHeight)};
     header.reduce(GuiConstants::padding, 0);
-    const int logoWidth{logo.isValid()
-        ? juce::roundToInt(static_cast<float>(GuiConstants::logoHeight)
-                           * static_cast<float>(logo.getWidth())
-                           / static_cast<float>(logo.getHeight()))
-        : 0};
+    // The wordmark is the settings button, so it needs a clickable box rather
+    // than just its own width: a little breathing room either side, over the
+    // full header height.
+    logoButton.setBounds(
+        header.removeFromLeft(logoButton.logoWidth() + GuiConstants::innerPadding));
     // The wordmark is a different KIND of thing from the field beside it, so it
     // needs more than the window's own margin between them or the two read as
     // one run-on group.
-    header.removeFromLeft(logoWidth + GuiConstants::padding + GuiConstants::innerPadding);
-    Rectangle<int> headerRow{header.withSizeKeepingCentre(
-        header.getWidth(), GuiConstants::filePickerHeight)};
-    settingsButton.setBounds(
-        headerRow.removeFromRight(GuiConstants::settingsButtonWidth));
-    // Small, because both buttons already carry their own icon inset: the gap
-    // the eye sees is this plus roughly five pixels from each side.
-    headerRow.removeFromRight(2);
-    filePicker.setBounds(headerRow);
+    header.removeFromLeft(GuiConstants::innerPadding);
+    filePicker.setBounds(header.withSizeKeepingCentre(
+        header.getWidth(), GuiConstants::filePickerHeight));
 
     statusLabel.setBounds(r.removeFromBottom(GuiConstants::statusBarHeight)
                               .reduced(GuiConstants::padding, 0));
@@ -548,9 +476,29 @@ void JuicySFAudioProcessorEditor::resized()
 }
 
 bool JuicySFAudioProcessorEditor::keyPressed(const KeyPress &key) {
+    // Any key press means the user is working by keyboard, so focus rings become
+    // visible from here until the next mouse click. Unhandled keys - Tab above
+    // all - bubble up to the editor, which is what makes this catch the moment
+    // keyboard traversal starts.
+    setFocusRingsVisible(true);
     // patch selection now lives in per-row dropdowns; all key input drives the
     // on-screen MIDI keyboard.
     return midiKeyboard.keyPressed(key);
+}
+
+void JuicySFAudioProcessorEditor::setFocusRingsVisible(bool visible) {
+    if (Juicy16::focusRingsVisible() == visible)
+        return;
+    Juicy16::setFocusRingsVisible(visible);
+    // The rings are drawn by the LookAndFeel across the whole tree, so the whole
+    // tree has to be asked to redraw.
+    repaint();
+    if (auto* top{getTopLevelComponent()}; top != nullptr && top != this)
+        top->repaint();
+}
+
+void JuicySFAudioProcessorEditor::mouseDown(const juce::MouseEvent&) {
+    setFocusRingsVisible(false);
 }
 
 bool JuicySFAudioProcessorEditor::keyStateChanged (bool isKeyDown) {

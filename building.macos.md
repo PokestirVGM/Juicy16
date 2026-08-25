@@ -144,4 +144,5 @@ tools/ci_gates.sh release   # strict portable Release build and CTest
 tools/ci_gates.sh all
 ```
 
-`.github/workflows/ci.yml` calls this script, so a local failure is a CI failure. See [docs/CI.md](docs/CI.md) for the gate matrix and what a passing run does not prove.
+`.github/workflows/ci.yml` calls this script, so a local failure is a CI failure.  Run `tools/ci_gates.sh` with no argument list to see the gate names; a passing run
+proves the automated gates only, not DAW or clean-machine behaviour.

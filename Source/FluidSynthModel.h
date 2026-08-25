@@ -232,26 +232,74 @@ private:
                                    RenderSegment&& renderSegment,
                                    MapPosition&& mapPosition) {
         int renderPosition{0};
-        for (const auto metadata : midiMessages) {
-            const int eventPosition{juce::jlimit(0, numSamples, metadata.samplePosition)};
+        for (auto it = midiMessages.begin(); it != midiMessages.end();) {
+            const int eventPosition{juce::jlimit(0, numSamples, (*it).samplePosition)};
             const int target{juce::jlimit(0, renderLimit, mapPosition(eventPosition))};
             if (target > renderPosition) {
                 renderSegment(renderPosition, target - renderPosition);
                 renderPosition = target;
             }
-            // MidiMessage copies anything longer than four bytes to the heap, which
-            // would allocate on the audio thread for every SysEx - and game rips
-            // carry a GM/GS/XG reset at tick 0. Dispatch those straight from the
-            // buffer's own storage instead; short messages stay inline and free.
-            if (metadata.numBytes > 4 && metadata.data[0] == 0xf0) {
-                if (metadata.numBytes >= 2)
-                    dispatchSysEx(metadata.data + 1, metadata.numBytes - 2);
-                continue;
+
+            // Everything sharing this timestamp, as one group. A MidiBuffer keeps
+            // equal timestamps in insertion order, and under VST3 that order is
+            // the host's parameter-queue order rather than anything musical: each
+            // CC is a separate parameter, so Bank Select can arrive after the
+            // Program Change that consumes it, and an RPN Data Entry can arrive
+            // before the RPN it was meant to set. Selector controllers are
+            // therefore applied first within the group. Correctly ordered input is
+            // unaffected, because there the selectors already come first.
+            const auto groupBegin = it;
+            auto groupEnd = it;
+            while (groupEnd != midiMessages.end()
+                   && juce::jlimit(0, numSamples, (*groupEnd).samplePosition) == eventPosition)
+                ++groupEnd;
+
+            for (int pass = 0; pass < 2; ++pass) {
+                for (auto scan = groupBegin; scan != groupEnd; ++scan) {
+                    const auto metadata = *scan;
+                    // MidiMessage copies anything longer than four bytes to the heap,
+                    // which would allocate on the audio thread for every SysEx - and
+                    // game rips carry a GM/GS/XG reset at tick 0. Dispatch those
+                    // straight from the buffer's own storage instead; short messages
+                    // stay inline and free.
+                    const bool isSysEx{metadata.numBytes > 4 && metadata.data[0] == 0xf0};
+                    if (isSelectorController(metadata.data, metadata.numBytes) != (pass == 0))
+                        continue;
+                    if (isSysEx) {
+                        if (metadata.numBytes >= 2)
+                            dispatchSysEx(metadata.data + 1, metadata.numBytes - 2);
+                        continue;
+                    }
+                    dispatchMidiEvent(metadata.getMessage(), eventPosition);
+                }
             }
-            dispatchMidiEvent(metadata.getMessage(), eventPosition);
+            it = groupEnd;
         }
         if (renderLimit > renderPosition)
             renderSegment(renderPosition, renderLimit - renderPosition);
+    }
+
+    // Controllers that only select what a following message will act on: Bank
+    // Select MSB/LSB ahead of a Program Change, and the RPN/NRPN selectors ahead
+    // of a Data Entry. They carry no sound of their own, so hoisting them within
+    // one timestamp cannot change what is heard - it can only stop the message
+    // that consumes them acting on a stale selection.
+    static bool isSelectorController(const juce::uint8* data, int numBytes) noexcept {
+        if (data == nullptr || numBytes < 2)
+            return false;
+        if ((data[0] & 0xf0) != 0xb0)
+            return false;
+        switch (data[1]) {
+            case 0:    // Bank Select MSB
+            case 32:   // Bank Select LSB
+            case 98:   // NRPN LSB
+            case 99:   // NRPN MSB
+            case 100:  // RPN LSB
+            case 101:  // RPN MSB
+                return true;
+            default:
+                return false;
+        }
     }
     // mirror a channel's current program into its progChN parameter (guarded so
     // parameterChanged doesn't re-apply it to the synth). Message thread only.

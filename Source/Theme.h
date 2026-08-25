@@ -9,6 +9,8 @@
 
 #pragma once
 
+#include <vector>
+
 #include "../JuceLibraryCode/JuceHeader.h"
 
 namespace Juicy16 {
@@ -48,13 +50,29 @@ enum ColourIds {
     keyboardBackgroundColourId,
 };
 
-// The accents offered to the user. Sage is the default; all four are a single
-// hue used for knob arcs, the selected-row marker, and held keys.
-enum class Accent { sage, amber, terracotta, neutral };
+// The accents offered to the user. Sage is the default; each is a single hue
+// used for knob arcs, the selected-row marker, and held keys. Ordered around the
+// hue wheel so the list reads as a spectrum rather than an arbitrary set.
+enum class Accent {
+    sage, olive, amber, terracotta, rose, magenta,
+    violet, indigo, steel, ice, teal, neutral
+};
+
+// Every accent, in the order they are offered.
+const std::vector<Accent>& allAccents();
 
 juce::Colour accentColour(Accent accent);
 juce::String accentName(Accent accent);
 Accent accentFromName(const juce::String& name);
+
+// Focus rings are drawn only while the user is working by keyboard. JUCE reports
+// keyboard focus after a mouse click too, so ringing every focused control put a
+// box around whatever was last clicked - which is not what a focus indicator is
+// for, and read as clutter. This is the `:focus-visible` rule: the ring appears
+// on the first key press and goes away on the next click, so keyboard operation
+// stays fully visible without decorating mouse use.
+bool focusRingsVisible() noexcept;
+void setFocusRingsVisible(bool visible) noexcept;
 
 class PluginLookAndFeel : public juce::LookAndFeel_V4 {
 public:

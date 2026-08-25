@@ -1,5 +1,124 @@
 # Changelog
 
+## 0.6.0-beta.1 — Beta 1
+
+The first release. macOS 11 or later on Apple Silicon, AU and VST3, ad-hoc
+signed. Windows VST3 is Beta 2. Everything below landed in the run-up to this
+tag; `0.6.0-alpha.1` through `alpha.4` were never released separately.
+
+### Verified for this release
+
+- **Per-channel Program Change works in FL Studio and Cubase, in both AU and
+  VST3** — the workflow the whole architecture exists for.
+- **Pitch-bend range is correct in Cubase**, confirmed by the owner against the
+  ordering fix below.
+- `auval -strict` passes on the packaged AU. Strict portable Release builds and
+  passes 15/15 from a clean checkout at a whitespace-free path.
+
+
+### Changed
+
+- **The accent list shows each colour beside its name**, so an accent can be
+  seen before it is chosen rather than only after. Scoped to that one dropdown.
+- **Twelve accent colours, in a dropdown.** Four swatches were both a short list
+  and the wrong control for a longer one. The accents now run around the hue
+  wheel — sage, olive, amber, terracotta, rose, magenta, violet, indigo, steel,
+  ice, teal, neutral — and the closed dropdown draws its own text in the accent
+  it selects. Every one of the twelve is held to the same contrast contract as
+  the original four: the palette test now iterates the full list rather than a
+  hardcoded sample, so a new hue that fails on any background fails the build.
+- **The wordmark opens settings; the cog is gone.** Two icons were competing for
+  the same corner of the header while the logo sat there as decoration. Making
+  the wordmark the control removes an icon and gives it a job. It keeps the
+  cog's accessible name, role and tooltip, so the headless accessibility test
+  covering "Settings" still passes against it.
+- **The folder icon is larger and better spaced**, at 16px rather than the 14px
+  it used when it had to match the weight of a gear beside it, in a box sized to
+  the glyph instead of to the height of the field.
+- **Focus rings follow keyboard use, not focus.** JUCE reports keyboard focus
+  after a mouse click too, so every clicked knob and button kept a ring around
+  it — which is not what a focus indicator is for and read as clutter. This is
+  the `:focus-visible` rule: rings appear on the first key press and go away on
+  the next click. Keyboard operation stays fully visible, so the accessibility
+  work this depends on is unaffected.
+- **A build directory can no longer pin an old version label in silence.** A
+  tree configured once with `-DJUICYSF_PRERELEASE_LABEL=...` keeps that label
+  forever and goes on displaying it in the status bar after the default has moved
+  on — which is the exact confusion the status bar exists to prevent. Configuring
+  now warns, and names the `cmake -B <dir> -U JUICYSF_PRERELEASE_LABEL` that
+  clears it. Found the hard way: `0.6.0-alpha.4` built as `alpha.3` in the
+  existing build tree while a clean checkout built it correctly.
+- **Only the Instrument column resizes.** `notSortable` still leaves JUCE's
+  resizable and draggable flags set, so every column boundary offered a resize
+  cursor and every header could be dragged into a new order — on columns whose
+  minimum and maximum widths are the same number, so neither gesture did
+  anything.
+
+### Fixed
+
+- **Changing the accent only half-applied it.** Controls resolve and cache their
+  colours in `lookAndFeelChanged()`, but selecting an accent called
+  `setAccent()` and then merely repainted — so anything holding a cached colour
+  redrew in the accent it already had, and the new one appeared only where a
+  colour happened to be looked up live. The editor now sends the change through
+  the tree, and the popover, which is not a child of the editor, is told
+  separately.
+- **The wordmark was clipped until the window was resized.** `resized()` sizes
+  the logo's box from the image's own width, and the image was handed over after
+  the editor's first `setSize()` — so the first layout computed a width of zero
+  and the wordmark sat in an 8px box until a resize ran the layout again. The
+  logo is now installed before the first layout, and a test pins the wordmark's
+  width after one layout.
+- **An RPN Data Entry could set the pitch-bend range on the wrong RPN.** Under
+  VST3 every CC is a separate host parameter, so the order of same-timestamp
+  controllers is the host's parameter-queue order rather than the order the MIDI
+  file wrote them in. A Data Entry that overtook its own RPN selector set the
+  range against whatever RPN was selected before, and Bank Select could likewise
+  arrive after the Program Change that consumes it. Selector controllers — Bank
+  Select MSB/LSB and the RPN/NRPN selectors — are now applied first within a
+  single timestamp. Correctly ordered input is unchanged, because there the
+  selectors already come first. Reported against Cubase; the fix is host-
+  agnostic, and re-testing in Cubase is what will confirm it.
+
+- **The strict Release build did not link FluidSynth at all**, and the gate that
+  was supposed to catch that passed anyway. Removing the vendored
+  `cmake/Modules/FindPkgConfig.cmake` exposed a behaviour of CMake's own module:
+  against a static-only pinned prefix it leaves `FLUIDSYNTH_STATIC_LINK_LIBRARIES`
+  empty. Two things then failed silently in the same direction — nothing linked
+  the engine, and the per-archive architecture and deployment-target checks
+  iterated over an empty list and reported success. The closure is now resolved
+  to absolute paths inside the pinned prefix, and release validation refuses to
+  run when it cannot resolve a single archive, so this cannot pass vacuously
+  again.
+- **The documentation link gate only ever checked the first link in each file.**
+  `string(REGEX MATCHALL)` returns its matches with the separators escaped, so
+  `foreach (IN LISTS)` saw one element. Replaced with an explicit cursor scan:
+  coverage went from 28 links to 57, which immediately surfaced two dead
+  `ROADMAP.md` links (`docs/BETA1_IDENTITY_CONTRACT.md` and
+  `docs/STATE_COMPATIBILITY.md`, both superseded by `docs/COMPATIBILITY.md`) and
+  one in `docs/PERFORMANCE.md`.
+- **A clean clone could not package.** `distribute/bundle_macos.sh` copied
+  `docs/PERFORMANCE.md`, which stopped being tracked when the published doc set
+  was cut to eight files. The doc list also duplicated two entries, copied
+  `README.md` a second time into `docs/`, and omitted `CONTROLLER_SUPPORT.md`,
+  `ARCHITECTURE.md` and `ROADMAP.md` — all of which packaged docs link to, so the
+  archive shipped dead links to its own testers. The bundler now runs the link
+  gate over the staged package, so a doc that links outside the archive fails the
+  build rather than reaching a tester.
+- **Two first-party warnings failed `-Werror`**, so neither the Debug nor the
+  strict Release CI gate could complete: `JuicySFAudioProcessorEditor::processor`
+  shadowed `AudioProcessorEditor::processor` (renamed to `audioProcessor`), and
+  `MixerPanelComponent` held a `FluidSynthModel&` it never used (removed, along
+  with the constructor parameter that fed it).
+- **Tester-facing documentation still advertised Windows.**
+  `docs/BETA_TESTER_GUIDE.md` listed Windows 10 as a supported OS, gave a Windows
+  install path and uninstall procedure, and named Logic among the hosts to cover;
+  Beta 1 is macOS-only and Logic is untested by decision. It also promised that
+  later releases would read "schema-v2" state, four schema versions out of date —
+  Beta 1 writes version 6. `docs/KNOWN_ISSUES.md` listed the unproven Windows
+  pipeline as a Beta 1 stop-ship gate rather than as Beta 2 scope.
+
+
 ## 0.6.0-alpha.3 — unreleased
 
 ### Added
@@ -346,7 +465,7 @@ Keyboard operation of the whole editor, and the libsndfile advisory found in the
 - **Channel and instrument selection work without a mouse.** The 16-channel table now takes keyboard focus, up and down arrows select the MIDI channel the sliders and status line follow, and Return opens the selected row's instrument dropdown as an ordinary keyboard-driven menu. The table previously declined focus, justified as stopping arrow keys from fighting MIDI-driven row selection — but nothing drives that: incoming MIDI changes a channel's *program*, not which row is selected. `uiState.selectedChannel` remains the single source of truth, with a re-entrancy guard breaking the two-way notify loop, and restored state opens on the channel it was editing rather than row 0. That closes the last mouse-only workflow; bank loading and the six sound sliders were already reachable. The headless editor suite drives all 16 rows, including rows scrolled out of view at the minimum window height.
 - The [tester guide](docs/BETA_TESTER_GUIDE.md) documents the keyboard workflow and asks for reports on hosts that swallow Tab before it reaches the editor.
 - **Importable MIDI fixtures and a host test protocol**, which Phase 7 needed and did not have. Its 35 host-matrix items say to "run the canonical CC/pitch-bend fixture" and "record the bank/program on all 16 channels at defined checkpoints" — but that fixture was a CSV of sample offsets only the offline harness can replay, and the sole `.mid` in the repository is the private, non-redistributable game rip. There was nothing to import into a DAW. `tests/fixtures/host/host_program_matrix.mid` now drives 16 independent Program Changes at three checkpoints, with a note on the same tick as each change; `host_controllers.mid` walks CC, 14-bit bend, per-channel RPN bend range, pedals, and channel mode one marked bar at a time, at 120 BPM so a bar is exactly two seconds. Both are original General MIDI content and redistributable.
-- [docs/HOST_TEST_PROTOCOL.md](docs/HOST_TEST_PROTOCOL.md) tabulates the expected instrument on all 16 channels at every checkpoint and the expected observation for every controller step, plus per-host routing setup and a fill-in results template. Three new tests keep it honest: the two fixtures are played through the engine against the platform's system GM bank, and the committed `.mid` files are pinned byte-for-byte to their generator, so a host that disagrees is the host's problem rather than the fixture's.
+- `docs/HOST_TEST_PROTOCOL.md` tabulates the expected instrument on all 16 channels at every checkpoint and the expected observation for every controller step, plus per-host routing setup and a fill-in results template. Three new tests keep it honest: the two fixtures are played through the engine against the platform's system GM bank, and the committed `.mid` files are pinned byte-for-byte to their generator, so a host that disagrees is the host's problem rather than the fixture's.
 
 ### Documented
 
@@ -373,8 +492,8 @@ Cross-bank Bank Select coverage, a FluidSynth polyphony fix found by the new den
 - A synthesised multi-bank SF2 fixture (`tests/SyntheticSf2.h`), written during the test run rather than committed, with presets in banks 0, 1, 8, and 128 that each sound a different pitch. Cross-bank Bank Select is now proven in the audio domain instead of inferred: CC0 into banks 1 and 8, CC32 retained but ignored under the pinned GS mode, the return to bank 0, and channel 10's default percussion bank, with engine, saved state, editor parameters, and audio agreeing at every step.
 - Bank-offset coverage. Juicy16 never installs a FluidSynth bank offset, so the raw/logical conversions in the program paths ran only at offset 0; the harness can now install one and the suite asserts that manual selection, MIDI Bank Select, saved state, editor parameters, and the sounding preset all resolve to the font's own bank numbering.
 - A voice-ceiling regression test asserting that the configured and reported polyphony agree and that 512 simultaneous note-ons allocate, sustain, and fully release.
-- Performance scenarios for one-channel playback, the 512-voice ceiling, and continuous Program Change and controller automation, measured across three banks and recorded in [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
-- A randomised MIDI soak (`JuicySFEngineMidiTests --midi-soak`, CTest `engine_midi_soak`, [docs/MIDI_SOAK.md](docs/MIDI_SOAK.md)). The existing fuzz pass covered malformed files and state blobs; nothing covered the MIDI input path, which is what a game rip actually drives and the only place an arbitrary SysEx payload reaches Juicy16's own parser. It asserts finite bounded audio, in-range program and pitch-bend state on all 16 channels, the 512-voice ceiling, serialisable saved state, and that All Sound Off leaves nothing running — then prints the offending block's whole event list, because a reproducer-less fuzz finding is unactionable. 40 seeds of 200,000 blocks — roughly 156 million MIDI events — with zero failures, plus 782,123 events under ASan+UBSan with no findings.
+- Performance scenarios for one-channel playback, the 512-voice ceiling, and continuous Program Change and controller automation, measured across three banks and recorded in `docs/PERFORMANCE.md`.
+- A randomised MIDI soak (`JuicySFEngineMidiTests --midi-soak`, CTest `engine_midi_soak`, `docs/MIDI_SOAK.md`). The existing fuzz pass covered malformed files and state blobs; nothing covered the MIDI input path, which is what a game rip actually drives and the only place an arbitrary SysEx payload reaches Juicy16's own parser. It asserts finite bounded audio, in-range program and pitch-bend state on all 16 channels, the 512-voice ceiling, serialisable saved state, and that All Sound Off leaves nothing running — then prints the offending block's whole event list, because a reproducer-less fuzz finding is unactionable. 40 seeds of 200,000 blocks — roughly 156 million MIDI events — with zero failures, plus 782,123 events under ASan+UBSan with no findings.
 - A `leaks` quality gate (`tools/ci_gates.sh leaks`, CI job `macos-leaks`). LeakSanitizer is unavailable on Darwin arm64, so the sanitizer gate runs with leak detection off; every offline harness now also runs under macOS `leaks -atExit` and must report zero leaked bytes, which covers the Core Foundation objects the security-scoped bookmark path owns. All four harnesses are clean.
 - Editor-view coverage in the VST3 harness: the view is created through `IPlugView` without a window, and the suite checks the platform type, the 500x547 default size, that nonsense host size requests are constrained to 500x300 / 1216x1000 rather than accepted, and what `setContentScaleFactor` answers. On macOS it answers `kResultFalse` — correct, because the window server applies the backing scale factor — and the test asserts that platform-specific answer rather than a portable one.
 - Audio-domain proof that a VST3 `progChN` automation point takes effect at its own in-block sample. Four isolated renderings show two programs correlating at -0.0364 on the same note, a switch one sample before the note matching the new program at 1.0000, and a switch one sample after it leaving that note on the old program at 1.0000. JUCE's ordinary parameter collapse would have failed the last case, so the vendored wrapper's timestamp preservation is now proven by audio rather than only by state readback.
@@ -388,7 +507,7 @@ Cross-bank Bank Select coverage, a FluidSynth polyphony fix found by the new den
 - Windows links the static MSVC C runtime for both the closure and the plugin, so the VST3 needs no Visual C++ redistributable. CMake derives the plugin's setting from `FLUIDSYNTH_LINK_STATIC` under MSVC, because a mismatch is a link failure rather than a silent difference.
 - Windows finds FluidSynth through its CMake package config instead of pkg-config (`JUICYSF_FLUIDSYNTH_CMAKE_CONFIG`, default `ON` under MSVC). The path is exercised on macOS too — a static build through it passed all eight registered tests — so it is not Windows-only code that nothing has run. macOS release validation still refuses it, because its per-archive architecture and deployment-target checks need pkg-config's static link list.
 - `font_load_system_dls` now runs on Windows against `C:\Windows\System32\drivers\gm.dls`, so DLS capability is proved at runtime rather than inferred. The dependency recipe separately fails if FluidSynth built without the native DLS loader.
-- Rewrote [building.win32.md](building.win32.md) from a status note into the pinned recipe, with an explicit list of what remains before it counts as a release procedure.
+- Rewrote `building.win32.md` from a status note into the pinned recipe, with an explicit list of what remains before it counts as a release procedure.
 
 ### Documented
 

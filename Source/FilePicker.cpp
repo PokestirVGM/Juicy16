@@ -40,12 +40,13 @@ void FolderIconButton::paintButton(Graphics& g, bool isMouseOverButton, bool isB
     folder.quadraticTo(3.0f, 19.0f, 3.0f, 17.0f);
     folder.closeSubPath();
 
-    // Scale the whole 24-unit grid - not the path's own bounds - to a 14px icon
-    // box, so the stroke lands at the design's weight (2 units at 14/24 scale is
-    // 1.17px) instead of being computed from whatever the outline happens to
+    // Scale the whole 24-unit grid - not the path's own bounds - to the icon box,
+    // so the stroke lands at the design's weight (2 units at 16/24 scale is
+    // 1.33px) instead of being computed from whatever the outline happens to
     // span. Sizing from the bounds is what made the first version look heavy.
     const auto bounds{getLocalBounds().toFloat()};
-    const float box{juce::jmin(14.0f, juce::jmin(bounds.getWidth(), bounds.getHeight()))};
+    const float box{juce::jmin(static_cast<float>(GuiConstants::folderIconSize),
+                               juce::jmin(bounds.getWidth(), bounds.getHeight()))};
     const float scale{box / 24.0f};
     folder.applyTransform(
         juce::AffineTransform::scale(scale).translated(

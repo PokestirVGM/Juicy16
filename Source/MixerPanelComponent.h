@@ -10,7 +10,6 @@
 #pragma once
 
 #include "../JuceLibraryCode/JuceHeader.h"
-#include "FluidSynthModel.h"
 
 using namespace std;
 using SliderAttachment = AudioProcessorValueTreeState::SliderAttachment;
@@ -19,9 +18,7 @@ class MixerPanelComponent : public Component,
                             private ValueTree::Listener
 {
 public:
-    MixerPanelComponent(
-        AudioProcessorValueTreeState& state,
-        FluidSynthModel& model);
+    explicit MixerPanelComponent(AudioProcessorValueTreeState& state);
     ~MixerPanelComponent() override;
 
     void paint(Graphics&) override;
@@ -44,7 +41,6 @@ private:
     void syncBankSummary();
 
     AudioProcessorValueTreeState& valueTreeState;
-    FluidSynthModel& fluidSynthModel;
 
     Label masterHeading;
     Slider outputLevelSlider;

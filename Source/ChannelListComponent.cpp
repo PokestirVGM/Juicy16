@@ -222,11 +222,18 @@ ChannelListComponent::ChannelListComponent(
 
     const auto addColumn = [this](const String& name, int id, int width, bool fixed,
                                   Justification justification) {
+        // A fixed column is visible and nothing else. `notSortable` still leaves
+        // JUCE's resizable and draggable flags set, so every boundary offered a
+        // resize cursor and every header could be dragged into a new order - on
+        // columns whose min and max width are the same value, so neither did
+        // anything. Only Instrument, the column that actually stretches, is
+        // resizable.
         table.getHeader().addColumn(
             name, id, width,
             fixed ? width : GuiConstants::minInstrumentWidth,
             fixed ? width : -1,
-            TableHeaderComponent::notSortable);
+            fixed ? TableHeaderComponent::visible
+                  : (TableHeaderComponent::visible | TableHeaderComponent::resizable));
         // Each header aligns over its own column's content; the LookAndFeel draws
         // it, so the rack states the alignment rather than the theme guessing.
         if (name.isNotEmpty())

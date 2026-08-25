@@ -30,16 +30,44 @@ const juce::Colour kFocusRing       {0xff9a9a9a};
 // A scrim, not a colour: laid over a silenced row's own background.
 const juce::Colour kRowSilenced     {0xa61c1c1c};
 
+// Twelve accents around the hue wheel. All sit in the same mid-luminance band as
+// the original four, which is what keeps every one of them clear of 3:1 against
+// the window, the header, and a selected row - a saturated or a dark hue would
+// pass on one background and fail on another.
 const juce::Colour kAccentSage      {0xff8fa47a};
+const juce::Colour kAccentOlive     {0xffa8a05c};
 const juce::Colour kAccentAmber     {0xffd8a24a};
 const juce::Colour kAccentTerracotta{0xffc07a5e};
+const juce::Colour kAccentRose      {0xffcf8096};
+const juce::Colour kAccentMagenta   {0xffc281b6};
+const juce::Colour kAccentViolet    {0xffa684c6};
+const juce::Colour kAccentIndigo    {0xff8a8ed2};
+const juce::Colour kAccentSteel     {0xff7f9bb5};
+const juce::Colour kAccentIce       {0xff6fa6bd};
+const juce::Colour kAccentTeal      {0xff5ba69d};
 const juce::Colour kAccentNeutral   {0xff9d9d9d};
 } // namespace
 
+const std::vector<Accent>& allAccents() {
+    static const std::vector<Accent> accents{
+        Accent::sage, Accent::olive, Accent::amber, Accent::terracotta,
+        Accent::rose, Accent::magenta, Accent::violet, Accent::indigo,
+        Accent::steel, Accent::ice, Accent::teal, Accent::neutral};
+    return accents;
+}
+
 juce::Colour accentColour(Accent accent) {
     switch (accent) {
+        case Accent::olive:      return kAccentOlive;
         case Accent::amber:      return kAccentAmber;
         case Accent::terracotta: return kAccentTerracotta;
+        case Accent::rose:       return kAccentRose;
+        case Accent::magenta:    return kAccentMagenta;
+        case Accent::violet:     return kAccentViolet;
+        case Accent::indigo:     return kAccentIndigo;
+        case Accent::steel:      return kAccentSteel;
+        case Accent::ice:        return kAccentIce;
+        case Accent::teal:       return kAccentTeal;
         case Accent::neutral:    return kAccentNeutral;
         case Accent::sage:       break;
     }
@@ -48,20 +76,37 @@ juce::Colour accentColour(Accent accent) {
 
 juce::String accentName(Accent accent) {
     switch (accent) {
+        case Accent::olive:      return "olive";
         case Accent::amber:      return "amber";
         case Accent::terracotta: return "terracotta";
+        case Accent::rose:       return "rose";
+        case Accent::magenta:    return "magenta";
+        case Accent::violet:     return "violet";
+        case Accent::indigo:     return "indigo";
+        case Accent::steel:      return "steel";
+        case Accent::ice:        return "ice";
+        case Accent::teal:       return "teal";
         case Accent::neutral:    return "neutral";
         case Accent::sage:       break;
     }
     return "sage";
 }
 
+// An unknown name falls back to the default rather than failing: a project saved
+// by a later build that adds an accent still opens.
 Accent accentFromName(const juce::String& name) {
-    if (name == "amber")      return Accent::amber;
-    if (name == "terracotta") return Accent::terracotta;
-    if (name == "neutral")    return Accent::neutral;
+    for (const auto accent : allAccents())
+        if (name == accentName(accent))
+            return accent;
     return Accent::sage;
 }
+
+namespace {
+bool focusRingsAreVisible{false};
+} // namespace
+
+bool focusRingsVisible() noexcept { return focusRingsAreVisible; }
+void setFocusRingsVisible(bool visible) noexcept { focusRingsAreVisible = visible; }
 
 PluginLookAndFeel::PluginLookAndFeel() {
     applyTokens();
@@ -237,7 +282,7 @@ void PluginLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int wi
     g.setColour(slider.findColour(juce::Slider::textBoxTextColourId).brighter(0.35f));
     g.fillPath(pointer);
 
-    if (slider.hasKeyboardFocus(false)) {
+    if ((slider.hasKeyboardFocus(false) && focusRingsVisible())) {
         g.setColour(findColour(focusRingColourId).withAlpha(0.55f));
         g.drawEllipse(bounds.withSizeKeepingCentre(diameter, diameter), 1.0f);
     }
@@ -250,7 +295,7 @@ void PluginLookAndFeel::drawLinearSlider(juce::Graphics& g, int x, int y, int wi
                                    juce::Slider& slider) {
     LookAndFeel_V4::drawLinearSlider(g, x, y, width, height, sliderPos,
                                      minSliderPos, maxSliderPos, style, slider);
-    if (slider.hasKeyboardFocus(false)) {
+    if ((slider.hasKeyboardFocus(false) && focusRingsVisible())) {
         g.setColour(findColour(focusRingColourId).withAlpha(0.55f));
         g.drawRect(juce::Rectangle<int>{x, y, width, height}.toFloat(), 1.0f);
     }
@@ -278,7 +323,7 @@ void PluginLookAndFeel::drawComboBox(juce::Graphics& g, int width, int height,
     const auto bounds{juce::Rectangle<int>{0, 0, width, height}.toFloat()};
     g.setColour(box.findColour(juce::ComboBox::backgroundColourId));
     g.fillRoundedRectangle(bounds, GuiConstants::cornerRadius);
-    g.setColour(box.hasKeyboardFocus(false)
+    g.setColour((box.hasKeyboardFocus(false) && focusRingsVisible())
         ? box.findColour(juce::ComboBox::focusedOutlineColourId)
         : box.findColour(juce::ComboBox::outlineColourId));
     g.drawRoundedRectangle(bounds.reduced(0.5f), GuiConstants::cornerRadius, 1.0f);
@@ -324,7 +369,7 @@ void PluginLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Button& bu
         fill = fill.brighter(0.09f);
     g.setColour(fill);
     g.fillRoundedRectangle(bounds, GuiConstants::cornerRadius);
-    g.setColour(button.hasKeyboardFocus(false)
+    g.setColour((button.hasKeyboardFocus(false) && focusRingsVisible())
         ? findColour(focusRingColourId)
         : findColour(controlBorderColourId));
     g.drawRoundedRectangle(bounds, GuiConstants::cornerRadius, 1.0f);
@@ -359,7 +404,7 @@ void PluginLookAndFeel::drawToggleButton(juce::Graphics& g,
         g.setColour(findColour(controlBorderColourId));
         g.drawRoundedRectangle(track.reduced(0.5f), height * 0.5f, 1.0f);
     }
-    if (button.hasKeyboardFocus(false)) {
+    if ((button.hasKeyboardFocus(false) && focusRingsVisible())) {
         g.setColour(findColour(focusRingColourId).withAlpha(0.55f));
         g.drawRoundedRectangle(track.expanded(2.0f), (height + 4.0f) * 0.5f, 1.0f);
     }

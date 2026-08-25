@@ -1,4 +1,5 @@
 #include "MixerPanelComponent.h"
+#include "FluidSynthModel.h"
 #include "GuiConstants.h"
 #include "Theme.h"
 
@@ -19,11 +20,8 @@ void styleHeading(Label& label, const String& text) {
 }
 } // namespace
 
-MixerPanelComponent::MixerPanelComponent(
-    AudioProcessorValueTreeState& state,
-    FluidSynthModel& model)
+MixerPanelComponent::MixerPanelComponent(AudioProcessorValueTreeState& state)
 : valueTreeState{state}
-, fluidSynthModel{model}
 {
     setName("Master and bank panel");
     setTitle("Master and bank panel");

@@ -39,11 +39,14 @@ struct GuiConstants {
     // a panel knob keep the same weight at different sizes.
     inline static const float knobArcThickness = 0.16f;
 
-    // Header strip: the logo, the bank picker, and the settings button.
+    // Header strip: the wordmark (which opens settings) and the bank picker.
     inline static const int headerHeight = 38;
     inline static const int filePickerHeight = 24;
-    inline static const int settingsButtonWidth = 24;
     inline static const int logoHeight = 14;
+    // The folder is the header's only icon now that the settings cog is gone, so
+    // it carries the corner on its own and is drawn a little larger than the 14px
+    // it used when it had to match a gear beside it.
+    inline static const int folderIconSize = 16;
 
     inline static const int pianoHeight = 66;
     inline static const int statusBarHeight = 22;

@@ -94,11 +94,15 @@ mkdir -p "$staging_dir/AU" "$staging_dir/VST3" \
 COPYFILE_DISABLE=1 cp -R "$au_source" "$staging_dir/AU/"
 COPYFILE_DISABLE=1 cp -R "$vst3_source" "$staging_dir/VST3/"
 cp "$repo_dir/LICENSE.txt" "$repo_dir/NOTICE.md" "$repo_dir/README.md" \
-   "$repo_dir/CHANGELOG.md" "$repo_dir/PRIVACY.txt" \
+   "$repo_dir/CHANGELOG.md" "$repo_dir/PRIVACY.txt" "$repo_dir/ROADMAP.md" \
    "$repo_dir/building.macos.md" "$staging_dir/"
-for document in BETA_TESTER_GUIDE.md COMPATIBILITY.md KNOWN_ISSUES.md \
-                DEPENDENCIES.md TROUBLESHOOTING.md LICENSING.md PERFORMANCE.md \
-                COMPATIBILITY.md ../README.md TROUBLESHOOTING.md; do
+# Every published doc, so that no link inside the package dangles. The list
+# duplicated two entries and copied README.md a second time into docs/; it also
+# copied PERFORMANCE.md, which is no longer tracked, so a clean clone could not
+# package at all.
+for document in ARCHITECTURE.md BETA_TESTER_GUIDE.md COMPATIBILITY.md \
+                CONTROLLER_SUPPORT.md DEPENDENCIES.md KNOWN_ISSUES.md \
+                LICENSING.md TROUBLESHOOTING.md; do
   cp "$repo_dir/docs/$document" "$staging_dir/docs/"
 done
 for notice in JUCE-framework_AGPL3.txt JUCE-AudioUnitSDK.txt JUCE-HarfBuzz.txt \
@@ -129,6 +133,11 @@ vst3_hash=$(shasum -a 256 "$vst3_source/Contents/MacOS/Juicy16" | cut -d ' ' -f 
   find . -type f ! -name SHA256SUMS -print | LC_ALL=C sort | \
     while IFS= read -r file; do shasum -a 256 "$file"; done > SHA256SUMS
 )
+
+# Every Markdown link inside the package must resolve within the package. A doc
+# that links to a file left out of the archive is a dead end for the tester who
+# is told to read it.
+cmake -DSOURCE_ROOT="$staging_dir" -P "$repo_dir/tests/DocumentationLinkTests.cmake"
 
 if grep -IRnE --exclude=SHA256SUMS \
      '/Users/[A-Za-z0-9._-]+/|/private/tmp|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY' \
@@ -220,6 +229,11 @@ cmake \
 
 echo "Created and revalidated: $archive"
 echo "Archive checksum: $archive.sha256"
-if [[ -n $label_suffix ]]; then
-  echo "LOCAL VALIDATION ONLY: the filename records dirty and/or ad-hoc inputs."
+# Ad-hoc signing is the APPROVED Beta 1 signature, so it must not be reported the
+# same way as an untraceable dirty build: saying "do not ship this" about the
+# thing being shipped is how a real disqualifier gets ignored.
+if [[ $dirty == yes ]]; then
+  echo "LOCAL VALIDATION ONLY: built from a dirty worktree and traceable to no commit. Do not distribute."
+elif [[ $signature != distribution ]]; then
+  echo "Ad-hoc signed, which is expected for Beta 1. Testers must clear quarantine; see docs/BETA_TESTER_GUIDE.md."
 fi

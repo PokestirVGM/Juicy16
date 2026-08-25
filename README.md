@@ -2,7 +2,7 @@
 
 Juicy16 is a 16-channel multitimbral DLS/SoundFont player inspired by the automatic patch-selection workflow of Fruity LSD. Load one `.dls`, `.sf2`, or `.sf3` bank, send a multichannel MIDI file to one plugin instance, and its Bank Select and Program Change events select instruments independently on MIDI channels 1–16. All channels mix to one stereo output.
 
-The current development version is `0.6.0-alpha.3`. It is an alpha: the engine, build, and automated gates are in good shape, but the Beta 1 readiness bar has not been met, so it is deliberately not labelled beta. The authoritative readiness checklist is [ROADMAP.md](ROADMAP.md).
+The current release is `0.6.0-beta.1` — Beta 1, the first release: macOS 11 or later on Apple Silicon, AU and VST3, ad-hoc signed. Windows VST3 is Beta 2. Read [docs/BETA_TESTER_GUIDE.md](docs/BETA_TESTER_GUIDE.md) before installing; macOS will refuse an ad-hoc signed plugin until you clear quarantine. Known limitations are in [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md), and what comes next is in [ROADMAP.md](ROADMAP.md).
 
 ## What is implemented
 
@@ -59,9 +59,6 @@ Host routing is not hard-coded to FL Studio or Cubase. AU hosts can deliver norm
 ## Building and testing
 
 - macOS: [building.macos.md](building.macos.md)
-- Windows status and intended path: [building.win32.md](building.win32.md)
-- CI quality gates: [docs/CI.md](docs/CI.md)
-- DAW host test protocol and MIDI fixtures: [docs/HOST_TEST_PROTOCOL.md](docs/HOST_TEST_PROTOCOL.md)
 - VST3/Cubase architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - Beta state compatibility: [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)
 

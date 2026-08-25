@@ -42,12 +42,15 @@ public:
     void layoutFilenameComponent(FilenameComponent& filenameComp, juce::ComboBox* filenameBox, Button* browseButton) override {
         if (browseButton == nullptr || filenameBox == nullptr)
             return;
-        const int buttonWidth{filenameComp.getHeight()};
+        // Just enough box for the glyph plus a small even inset, so the space the
+        // eye reads either side of the folder is this inset plus the gap below,
+        // rather than whatever a square the height of the field left over.
+        const int buttonWidth{GuiConstants::folderIconSize + GuiConstants::innerPadding / 2};
         browseButton->setSize(buttonWidth, filenameComp.getHeight());
         browseButton->setTopRightPosition(filenameComp.getWidth(), 0);
         // Leave a gap between the field's border and the folder. Butted right up
-        // against it, the folder sat about 6px from the field and 15px from the
-        // settings button beside it, which is what read as uneven spacing.
+        // against it the folder read as part of the field, and the cog that used
+        // to sit beside it made the spacing look uneven from the other side too.
         filenameBox->setBounds(0, 0,
                                browseButton->getX() - GuiConstants::innerPadding,
                                filenameComp.getHeight());

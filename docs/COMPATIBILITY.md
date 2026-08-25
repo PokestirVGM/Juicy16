@@ -2,7 +2,7 @@
 
 What must not change without breaking saved projects and host automation.
 
-This file records the host-facing identifiers frozen when Beta 1 becomes the compatibility baseline. The current development version `0.6.0-alpha.3` already uses them, so no identifier change is pending; only the version label differs. Pre-Beta sessions are outside this contract. Beta 1 and later releases must retain these values unless an explicitly approved stop-ship migration changes the contract and adds host save/reopen coverage.
+This file records the host-facing identifiers frozen by Beta 1, which is the compatibility baseline. `0.6.0-beta.1` ships them, and they are now frozen: pre-Beta sessions are outside this contract. Beta 1 and later releases must retain these values unless an explicitly approved stop-ship migration changes the contract and adds host save/reopen coverage.
 
 ## Product and plugin identity
 

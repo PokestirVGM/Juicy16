@@ -4,7 +4,7 @@
 
 Juicy16 Beta 1 is pre-release audio software. Use copies of important DAW projects and banks, save incremental project versions, and do not depend on Beta state for irreplaceable work. A Beta candidate may be withdrawn for crashes, state corruption, invalid signatures/dependencies, licensing problems, or incorrect multichannel MIDI behavior.
 
-Do not download a candidate unless its release notes list your operating system, CPU architecture, DAW, and plugin format as tested. “Cross-platform” does not mean every OS/host combination is supported.
+Check the table below before downloading: it lists exactly which operating system, CPU, and plugin formats Beta 1 covers. “Cross-platform” does not mean every OS/host combination is supported — Windows is not part of Beta 1 at all.
 
 ## Is your setup supported? Check before downloading
 
@@ -13,23 +13,27 @@ nothing below applies.
 
 | | Supported | Not supported |
 | --- | --- | --- |
-| **Operating system** | macOS 11.0 or later; Windows 10 version 1607 or later | Anything older; Linux |
-| **CPU** | Apple Silicon (`arm64`) on macOS; `x86_64` on Windows | Intel Macs; Windows ARM64; 32-bit Windows |
-| **Plugin format** | AU and VST3 on macOS; VST3 on Windows | VST2; AUv3; standalone as a release format |
+| **Operating system** | macOS 11.0 or later | Anything older; Windows; Linux |
+| **CPU** | Apple Silicon (`arm64`) | Intel Macs; everything else |
+| **Plugin format** | AU and VST3 | VST2; AUv3; standalone as a release format |
 | **Bank file** | SF2, SF3, DLS | Anything else |
 
-On macOS, `Apple menu > About This Mac` names the chip: "Apple M1/M2/M3/M4" is
-supported, "Intel" is not. On Windows, `Settings > System > About` must show
-"64-bit operating system, x64-based processor".
+`Apple menu > About This Mac` names the chip: "Apple M1/M2/M3/M4" is supported,
+"Intel" is not.
+
+**Beta 1 is macOS only.** Windows VST3 moved to Beta 2 on 2026-08-24: that
+toolchain has never produced a host-validated artifact, so there is nothing to
+test yet.
 
 Two further limits worth knowing before you spend time on this:
 
 - **The candidate is ad-hoc signed**, not Developer ID signed or notarized, so
   macOS will refuse it until you clear quarantine. The exact command is in the
   Gatekeeper section below. If you are not willing to do that, stop here.
-- **Which DAWs are actually validated is per candidate.** The release notes list
-  them. Approved *scope* is not the same as tested, and a host absent from that
-  list is untested rather than known-good.
+- **Beta 1 is validated in FL Studio and Cubase only**, in both AU and VST3.
+  Logic Pro and every other host are untested rather than known-good — approved
+  *scope* is not the same as tested. `auval -strict` passes, which is not the
+  same as Logic working.
 
 The full matrix — including sample rates, bank-format evidence, and what is
 explicitly out of scope — is [../README.md](../README.md). Known
@@ -38,9 +42,9 @@ limitations you should read before reporting a bug are in
 
 ## Intended tester audience
 
-The first canary should be experienced macOS AU/VST3 and Windows VST3 users who can preserve 16-channel MIDI routing, identify Bank Select/Program Change events, restore a backup, and submit a minimal reproduction. The group should include FL Studio, Cubase, Logic, one additional AU host, and one additional VST3 host, plus users of SF2, SF3, conventional DLS, and known malformed DLS exports.
+The first canary should be experienced macOS AU/VST3 users who can preserve 16-channel MIDI routing, identify Bank Select/Program Change events, restore a backup, and submit a minimal reproduction. The group should include FL Studio and Cubase, plus users of SF2, SF3, conventional DLS, and known malformed DLS exports. Logic Pro is not owned and is untested in Beta 1; a Logic report is welcome but is exploring an unvalidated host rather than confirming a tested one.
 
-The tester count, invitation channel, support hours, and withdrawal owner require owner approval before launch. The approved feedback address is `contact@pokestir.com`; email subjects must begin with `[Juicy16 VST]` so reports can be identified and routed.
+Send reports to `contact@pokestir.com` with a subject beginning `[Juicy16 VST]` so they can be identified and routed.
 
 ## The window
 
@@ -150,7 +154,7 @@ notarized build.
 Verify the download first. The archive ships with a `.sha256` file beside it, and `SHA256SUMS` inside covering every packaged file:
 
 ```bash
-shasum -a 256 -c Juicy16-<version>-<candidate>-macos-arm64.zip.sha256
+shasum -a 256 -c Juicy16-0.6.0-beta.1-BC1-macos-arm64-ADHOC.zip.sha256
 ```
 
 Two labels can appear in the filename, and they mean different things:
@@ -162,7 +166,6 @@ Unpack the archive and copy the bundles into your user plug-in folders:
 
 - macOS AU → `~/Library/Audio/Plug-Ins/Components/Juicy16.component`
 - macOS VST3 → `~/Library/Audio/Plug-Ins/VST3/Juicy16.vst3`
-- Windows VST3 → the VST3 directory your DAW scans, commonly `C:\Program Files\Common Files\VST3\Juicy16.vst3`
 
 Back up any existing bundle at those paths before replacing it. Close every DAW first, then rescan plug-ins after copying.
 
@@ -205,7 +208,7 @@ ask you to.
 
 ## Support boundary
 
-Beta 1 is intended to cover only the exact OS versions, architectures, formats, and DAWs named in the candidate release notes. One stereo mix output is intentional. VST2, AUv3, Linux, 32-bit Windows, and unlisted architectures are unsupported unless a later approved matrix says otherwise. Bank-specific modulators can change how pressure and controllers sound even when messages are delivered correctly; see the exact [MIDI controller support contract](CONTROLLER_SUPPORT.md).
+Beta 1 covers only the operating system, architecture, formats, and hosts named above: macOS 11+ on Apple Silicon, AU and VST3, validated in FL Studio and Cubase. One stereo mix output is intentional. Windows, VST2, AUv3, Linux, Intel Macs, and unlisted architectures are unsupported unless a later approved matrix says otherwise. Bank-specific modulators can change how pressure and controllers sound even when messages are delivered correctly; see the exact [MIDI controller support contract](CONTROLLER_SUPPORT.md).
 
 ## Uninstall and rollback
 
@@ -216,9 +219,9 @@ On macOS, remove only the Juicy16 bundles installed for the Beta from:
 - `~/Library/Audio/Plug-Ins/Components/` (AU)
 - `~/Library/Audio/Plug-Ins/VST3/` (VST3)
 
-On Windows, remove only `Juicy16.vst3` from the VST3 directory used during installation. Rescan the DAW afterward. Restore the prior backed-up bundle if rollback is required; never overwrite the backup. Projects saved with Beta-specific state may not work in an older build, so restore the corresponding project backup too.
+Rescan the DAW afterward. Restore the prior backed-up bundle if rollback is required; never overwrite the backup. Projects saved with Beta-specific state may not work in an older build, so restore the corresponding project backup too.
 
-Beta 2 and the first stable release are expected to read Beta 1 schema-v2 state. Older betas deliberately reject newer schemas rather than guessing at their meaning. See this document for the versioning and identifier policy.
+Beta 2 and the first stable release are expected to read Beta 1 schema-v6 state. Older betas deliberately reject newer schemas rather than guessing at their meaning. See this document for the versioning and identifier policy.
 
 No uninstaller should delete user DLS/SF2/SF3 files or DAW projects. Temporary repaired DLS copies are stored in the operating system temporary area and normally removed with the plugin instance.
 

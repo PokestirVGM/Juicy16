@@ -1,6 +1,6 @@
 # Beta 1 known issues and unverified areas
 
-This file describes the unreleased `0.6.0-alpha.3` development state. It must be regenerated for the exact frozen candidate.
+Known limitations and unverified areas in `0.6.0-beta.1`, the Beta 1 release. Read this before reporting a bug: several entries below are deliberate, and one of them is probably what you are hearing.
 
 ## Debug-only: LookAndFeel assertions
 
@@ -33,7 +33,6 @@ interface was inspected in the running plugin. Cosmetic and unresolved.
   0.5.1-alpha.5 after gain 1.0 clipped a real rip at +7.32 dBFS. Raising the
   output to match VGMTrans would clip the loudest banks in the test corpus.
   Workaround today: raise the master output trim, which spans -24 to +12 dB.
-  See [INVESTIGATION_ENVELOPE_DECAY.md](INVESTIGATION_ENVELOPE_DECAY.md) §0.
 - **Some material sounds different from other players.** Juicy16 reproduces
   FluidSynth faithfully — measured within 0.03 dB RMS of stock FluidSynth on the
   same rip, with velocity, CC7, CC11, per-instrument balance and the volume
@@ -53,17 +52,45 @@ interface was inspected in the running plugin. Cosmetic and unresolved.
   against predates the reverb.
 
 
-## Stop-ship/open gates
+## What is and is not validated
 
-- Product identifiers and the Beta 1 platform matrix are approved and implemented, but the renamed artifacts still require candidate-specific metadata and session-recall validation.
-- JUCE 8 is used under AGPLv3 with the inherited application code remaining GPLv3. Qualified external review was **waived by owner decision on 2026-08-23**; the owner self-reviews source packaging, notices, ownership language, and the dependency inventory against [LICENSING.md](LICENSING.md) before candidate freeze, with the repository going public at the beta tag to satisfy the corresponding-source offer. Not yet performed against a frozen package.
-- Homebrew's current static dependency set was compiled for macOS 26 and is rejected by strict validation. The checksum-pinned source recipe now produces a macOS 11 arm64 closure with SF3 and native DLS enabled; clean-environment reproduction and final package review remain required.
-- A correctly built macOS 11-targeted arm64 artifact still needs runtime validation on both macOS 11 and the current macOS release. Intel macOS is intentionally deferred.
-- The current strict-Release AU passes `auval -strict` on macOS 26.5.2, both as built and as extracted from its package. Logic, an additional AU host, and macOS 11 remain untested.
-- Cubase, FL Studio, and an additional VST3 host have not yet run the exact packaged candidate through the canonical 16-channel game-rip fixture.
-- The Windows MSVC/CI pipeline, clean-machine dependency check, DLS capability, and host matrix remain unproven. The legacy LLVM-MinGW Docker path is unsupported.
-- A local private SF2/DLS/malformed-DLS corpus and FluidSynth's licensed upstream SF3 fixture pass the strict arm64 macOS loader. Private-bank redistribution rights, Windows results, and final-candidate results remain unresolved.
-- Developer ID signing and notarization are **out of scope for Beta 1** by an approved decision; the gate is now the tester-facing Gatekeeper procedure, which is published. Packaging, clean-machine installation, and uploaded checksum verification remain incomplete.
+Beta 1 ships with these tested, on the packaged artifacts:
+
+- Per-channel Bank Select and Program Change on all 16 channels, in **FL Studio
+  and Cubase**, in both **AU and VST3**.
+- Pitch-bend range through RPN, confirmed in Cubase.
+- `auval -strict` on the AU, both as built and as extracted from the package.
+- The strict portable Release suite, 15/15, from a clean checkout: arm64-only,
+  `minos 11.0` on every Mach-O, no developer-only dynamic library, SF2/SF3/DLS
+  loading, and the 16-channel VST3 unit and program-list structure.
+
+These are **not** validated, and a report about any of them is genuinely new
+information:
+
+- **macOS 11 itself.** Every binary declares `minos 11.0` and strict validation
+  proves it, but the only Mac available runs macOS 26. Nothing has booted this on
+  11. That is why the claim is written as "built for 11.0+, validated on current
+  macOS".
+- **Logic Pro, and any AU host other than FL Studio.** Logic is not owned. AU
+  coverage is `auval -strict` plus FL Studio.
+- **Any VST3 host other than FL Studio and Cubase.**
+- **Intel Macs.** Out of scope, not built.
+- **Clean-machine installation.** Every install so far has been on the
+  development machine, which already has the dependencies a user will not have.
+  The plugin links its dependencies statically and validation checks for exactly
+  this, but "checked" is not "someone did it".
+- **Windows.** Not part of Beta 1 at all; see below.
+- **Redistribution rights for the private bank corpus.** The compatibility corpus
+  is local and is never packaged.
+
+## Licensing
+
+JUCE 8 is used under AGPLv3, with the inherited application code remaining
+GPLv3. Qualified external legal review was **waived by owner decision on
+2026-08-23** in favour of an owner self-review against
+[LICENSING.md](LICENSING.md), on the basis of a small named tester list and
+public source at the beta tag. That is a recorded risk taken deliberately, not
+an oversight.
 
 - **REMEDIATED — CVE-2025-52194 in libsndfile 1.2.2.** A buffer overflow in `ircam_read_header`, reachable because FluidSynth passes a SoundFont's embedded sample bytes to libsndfile's automatic format detection without pre-validating the format and only *warns* when the result is not OGG — so a crafted `.sf3`, the plugin's primary untrusted input, could route into the vulnerable reader. Upstream has no release carrying the fix, so `vendor/libsndfile_patched/` backports it and both dependency recipes bracket the edit with pre- and post-edit `src/ircam.c` hashes. As of 2026-08-23 the patched closure is **built and linked**, not merely specified: the strict portable Release gate passed 15/15 against it, including the SF3 load path that reaches libsndfile. No proof-of-concept existed before or after, so this closes a reachable code path rather than disproving a demonstrated exploit. The related MPEG advisories are not reachable, because `ENABLE_MPEG=OFF` keeps that code out of the binary.
 
@@ -75,6 +102,7 @@ interface was inspected in the running plugin. Cosmetic and unresolved.
 
 - Beta 1 is **ad-hoc signed by decision**, not Developer ID signed and not notarized. Every macOS install therefore requires clearing the quarantine attribute; see [BETA_TESTER_GUIDE.md](BETA_TESTER_GUIDE.md). The `ADHOC` label in the package filename is expected for Beta 1 and is not a disqualifier. `LOCAL-DIRTY` still is.
 - Standalone is a development/QA target, not a primary Beta format.
+- **Windows is not part of Beta 1.** Windows VST3 moved to Beta 2 on 2026-08-24: the MSVC/CI pipeline, clean-machine dependency check, DLS capability and host matrix are all unproven, and the legacy LLVM-MinGW Docker path is unsupported. No Windows artifact is published, so there is nothing to test.
 - Intel macOS, Windows ARM64, VST2, AUv3, Linux, and 32-bit Windows are outside the current Beta scope.
 - VST3 `progChN` parameters expose program 0–127 only; arbitrary bank changes still require MIDI Bank Select CC0/32 before Program Change.
 - **B2** — Selecting a bank/program the loaded bank file does not define shows the requested patch while a different one sounds. FluidSynth 2.5.5 accepts the change, records the requested bank and program on the channel, and substitutes bank 0 program 0 for synthesis. Juicy16 keeps the requested value in the editor and saved state on purpose, so reopening the project with the intended bank plays what the MIDI asked for; the disagreement lasts only while the wrong bank is loaded. Verified by the offline cross-bank fixture.
