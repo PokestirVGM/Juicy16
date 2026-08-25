@@ -49,6 +49,12 @@ Send reports to `contact@pokestir.com` with a subject beginning `[Juicy16 VST]` 
 
 ## Installation
 
+**Nothing to install first.** Juicy16 has no third-party dependencies — the
+synthesis engine and every audio codec are built into the plugin itself. You do
+not need Homebrew, FluidSynth, or anything else on your machine. The
+`building.macos.md` file in the archive is for compiling from source and can be
+ignored.
+
 ### The easy way
 
 Unpack the `.zip`, then **double-click `install_macos.command`** inside it.

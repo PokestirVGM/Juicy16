@@ -1,5 +1,12 @@
 # Building Juicy16 on macOS
 
+> **You do not need any of this to use Juicy16.** The released plugin has no
+> third-party dependencies: FluidSynth and its codecs are linked statically into
+> the bundle, so nothing needs installing. Unpack the release and run
+> `install_macos.command` — see [docs/BETA_TESTER_GUIDE.md](docs/BETA_TESTER_GUIDE.md).
+> This file is for building from source, and the requirements below are the
+> *build* toolchain only.
+
 These commands describe the locally verified developer build. They do not by themselves create an approved public release: minimum/current-OS testing, host validation, signing identity, notarization, and final licensing review remain Beta 1 gates.
 
 ## Requirements

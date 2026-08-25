@@ -2,7 +2,7 @@
 
 Juicy16 is a 16-channel multitimbral DLS/SoundFont player inspired by the automatic patch-selection workflow of Fruity LSD. Load one `.dls`, `.sf2`, or `.sf3` bank, send a multichannel MIDI file to one plugin instance, and its Bank Select and Program Change events select instruments independently on MIDI channels 1–16. All channels mix to one stereo output.
 
-The current release is `0.6.0-beta.1` — Beta 1, the first release: macOS 11 or later on Apple Silicon, AU and VST3, ad-hoc signed. Windows VST3 is Beta 2. Read [docs/BETA_TESTER_GUIDE.md](docs/BETA_TESTER_GUIDE.md) before installing; macOS will refuse an ad-hoc signed plugin until you clear quarantine. Known limitations are in [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md), and what comes next is in [ROADMAP.md](ROADMAP.md).
+The current release is `0.6.0-beta.1` — Beta 1, the first release: macOS 11 or later on Apple Silicon, AU and VST3, ad-hoc signed. It is self-contained: FluidSynth and its codecs are statically linked, so there is nothing to install alongside it. Unpack the archive, double-click `install_macos.command`, and rescan your host. Windows VST3 is Beta 2. Read [docs/BETA_TESTER_GUIDE.md](docs/BETA_TESTER_GUIDE.md) before installing; macOS will refuse an ad-hoc signed plugin until you clear quarantine. Known limitations are in [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md), and what comes next is in [ROADMAP.md](ROADMAP.md).
 
 ## What is implemented
 

@@ -66,12 +66,49 @@ foreach (BINARY IN LISTS BINARIES)
     message(FATAL_ERROR
       "Could not inspect linked dependencies for ${BINARY}: ${OTOOL_LIBS_ERROR}")
   endif ()
-  # The first line is the inspected executable path, not a linked dependency.
-  string(REGEX REPLACE "^[^\n]*\n" "" OTOOL_DEPENDENCIES "${OTOOL_LIBS_OUTPUT}")
-  if (OTOOL_DEPENDENCIES MATCHES
-      "(/opt/homebrew|/usr/local|/Users/[A-Za-z0-9._-]+/|/private/tmp|/var/folders/)")
+  # Dependency lines are the tab-indented ones; the first line is the inspected
+  # binary's own path. Split on newlines rather than stripping the header with a
+  # regex: `string(REGEX REPLACE "^[^\n]*\n" "" ...)` empties the whole string in
+  # CMake, because a bracket expression there does not exclude a newline the way
+  # it reads. That silently left this entire check inspecting an empty string,
+  # so every artifact "passed" it without a single dependency being looked at.
+  string(REPLACE "\n" ";" OTOOL_LINES "${OTOOL_LIBS_OUTPUT}")
+  set(DEPENDENCY_COUNT 0)
+  foreach (OTOOL_LINE IN LISTS OTOOL_LINES)
+    if (NOT OTOOL_LINE MATCHES "^[ \t]+")
+      continue()
+    endif ()
+    string(STRIP "${OTOOL_LINE}" DEPENDENCY_PATH)
+    string(REGEX REPLACE " \\(compatibility version.*$" "" DEPENDENCY_PATH "${DEPENDENCY_PATH}")
+    string(STRIP "${DEPENDENCY_PATH}" DEPENDENCY_PATH)
+    if (DEPENDENCY_PATH STREQUAL "")
+      continue()
+    endif ()
+    math(EXPR DEPENDENCY_COUNT "${DEPENDENCY_COUNT} + 1")
+
+    if (DEPENDENCY_PATH MATCHES
+        "(/opt/homebrew|/usr/local|/Users/[A-Za-z0-9._-]+/|/private/tmp|/var/folders/)")
+      message(FATAL_ERROR
+        "Release artifact links a developer/build path: ${BINARY}\n  ${DEPENDENCY_PATH}")
+    endif ()
+
+    # The product claim is that a tester installs the plugin and nothing else, so
+    # every load command must resolve inside macOS itself. FluidSynth and every
+    # codec are linked statically; anything outside /usr/lib or /System is a
+    # dependency a user would have to go and install.
+    if (NOT DEPENDENCY_PATH MATCHES "^(/usr/lib/|/System/)")
+      message(FATAL_ERROR
+        "Release artifact links a non-system library, which a user would have to "
+        "install separately: ${BINARY}\n  ${DEPENDENCY_PATH}")
+    endif ()
+  endforeach ()
+
+  # A parse that finds nothing must fail rather than pass: that is how the
+  # previous version of this check went unnoticed.
+  if (DEPENDENCY_COUNT EQUAL 0)
     message(FATAL_ERROR
-      "Release artifact links a developer/build path: ${BINARY}\n${OTOOL_DEPENDENCIES}")
+      "Could not parse any linked dependency for ${BINARY}. Every Mach-O links at "
+      "least libSystem, so this means the check is inspecting nothing.")
   endif ()
 
   execute_process(
