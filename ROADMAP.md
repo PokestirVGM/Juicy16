@@ -23,6 +23,18 @@ it, because controls cache their colours. Per-channel Program Change and
 pitch-bend range are both confirmed working in FL Studio and Cubase, in AU and
 VST3.
 
+Four more fixes landed after the first tag was cut, so the tag was re-cut on the
+commit that carries them: the two failures the first hosted CI run found, the
+double-clickable installer, the rewritten install procedure, and a linked-
+dependency check that had been parsing nothing. A licensing review of the
+packaged candidate then found the package claiming an Independent JPEG Group
+notice it did not contain; the notice now ships. Gate item 1 was re-run from a
+clean checkout on the final commit: docs link closure over 44 links, Debug 13/13,
+ASan 2/2, `leaks` clean across four harnesses, strict Release 15/15, and
+`Juicy16-0.6.0-beta.1-BC4-macos-arm64-ADHOC.zip` passing its own revalidation,
+including link closure and full artifact re-validation over the extracted
+package. `ADHOC` is expected: Beta 1 is ad-hoc signed by decision.
+
 ## Beta 1 scope
 
 macOS 11 or later on Apple Silicon (`arm64`), AU and VST3.
