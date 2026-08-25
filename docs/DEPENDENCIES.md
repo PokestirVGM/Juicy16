@@ -19,7 +19,7 @@ The pinned versions and their checksums live in `tools/build_macos_dependencies.
 
 The Audio Unit and VST3 SDK interface sources ship with JUCE and are compiled as headers; no separate SDK binary is linked.
 
-Windows has no validated closure yet. It is deliberately absent from this table rather than assumed to match macOS — see Phase 4.3 of [../ROADMAP.md](../ROADMAP.md).
+Windows has no validated closure yet. It is deliberately absent from this table rather than assumed to match macOS — Windows VST3 is Beta 2 scope in [../ROADMAP.md](../ROADMAP.md).
 
 ## Security and currency review
 

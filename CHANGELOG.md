@@ -16,6 +16,16 @@ tag; `0.6.0-alpha.1` through `alpha.4` were never released separately.
   passes 15/15 from a clean checkout at a whitespace-free path.
 
 
+### Added
+
+- **A double-clickable installer.** The archive now carries
+  `install_macos.command`: unpack, double-click, choose AU, VST3 or both. It
+  verifies the package's own SHA-256 manifest before it copies anything, moves
+  any existing install aside as a timestamped backup, and clears the quarantine
+  flag — which otherwise leaves the plugin invisible to every host, with no
+  error anywhere to explain why. Copying the bundles by hand still works and is
+  still documented.
+
 ### Changed
 
 - **The accent list shows each colour beside its name**, so an accent can be
@@ -53,6 +63,13 @@ tag; `0.6.0-alpha.1` through `alpha.4` were never released separately.
   cursor and every header could be dragged into a new order — on columns whose
   minimum and maximum widths are the same number, so neither gesture did
   anything.
+
+- **The install instructions are one ordered procedure.** The tester guide gave
+  the quarantine fix before the copy step it applies to, told the reader to
+  verify checksums first in two consecutive paragraphs, explained Gatekeeper in
+  two separate places, and put all of it after a UI tour that is read later.
+  Install is now five numbered steps ahead of the tour, with the symptom table
+  folded into a single troubleshooting block.
 
 ### Fixed
 
@@ -117,6 +134,40 @@ tag; `0.6.0-alpha.1` through `alpha.4` were never released separately.
   later releases would read "schema-v2" state, four schema versions out of date —
   Beta 1 writes version 6. `docs/KNOWN_ISSUES.md` listed the unproven Windows
   pipeline as a Beta 1 stop-ship gate rather than as Beta 2 scope.
+
+- **The linked-dependency check never inspected a dependency.** `otool -L`
+  output had its first line — the binary's own path — stripped with
+  `string(REGEX REPLACE "^[^\n]*\n" "" ...)`, which in CMake empties the entire
+  string instead. So the blacklist of developer build paths ran against `""` and
+  passed every artifact without looking at one. The check now splits the output
+  into lines, additionally requires every load command to resolve under
+  `/usr/lib` or `/System` — anything else is a library a tester would have to go
+  and install — and fails when the parse finds no dependencies at all, since
+  every Mach-O links at least libSystem. That last case is exactly what used to
+  read as success.
+- **The build guide opened by telling readers to `brew install fluid-synth`**
+  while the product claim is that there is nothing to install. FluidSynth and
+  its codecs are statically linked; `building.macos.md` and `README.md` now say
+  so up front, and the check above is what holds the claim to it.
+- **The package claimed an IJG notice it did not contain.** `NOTICE.md` and
+  `docs/LICENSING.md` both stated that the notices for the code JUCE embeds —
+  HarfBuzz, SheenBidi, zlib, libpng and Independent JPEG Group — ship in
+  `licenses_of_dependencies/`, but no IJG text existed there or in the
+  packager's list, while `jpeglib` symbols are demonstrably compiled into both
+  binaries. Added `licenses_of_dependencies/libjpeg_IJG.txt`, carrying the IJG
+  terms verbatim from the copy JUCE bundles along with the modifications JUCE
+  made to it, and staged it in the archive. Found by the licensing review of the
+  packaged candidate that `docs/LICENSING.md` asks for.
+- **Two failures the first hosted CI run found**, neither of which a local run
+  could have produced. Nine `-Wzero-as-null-pointer-constant` errors: CI runs
+  Xcode 15.4, and the development Mac's newer toolchain defines `NULL` so that
+  the warning never fires there — `NULL` is gone from first-party sources. And
+  `tools/build_macos_dependencies.sh` could not build the closure from scratch:
+  FluidSynth's CLI is built unconditionally and links through CMake targets,
+  while libsndfile's static archive does not export its codec dependencies, so
+  `src/fluidsynth` failed on FLAC, vorbis and ogg symbols. Every local run had
+  reused a closure built in an earlier session, so the recipe's from-scratch
+  path had never actually run. It now builds end to end.
 
 
 ## 0.6.0-alpha.3 — unreleased

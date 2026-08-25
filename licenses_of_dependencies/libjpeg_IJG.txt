@@ -1,0 +1,80 @@
+Independent JPEG Group (IJG) libjpeg
+====================================
+
+JUCE 8.0.14 embeds a reduced copy of the IJG libjpeg sources in
+`modules/juce_graphics/image_formats/jpglib/`, and Juicy16's AU and VST3
+binaries contain that code. This file reproduces the IJG terms verbatim from
+that copy's own README.
+
+As required by condition (2) below, and as stated in `NOTICE.md`:
+this software is based in part on the work of the Independent JPEG Group.
+
+JUCE distributes a subset of the library and made source changes to it, listed
+upstream in `modules/juce_graphics/image_formats/jpglib/changes to libjpeg for
+JUCE.txt`: renamed `jpeg_entropy_decoder` and `jpeg_d_coef_controller` struct
+members in `jpegint.h`, a commented-out duplicate `JPEG_MARKER` enum in
+`jdmarker.c`, a commented-out `jmemsys.h` include in `jmemnobs.c`, and a
+commented-out `_WIN32` ifdef in `jconfig.h`. Juicy16 makes no further changes.
+The complete corresponding source is the pinned JUCE 8.0.14 release named in
+`docs/DEPENDENCIES.md`.
+
+--------------------------------------------------------------------------
+The following is the LEGAL ISSUES section of the IJG README as distributed
+with JUCE 8.0.14.
+--------------------------------------------------------------------------
+
+LEGAL ISSUES
+============
+
+In plain English:
+
+1. We don't promise that this software works.  (But if you find any bugs,
+   please let us know!)
+2. You can use this software for whatever you want.  You don't have to pay us.
+3. You may not pretend that you wrote this software.  If you use it in a
+   program, you must acknowledge somewhere in your documentation that
+   you've used the IJG code.
+
+In legalese:
+
+The authors make NO WARRANTY or representation, either express or implied,
+with respect to this software, its quality, accuracy, merchantability, or
+fitness for a particular purpose.  This software is provided "AS IS", and you,
+its user, assume the entire risk as to its quality and accuracy.
+
+This software is copyright (C) 1991-2024, Thomas G. Lane, Guido Vollbeding.
+All Rights Reserved except as specified below.
+
+Permission is hereby granted to use, copy, modify, and distribute this
+software (or portions thereof) for any purpose, without fee, subject to these
+conditions:
+(1) If any part of the source code for this software is distributed, then this
+README file must be included, with this copyright and no-warranty notice
+unaltered; and any additions, deletions, or changes to the original files
+must be clearly indicated in accompanying documentation.
+(2) If only executable code is distributed, then the accompanying
+documentation must state that "this software is based in part on the work of
+the Independent JPEG Group".
+(3) Permission for use of this software is granted only if the user accepts
+full responsibility for any undesirable consequences; the authors accept
+NO LIABILITY for damages of any kind.
+
+These conditions apply to any software derived from or based on the IJG code,
+not just to the unmodified library.  If you use our work, you ought to
+acknowledge us.
+
+Permission is NOT granted for the use of any IJG author's name or company name
+in advertising or publicity relating to this software or products derived from
+it.  This software may be referred to only as "the Independent JPEG Group's
+software".
+
+We specifically permit and encourage the use of this software as the basis of
+commercial products, provided that all warranty or liability claims are
+assumed by the product vendor.
+
+
+The Unix configuration script "configure" was produced with GNU Autoconf.
+It is copyright by the Free Software Foundation but is freely distributable.
+The same holds for its supporting scripts (config.guess, config.sub,
+ltmain.sh).  Another support script, install-sh, is copyright by X Consortium
+but is also freely distributable.

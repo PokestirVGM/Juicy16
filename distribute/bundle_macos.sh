@@ -113,8 +113,9 @@ done
 for notice in JUCE-framework_AGPL3.txt JUCE-AudioUnitSDK.txt JUCE-HarfBuzz.txt \
               JUCE-libpng.txt JUCE-SheenBidi.txt JUCE-VST3_SDK.txt JUCE-zlib.txt \
               gcem_Apache_2.0.txt libflac_New_BSD.txt libfluidsynth_LGPL_2.1.txt \
-              libogg_New_BSD.txt libopus_BSD.txt libsndfile_LGPL_2.1.txt \
-              libvorbis_New_BSD.txt libvorbisenc_New_BSD.txt; do
+              libjpeg_IJG.txt libogg_New_BSD.txt libopus_BSD.txt \
+              libsndfile_LGPL_2.1.txt libvorbis_New_BSD.txt \
+              libvorbisenc_New_BSD.txt; do
   cp "$repo_dir/licenses_of_dependencies/$notice" \
      "$staging_dir/licenses_of_dependencies/"
 done
