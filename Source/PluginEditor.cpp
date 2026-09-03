@@ -81,7 +81,8 @@ public:
         return 0;
     }
 
-    SettingsPanel(Juicy16::Accent current,
+    SettingsPanel(AudioProcessorValueTreeState& state,
+                  Juicy16::Accent current,
                   std::vector<Fact> factsToShow,
                   std::function<void(Juicy16::Accent)> onAccentChosen)
     : facts{std::move(factsToShow)}
@@ -89,7 +90,58 @@ public:
     {
         setName("Settings");
         setTitle("Settings");
-        setDescription("Juicy16 settings: accent colour and build information");
+        setDescription("Juicy16 settings: accent colour, MIDI bend compensation, and build information");
+
+        midiHeading.setText("MIDI", dontSendNotification);
+        midiHeading.setFont(Font{juce::FontOptions{GuiConstants::labelFontHeight}});
+        midiHeading.setAccessible(false);
+        addAndMakeVisible(midiHeading);
+
+        // Host bend compensation. Both are real parameters, so a project keeps
+        // them; the popover is just where they live.
+        bendRangeLabel.setText("Bend range", dontSendNotification);
+        bendRangeLabel.setFont(Font{juce::FontOptions{GuiConstants::valueFontHeight}});
+        bendRangeLabel.setAccessible(false);
+        addAndMakeVisible(bendRangeLabel);
+        bendRangeBox.setName("Bend range override");
+        bendRangeBox.setTitle("Bend range override");
+        bendRangeBox.setDescription(
+            "Force one pitch-bend range on every channel, for a host that does not "
+            "pass the file's RPN bend range to the plugin");
+        bendRangeBox.setTooltip(
+            "Follow the MIDI file, or force one bend range on all 16 channels. Use "
+            "it when a host drops the file's RPN bend range: game rips usually ask "
+            "for 12 semitones.");
+        bendRangeBox.setWantsKeyboardFocus(true);
+        bendRangeBox.addItem("Follow the MIDI file", 1);
+        for (int semitones = 1; semitones <= 24; ++semitones)
+            bendRangeBox.addItem(String(semitones) + (semitones == 1 ? " semitone" : " semitones"),
+                                 semitones + 1);
+        addAndMakeVisible(bendRangeBox);
+
+        bendScaleLabel.setText("Bend scale", dontSendNotification);
+        bendScaleLabel.setFont(Font{juce::FontOptions{GuiConstants::valueFontHeight}});
+        bendScaleLabel.setAccessible(false);
+        addAndMakeVisible(bendScaleLabel);
+        bendScaleBox.setName("Bend scale");
+        bendScaleBox.setTitle("Bend scale");
+        bendScaleBox.setDescription(
+            "Multiply every incoming pitch bend, for a host that shrank the bends "
+            "when it imported the MIDI file");
+        bendScaleBox.setTooltip(
+            "Multiplies incoming pitch bend. FL Studio imports every MIDI bend as "
+            "plus or minus two semitones whatever the file asked for; for a rip "
+            "written for 12 semitones, choose x6.");
+        bendScaleBox.setWantsKeyboardFocus(true);
+        for (int factor = 1; factor <= 24; ++factor)
+            bendScaleBox.addItem(String::fromUTF8("\xc3\x97") + String(factor)
+                                     + (factor == 1 ? " (off)" : ""),
+                                 factor);
+        addAndMakeVisible(bendScaleBox);
+        bendRangeAttachment = std::make_unique<AudioProcessorValueTreeState::ComboBoxAttachment>(
+            state, "bendRange", bendRangeBox);
+        bendScaleAttachment = std::make_unique<AudioProcessorValueTreeState::ComboBoxAttachment>(
+            state, "bendScale", bendScaleBox);
 
         accentHeading.setText("ACCENT", dontSendNotification);
         accentHeading.setFont(Font{juce::FontOptions{GuiConstants::labelFontHeight}});
@@ -155,6 +207,9 @@ public:
                     + kHeadingHeight + kHeadingGap + kSwatchHeight
                     + GuiConstants::groupGap + 1 + GuiConstants::groupGap
                     + kHeadingHeight + kHeadingGap
+                    + 2 * kControlRowHeight + kControlRowGap
+                    + GuiConstants::groupGap + 1 + GuiConstants::groupGap
+                    + kHeadingHeight + kHeadingGap
                     + static_cast<int>(facts.size()) * kFactRowHeight);
     }
 
@@ -167,14 +222,15 @@ public:
     void paint(Graphics& g) override {
         g.fillAll(findColour(Juicy16::panelBackgroundColourId));
         g.setColour(findColour(Juicy16::subtleBorderColourId));
-        g.fillRect(GuiConstants::padding, dividerY,
-                   getWidth() - GuiConstants::padding * 2, 1);
+        for (const int y : {midiDividerY, dividerY})
+            g.fillRect(GuiConstants::padding, y, getWidth() - GuiConstants::padding * 2, 1);
     }
 
     void lookAndFeelChanged() override {
         auto& lookAndFeel{getLookAndFeel()};
         const Colour label{lookAndFeel.findColour(Juicy16::textLabelColourId)};
-        for (Label* heading : {&accentHeading, &buildHeading})
+        for (Label* heading : {&accentHeading, &midiHeading, &buildHeading,
+                               &bendRangeLabel, &bendScaleLabel})
             heading->setColour(Label::textColourId, label);
         // The closed dropdown draws its text in the accent it currently selects,
         // so the chosen hue is visible without opening the list.
@@ -195,6 +251,22 @@ public:
         accentBox.setBounds(r.removeFromTop(kSwatchHeight));
 
         r.removeFromTop(GuiConstants::groupGap);
+        midiDividerY = r.removeFromTop(1).getY();
+        r.removeFromTop(GuiConstants::groupGap);
+
+        midiHeading.setBounds(r.removeFromTop(kHeadingHeight));
+        r.removeFromTop(kHeadingGap);
+        {
+            Rectangle<int> row{r.removeFromTop(kControlRowHeight)};
+            bendRangeBox.setBounds(row.removeFromRight(row.getWidth() * 3 / 5));
+            bendRangeLabel.setBounds(row);
+            r.removeFromTop(kControlRowGap);
+            row = r.removeFromTop(kControlRowHeight);
+            bendScaleBox.setBounds(row.removeFromRight(row.getWidth() * 3 / 5));
+            bendScaleLabel.setBounds(row);
+        }
+
+        r.removeFromTop(GuiConstants::groupGap);
         dividerY = r.removeFromTop(1).getY();
         r.removeFromTop(GuiConstants::groupGap);
 
@@ -213,13 +285,21 @@ private:
     static constexpr int kHeadingGap{8};
     static constexpr int kSwatchHeight{26};
     static constexpr int kFactRowHeight{18};
+    static constexpr int kControlRowHeight{24};
+    static constexpr int kControlRowGap{6};
 
     std::vector<Fact> facts;
-    Label accentHeading, buildHeading;
+    Label accentHeading, midiHeading, buildHeading;
+    Label bendRangeLabel, bendScaleLabel;
     AccentListLookAndFeel accentListLookAndFeel;
     juce::ComboBox accentBox;
+    juce::ComboBox bendRangeBox, bendScaleBox;
+    // Declared after the boxes they attach to, so they are destroyed first.
+    std::unique_ptr<AudioProcessorValueTreeState::ComboBoxAttachment> bendRangeAttachment;
+    std::unique_ptr<AudioProcessorValueTreeState::ComboBoxAttachment> bendScaleAttachment;
     juce::OwnedArray<Label> factKeys, factValues;
     int dividerY{0};
+    int midiDividerY{0};
     std::function<void(Juicy16::Accent)> chooseAccent;
 };
 
@@ -345,6 +425,7 @@ void JuicySFAudioProcessorEditor::showSettings() {
     };
 
     auto panel{std::make_unique<SettingsPanel>(
+        valueTreeState,
         lookAndFeel.getAccent(),
         std::move(facts),
         [this](Juicy16::Accent accent) {

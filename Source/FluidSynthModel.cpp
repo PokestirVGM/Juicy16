@@ -6,6 +6,7 @@
 #include <iterator>
 #include <cstring>
 #include <array>
+#include <algorithm>
 #include <fluidsynth.h>
 #include "FluidSynthModel.h"
 #include "MidiConstants.h"
@@ -214,6 +215,8 @@ FluidSynthModel::FluidSynthModel(
             lastKeyPressureValue[i][value].store(-1, std::memory_order_relaxed);
             lastKeyPressureSample[i][value].store(-1, std::memory_order_relaxed);
         }
+        engineBendRange[i].store(-1, std::memory_order_relaxed);
+        resetRpnTracking(i);
         for (int c = 0; c < kNumMixerCcs; c++) {
             midiCcValue[i][c].store(-1, std::memory_order_relaxed);
             // Seed from the same GM defaults the ValueTree and the parameters use,
@@ -227,6 +230,8 @@ FluidSynthModel::FluidSynthModel(
     valueTreeState.addParameterListener("bank", this);
     valueTreeState.addParameterListener("preset", this);
     valueTreeState.addParameterListener("outputLevel", this);
+    valueTreeState.addParameterListener("bendRange", this);
+    valueTreeState.addParameterListener("bendScale", this);
     valueTreeState.addParameterListener("reverbOn", this);
     valueTreeState.addParameterListener("reverbProfile", this);
     for (int i = 0; i < numReverbParams; ++i) {
@@ -258,6 +263,8 @@ FluidSynthModel::~FluidSynthModel() {
     valueTreeState.removeParameterListener("bank", this);
     valueTreeState.removeParameterListener("preset", this);
     valueTreeState.removeParameterListener("outputLevel", this);
+    valueTreeState.removeParameterListener("bendRange", this);
+    valueTreeState.removeParameterListener("bendScale", this);
     valueTreeState.removeParameterListener("reverbOn", this);
     valueTreeState.removeParameterListener("reverbProfile", this);
     for (int i = 0; i < numReverbParams; ++i)
@@ -342,6 +349,10 @@ void FluidSynthModel::createSynth() {
     for (int ch = 0; ch < kNumChannels; ++ch)
         fluid_synth_cc(synth.get(), ch, static_cast<int>(EFFECTS_DEPTH1),
                        MidiConstants::defaultReverbSend);
+
+    // A fresh synth is at the default two semitones everywhere; processBlock
+    // re-applies the override, and refreshBanks the remembered per-channel ranges.
+    bendRangeOverrideDirty.store(true, std::memory_order_release);
 
     // No modulators are installed here any more.
     //
@@ -518,6 +529,20 @@ void FluidSynthModel::parameterChanged(const String& parameterID, float /*newVal
         if (auto* p{dynamic_cast<juce::AudioParameterFloat*>(
                 valueTreeState.getParameter(parameterID))})
             setOutputLevelDb(p->get());
+        return;
+    }
+    if (parameterID == "bendRange" || parameterID == "bendScale") {
+        // Host bend compensation. May arrive on the audio thread; store only.
+        int value{0};
+        if (auto* p{dynamic_cast<AudioParameterInt*>(
+                valueTreeState.getParameter(parameterID))})
+            value = p->get();
+        if (parameterID == "bendScale") {
+            bendScale.store(juce::jmax(1, value), std::memory_order_relaxed);
+        } else {
+            bendRangeOverride.store(juce::jmax(0, value), std::memory_order_relaxed);
+            bendRangeOverrideDirty.store(true, std::memory_order_release);
+        }
         return;
     }
     // Reverb. Like outputLevel, these may arrive on the audio thread from host
@@ -1495,6 +1520,9 @@ void FluidSynthModel::refreshBanks() {
                         static_cast<int>(ch.getProperty(paramID, defaultParamValue(paramID))),
                         std::memory_order_relaxed);
             }
+            // ...and the bend range the MIDI stream last set, which a rebuilt
+            // synth (sample-rate change) would otherwise have forgotten.
+            reassertBendRange(chNum);
         }
     }
 
@@ -1655,6 +1683,318 @@ void FluidSynthModel::dispatchSysEx(const uint8_t* payload, int payloadBytes) {
         // right answer after a reset.
         fluid_synth_cc(synth.get(), ch, static_cast<int>(EFFECTS_DEPTH1),
                        MidiConstants::defaultReverbSend);
+        // The reset nulled the RPN and returned the bend range to two
+        // semitones. Re-assert the range the file established, for the same
+        // reason programs are re-asserted: on a replay the host's parameter
+        // cache still holds the RPN and it is never sent again.
+        resetRpnTracking(ch);
+        reassertBendRange(ch);
+    }
+}
+
+void FluidSynthModel::resetRpnTracking(int ch) {
+    rpnMsb[ch] = 127;
+    rpnLsb[ch] = 127;
+    nrpnActive[ch] = false;
+    dataMsb[ch] = 0;
+    dataLsb[ch] = 0;
+}
+
+// Follows the RPN selection the way FluidSynth does, so a Data Entry can be
+// recognised as a bend-range write and remembered. Reset All Controllers nulls
+// the selection and zeroes Data Entry, as FluidSynth's channel init does.
+void FluidSynthModel::noteControllerForBendRange(int ch, int cc, int value) {
+    switch (cc) {
+        case RPN_MSB:  rpnMsb[ch] = value; nrpnActive[ch] = false; return;
+        case RPN_LSB:  rpnLsb[ch] = value; nrpnActive[ch] = false; return;
+        case NRPN_MSB:
+        case NRPN_LSB: nrpnActive[ch] = true; return;
+        case ALL_CTRL_OFF: resetRpnTracking(ch); return;
+        case DATA_ENTRY_MSB: dataMsb[ch] = value; break;
+        case DATA_ENTRY_LSB: dataLsb[ch] = value; break;
+        default: return;
+    }
+    if (nrpnActive[ch] || rpnMsb[ch] != 0 || rpnLsb[ch] != 0)
+        return;
+    engineBendRange[ch].store((dataMsb[ch] << 7) | dataLsb[ch], std::memory_order_relaxed);
+    applyBendRangeOverride(ch); // the override outranks the file
+}
+
+void FluidSynthModel::applyBendRangeOverride(int ch) {
+    const int forced{bendRangeOverride.load(std::memory_order_relaxed)};
+    if (forced > 0 && synth != nullptr)
+        fluid_synth_pitch_wheel_sens(synth.get(), ch, forced);
+}
+
+// Through the RPN rather than fluid_synth_pitch_wheel_sens, so the cents in the
+// Data Entry LSB survive. Leaves the RPN null, which is where a reset put it.
+void FluidSynthModel::reassertBendRange(int ch) {
+    const int range{engineBendRange[ch].load(std::memory_order_relaxed)};
+    if (range >= 0 && synth != nullptr) {
+        fluid_synth_cc(synth.get(), ch, RPN_MSB, 0);
+        fluid_synth_cc(synth.get(), ch, RPN_LSB, 0);
+        fluid_synth_cc(synth.get(), ch, DATA_ENTRY_MSB, range >> 7);
+        fluid_synth_cc(synth.get(), ch, DATA_ENTRY_LSB, range & 127);
+        fluid_synth_cc(synth.get(), ch, RPN_MSB, 127);
+        fluid_synth_cc(synth.get(), ch, RPN_LSB, 127);
+    }
+    applyBendRangeOverride(ch);
+}
+
+void FluidSynthModel::applyBendRangeChangeFromAudioThread() {
+    if (!bendRangeOverrideDirty.exchange(false, std::memory_order_acq_rel) || synth == nullptr)
+        return;
+    const int forced{bendRangeOverride.load(std::memory_order_relaxed)};
+    for (int ch = 0; ch < kNumChannels; ++ch) {
+        if (forced > 0) {
+            fluid_synth_pitch_wheel_sens(synth.get(), ch, forced);
+            continue;
+        }
+        // Back to what the file established. Whole semitones: this must not
+        // disturb the live RPN selection, and the file's next RPN restores cents.
+        const int range{engineBendRange[ch].load(std::memory_order_relaxed)};
+        fluid_synth_pitch_wheel_sens(synth.get(), ch, range >= 0 ? range >> 7 : 2);
+    }
+}
+
+namespace {
+enum GroupKind : juce::uint8 {
+    kindSysEx, kindBank, kindProgram, kindRpnSelect, kindRpnNull, kindData, kindOther
+};
+
+// Dispatch tier per kind: resets first, then what a Program Change needs, the
+// Program Change itself, everything ordinary, and the RPN machinery last - a
+// Reset All Controllers written ahead of it in the file still lands ahead.
+int groupTier(juce::uint8 kind) {
+    switch (kind) {
+        case kindSysEx:   return 0;
+        case kindBank:    return 1;
+        case kindProgram: return 2;
+        case kindOther:   return 3;
+        default:          return 4;
+    }
+}
+
+juce::uint8 classifyGroupEvent(const juce::uint8* d, int n, int& channel, int& cc, int& value) {
+    channel = 0;
+    cc = 0;
+    value = 0;
+    if (d == nullptr || n < 1)
+        return kindOther;
+    if (d[0] == 0xf0)
+        return kindSysEx;
+    const int status{d[0] & 0xf0};
+    if (status < 0x80 || status == 0xf0)
+        return kindOther;
+    channel = d[0] & 0x0f;
+    if (status == 0xc0)
+        return kindProgram;
+    if (status != 0xb0 || n < 3)
+        return kindOther;
+    cc = d[1];
+    value = d[2];
+    switch (cc) {
+        case BANK_SELECT_MSB:
+        case BANK_SELECT_LSB:
+            return kindBank;
+        case RPN_MSB:
+        case RPN_LSB:
+        case NRPN_MSB:
+        case NRPN_LSB:
+            return value == 127 ? kindRpnNull : kindRpnSelect;
+        case DATA_ENTRY_MSB:
+        case DATA_ENTRY_LSB:
+        case DATA_ENTRY_INCR:
+        case DATA_ENTRY_DECR:
+            return kindData;
+        default:
+            return kindOther;
+    }
+}
+
+// Slot 0-7 for the eight RPN-machinery controllers. Selector pairs are adjacent
+// so a partner is slot ^ 1.
+int rpnSlot(int cc) {
+    switch (cc) {
+        case RPN_MSB:         return 0;
+        case RPN_LSB:         return 1;
+        case NRPN_MSB:        return 2;
+        case NRPN_LSB:        return 3;
+        case DATA_ENTRY_MSB:  return 4;
+        case DATA_ENTRY_LSB:  return 5;
+        case DATA_ENTRY_INCR: return 6;
+        default:              return 7;
+    }
+}
+} // namespace
+
+void FluidSynthModel::dispatchGroupEvent(const GroupEvent& e, int eventPosition) {
+    if (e.kind == kindSysEx) {
+        // Straight from the buffer: MidiMessage copies any SysEx longer than
+        // four bytes to the heap, and game rips carry a reset at tick 0.
+        if (e.numBytes >= 2)
+            dispatchSysEx(e.data + 1, e.numBytes - 2);
+        return;
+    }
+    dispatchMidiEvent(
+        juce::MidiMessage{e.data, e.numBytes, static_cast<double>(eventPosition)},
+        eventPosition);
+}
+
+void FluidSynthModel::dispatchTimestampGroup(juce::MidiBufferIterator begin,
+                                             juce::MidiBufferIterator end,
+                                             int eventPosition) {
+    int count{0};
+    bool plain{true};
+    for (auto it = begin; it != end; ++it) {
+        if (count == kMaxGroupEvents) {
+            // More than the scratch holds: the host's order, nothing dropped.
+            for (auto rest = begin; rest != end; ++rest) {
+                const auto m = *rest;
+                GroupEvent raw{};
+                int ch{0}, cc{0}, value{0};
+                raw.data = m.data;
+                raw.numBytes = m.numBytes;
+                raw.kind = classifyGroupEvent(m.data, m.numBytes, ch, cc, value);
+                dispatchGroupEvent(raw, eventPosition);
+            }
+            return;
+        }
+        const auto m = *it;
+        GroupEvent& e{groupScratch[static_cast<std::size_t>(count)]};
+        int ch{0}, cc{0}, value{0};
+        e.data = m.data;
+        e.numBytes = m.numBytes;
+        e.index = count;
+        e.kind = classifyGroupEvent(m.data, m.numBytes, ch, cc, value);
+        e.channel = static_cast<juce::uint8>(ch);
+        e.cc = static_cast<juce::uint8>(cc);
+        e.value = static_cast<juce::uint8>(value);
+        e.unit = e.round = e.subTier = e.ccRank = 0;
+        plain = plain && e.kind == kindOther;
+        ++count;
+    }
+    if (count > 1 && !plain) {
+        for (int ch = 0; ch < kNumChannels; ++ch)
+            orderChannelRpn(ch, count);
+        std::sort(groupScratch.begin(), groupScratch.begin() + count,
+                  [](const GroupEvent& a, const GroupEvent& b) {
+                      const int ta{groupTier(a.kind)}, tb{groupTier(b.kind)};
+                      if (ta != tb)
+                          return ta < tb;
+                      if (ta == 4) {
+                          if (a.channel != b.channel) return a.channel < b.channel;
+                          if (a.unit != b.unit)       return a.unit < b.unit;
+                          if (a.round != b.round)     return a.round < b.round;
+                          if (a.subTier != b.subTier) return a.subTier < b.subTier;
+                          if (a.ccRank != b.ccRank)   return a.ccRank < b.ccRank;
+                      }
+                      return a.index < b.index;
+                  });
+    }
+    for (int i = 0; i < count; ++i)
+        dispatchGroupEvent(groupScratch[static_cast<std::size_t>(i)], eventPosition);
+}
+
+// Puts one channel's RPN machinery - selectors, nulls, Data Entries - into
+// select -> write -> deselect order without disturbing a file that already
+// has it.
+//
+// The events split into runs of selectors and runs of Data Entries. A data run
+// and the selector run before it form a unit, which is how a sequenced file
+// reads: select, write, usually deselect. Within a unit the k-th write of each
+// controller goes after the k-th selection and before the k-th null, which is
+// exactly what survives a host that delivers each controller's queue back to
+// back. A trailing selector run with no data of its own joins the unit before
+// it when it completes that unit - the unit selected nothing yet, or the run
+// supplies the other half of a pair whose first half is already there - and
+// otherwise stays in buffer order. Nulls ahead of everything else in a unit
+// stay ahead, so a defensive null before a selection is left alone.
+void FluidSynthModel::orderChannelRpn(int midiCh, int count) {
+    int n{0};
+    for (int i = 0; i < count; ++i) {
+        const GroupEvent& e{groupScratch[static_cast<std::size_t>(i)]};
+        if (e.channel == midiCh
+            && (e.kind == kindRpnSelect || e.kind == kindRpnNull || e.kind == kindData))
+            rpnScratch[static_cast<std::size_t>(n++)] = i;
+    }
+    if (n < 2)
+        return;
+    const auto at = [this](int k) -> GroupEvent& {
+        return groupScratch[static_cast<std::size_t>(rpnScratch[static_cast<std::size_t>(k)])];
+    };
+
+    int units{1};
+    bool lastWasData{false};
+    for (int k = 0; k < n; ++k) {
+        GroupEvent& e{at(k)};
+        const bool isData{e.kind == kindData};
+        if (k > 0 && !isData && lastWasData)
+            ++units;
+        e.unit = static_cast<juce::int16>(units - 1);
+        lastWasData = isData;
+    }
+
+    if (units > 1 && !lastWasData) {
+        const int last{units - 1}, prev{units - 2};
+        unsigned prevSelected{0}, lastSelected{0};
+        for (int k = 0; k < n; ++k) {
+            const GroupEvent& e{at(k)};
+            if (e.kind != kindRpnSelect)
+                continue;
+            const unsigned bit{1u << rpnSlot(e.cc)};
+            if (e.unit == prev)
+                prevSelected |= bit;
+            else if (e.unit == last)
+                lastSelected |= bit;
+        }
+        bool merge{prevSelected == 0};
+        if (!merge && lastSelected != 0) {
+            merge = true;
+            for (int slot = 0; slot < 4; ++slot) {
+                if ((lastSelected & (1u << slot)) == 0)
+                    continue;
+                if ((prevSelected & (1u << slot)) != 0
+                    || (prevSelected & (1u << (slot ^ 1))) == 0)
+                    merge = false;
+            }
+        }
+        if (merge) {
+            for (int k = 0; k < n; ++k)
+                if (GroupEvent& e{at(k)}; e.unit == last)
+                    e.unit = static_cast<juce::int16>(prev);
+            --units;
+        }
+    }
+
+    for (int u = 0; u < units; ++u) {
+        bool hasData{false};
+        for (int k = 0; k < n; ++k)
+            hasData = hasData || (at(k).unit == u && at(k).kind == kindData);
+        if (!hasData)
+            continue; // selectors alone stay in buffer order
+        int occurrence[4][8]{};
+        int rank[4][8];
+        int nextRank[4]{};
+        std::fill(&rank[0][0], &rank[0][0] + 32, -1);
+        bool seenSelectOrData{false};
+        for (int k = 0; k < n; ++k) {
+            GroupEvent& e{at(k)};
+            if (e.unit != u)
+                continue;
+            int sub{0};
+            if (e.kind == kindRpnSelect) { seenSelectOrData = true; sub = 1; }
+            else if (e.kind == kindData) { seenSelectOrData = true; sub = 2; }
+            else sub = seenSelectOrData ? 3 : 0;
+            if (sub == 0)
+                continue; // leading null: buffer order, ahead of the unit
+            const int slot{rpnSlot(e.cc)};
+            if (rank[sub][slot] < 0)
+                rank[sub][slot] = nextRank[sub]++;
+            e.subTier = static_cast<juce::int16>(sub);
+            e.round = static_cast<juce::int16>(occurrence[sub][slot]++);
+            e.ccRank = static_cast<juce::int16>(rank[sub][slot]);
+        }
     }
 }
 
@@ -1709,6 +2049,8 @@ void FluidSynthModel::dispatchMidiEvent(const MidiMessage& m, int samplePosition
                 midiCh,
                 m.getControllerNumber(),
                 m.getControllerValue());
+            noteControllerForBendRange(
+                midiCh, m.getControllerNumber(), m.getControllerValue());
             restoreSixteenChannelLayout(m.getControllerNumber());
 
             // Mirror mapped sound controllers (CC71-79) into the channel's saved
@@ -1726,10 +2068,10 @@ void FluidSynthModel::dispatchMidiEvent(const MidiMessage& m, int samplePosition
         } else if (m.isProgramChange()) {
             applyProgramChangeFromAudioThread(midiCh, m.getProgramChangeNumber());
         } else if (m.isPitchWheel()) {
-            fluid_synth_pitch_bend(
-                synth.get(),
-                midiCh,
-                m.getPitchWheelValue());
+            int bend{m.getPitchWheelValue()};
+            if (const int scale{bendScale.load(std::memory_order_relaxed)}; scale > 1)
+                bend = juce::jlimit(0, 16383, 8192 + (bend - 8192) * scale);
+            fluid_synth_pitch_bend(synth.get(), midiCh, bend);
         } else if (m.isChannelPressure()) {
             lastChannelPressureValue[midiCh].store(
                 m.getChannelPressureValue(), std::memory_order_relaxed);
@@ -1913,6 +2255,7 @@ void FluidSynthModel::processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiM
     // Reverb settings first, so a note rendered in this block is heard through
     // the reverb this block was asked for rather than the previous one's.
     applyReverbFromAudioThread(numSamples);
+    applyBendRangeChangeFromAudioThread();
 
     // MidiBuffer is timestamp ordered. Render the audio before each event, apply all
     // events at that timestamp in buffer order, then continue. This preserves Bank

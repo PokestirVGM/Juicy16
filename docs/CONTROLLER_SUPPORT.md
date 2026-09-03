@@ -27,6 +27,15 @@ the Data Entry LSB is clearly in effect. `getPitchWheelSensitivity` reports whol
 semitones only, which is a limit of that diagnostic accessor and not of the
 engine. The offline suite asserts this in the audio domain at 48 kHz.
 
+A GM/GS/XG reset SysEx re-asserts, on each channel, the bend range the MIDI
+stream last set there — through the RPN itself, so cents survive, leaving the
+RPN null as the reset left it. This is the program re-assert policy applied to
+bend range, and for the same reason: under VST3 the RPN controllers are host
+parameters that the host's cache does not send twice, so on every replay the
+tick-0 reset would otherwise leave the channel at two semitones. A channel the
+stream never configured resets to two. Reset All Controllers (CC121) keeps the
+range, as FluidSynth always did.
+
 Bank Select is mode-dependent state for the next Program Change, never a patch
 change by itself. Juicy16 explicitly pins FluidSynth's initial mode to GS for
 Beta 1: CC0 selects the pending bank, while CC32 is still delivered/stored but
@@ -66,6 +75,29 @@ preset all resolve to the font's own bank numbering.
 
 Pitch bend itself is not a paired 7-bit CC and retains its complete 14-bit range.
 
+## Same-timestamp ordering
+
+A MidiBuffer keeps equal timestamps in insertion order. Under VST3 that is the
+host's parameter-queue order, not the file's: every CC is a separate parameter,
+Program Change arrives through a parameter too, and a SysEx is an event that
+JUCE's wrapper copies in *after* the parameter queue. So at a game rip's tick 0
+the GM reset can reach the synth after the RPN written to follow it, Bank
+Select after the Program Change that consumes it, and an RPN Data Entry before
+or after the selector it belongs to.
+
+Juicy16 therefore orders each timestamp's events by role before dispatch:
+reset and other SysEx first, then Bank Select, then Program Change, then every
+ordinary message in buffer order, then the RPN/NRPN machinery last (so a Reset
+All Controllers written ahead of it still lands ahead). The RPN machinery is
+rebuilt per channel as select → write → deselect from the one thing VST3 does
+preserve, each controller's own queue order: the k-th Data Entry of a unit
+goes after the k-th selection and before the k-th null, a trailing selector run
+joins the unit it completes, and a null written ahead of everything stays
+ahead. A correctly ordered file is left as written; the suite pins RPN with a
+trailing null, two nulled RPN blocks on one tick, NRPN followed by RPN on one
+tick, and the VST3 shapes (queues back to back, MSB and LSB queues straddling
+the Data Entry, the reset queued last). Limits are in `KNOWN_ISSUES.md`.
+
 ## Common controller interpretation
 
 | Controllers | Beta 1 behavior |
@@ -76,7 +108,7 @@ Pitch bend itself is not a paired 7-bit CC and retains its complete 14-bit range
 | CC66 | FluidSynth sostenuto pedal. It captures voices already active when the pedal is pressed. |
 | CC67 | Delivered as the soft-pedal controller; audible behavior depends on bank modulators. |
 | CC91/93 | Per-channel reverb and chorus sends, delivered exactly. CC91 feeds the reverb described below. CC93 reaches the engine but the chorus is switched off, so it does nothing audible — see below. |
-| CC98/99, CC100/101, CC6/38 | FluidSynth NRPN/RPN selection and Data Entry. RPN 0,0 bend range and RPN Null are regression-tested. |
+| CC98/99, CC100/101, CC6/38 | FluidSynth NRPN/RPN selection and Data Entry. RPN 0,0 bend range and RPN Null are regression-tested, including same-timestamp order under VST3 (above). |
 | CC120 | All Sound Off immediately silences the addressed channel. |
 | CC121 | Reset All Controllers resets switches, expression, RPN/NRPN selection, pressure, and pitch wheel. FluidSynth intentionally preserves bank, volume, pan, effects sends, sound controls CC70–79, and the configured bend range. |
 | CC122 | Local Control is accepted/stored by FluidSynth but intentionally has no synthesis action in this plugin engine. |
@@ -282,3 +314,22 @@ back without pushing anything past full scale — across a 24-file corpus the
 loudest rip peaks at -1.61 dBFS. It does not close the gap; that would need a
 limiter, which Beta 1 deliberately does not have. Raise the trim per project if
 you want more.
+
+## Bend range override and bend scale
+
+Two compensations for hosts that damage pitch bend on the way in, both in the
+settings popover, both real parameters, both off by default. Neither is a MIDI
+controller; nothing in a file changes them.
+
+| Control | Parameter | Range | Default | What it does |
+|---|---|---|---|---|
+| Bend range | `bendRange` | Follow the MIDI file, or 1–24 semitones | follow | Forces one bend range on all 16 channels. Outranks the file's RPN, survives a reset SysEx and a synth rebuild. Clearing it restores each channel's own range. |
+| Bend scale | `bendScale` | ×1–×24 | ×1 | Multiplies every incoming bend about centre (8192) and clamps to 0–16383 before it reaches the engine. |
+
+**FL Studio** is the reason they exist. FL imports every MIDI pitch bend as
+plus or minus two semitones whatever the file's RPN said, so a rip written for
+12 semitones plays its bends six times too small; its wrapper's *Send pitch bend
+range* is off by default and sends one range on one channel. For a 12-semitone
+rip start with bend scale ×6. If FL never delivers the RPN to the plugin at all,
+bend range override 12 is the fix instead — a ×6 on full-size bends would clamp.
+Which of the two FL actually needs has not been established in FL.

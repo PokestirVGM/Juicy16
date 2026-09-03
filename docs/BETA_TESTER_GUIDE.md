@@ -169,8 +169,11 @@ chooses which channel the on-screen keyboard auditions.
 
 The panel on the right holds what is global rather than per channel: the master
 output trim, the reverb, and a summary of the loaded bank. The header carries the bank picker
-and a settings button; settings holds the accent colour and the build details
-worth quoting in a bug report (version, FluidSynth version, plugin format, sample
+and a settings button; settings holds the accent colour, two pitch-bend
+compensations for hosts that damage bends on the way in (*Bend range* and
+*Bend scale* — leave both off unless bends are plainly too small; see
+[CONTROLLER_SUPPORT.md](CONTROLLER_SUPPORT.md)), and the build details worth
+quoting in a bug report (version, FluidSynth version, plugin format, sample
 rate).
 
 Two things to know about the row controls:
@@ -179,6 +182,12 @@ Two things to know about the row controls:
   The next CC7 or CC10 the file sends on that channel replaces it, at that
   event's timestamp — the same rule the instrument dropdowns follow for Program
   Change. This is intended; please do not report it as a defect.
+- **If a channel sounds too loud or too quiet, look at its Vol knob first.**
+  It shows the CC7 the file last sent. A knob that disagrees with the file is
+  a plugin defect; a knob that agrees means the level is what the file asked
+  for, and the report needs the file, channel, instrument, host, and what you
+  are comparing against. [KNOWN_ISSUES.md](KNOWN_ISSUES.md) lists host-side
+  settings that change a channel's volume behind the file's back.
 - **Mute and solo do not follow the MIDI file.** Nothing in a MIDI file changes
   them, and no reset clears them. A muted channel stops sounding new notes but
   still receives everything else, so unmuting mid-song picks up correctly.

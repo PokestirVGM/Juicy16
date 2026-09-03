@@ -1,5 +1,75 @@
 # Changelog
 
+## 0.6.1-beta.1 — unreleased
+
+What Beta 1 testing turned up. Offline evidence only so far: the engine suite
+grew from 149 to 158 checks and the eight new ones fail against the Beta 1
+engine; nothing below has been re-confirmed in a DAW yet.
+
+### Fixed
+
+- **Pitch-bend range wrong in Cubase, on some files, some of the time.** Two
+  defects in how events sharing one timestamp are ordered, and a third in what
+  a reset does to the range.
+
+  1. Under VST3 every CC is a host parameter and a SysEx is an event. JUCE's
+     wrapper converts the parameter queue *before* it copies the event list,
+     so a game rip's tick-0 GM reset reached the synth AFTER the RPN bend-range
+     controllers the file wrote to follow it — and FluidSynth's reset put the
+     channel back to two semitones. Every VGMTrans rip in the corpus has this
+     exact tick 0. The reset SysEx is now applied first within its timestamp.
+  2. The Beta 1 fix that hoisted selector controllers within a timestamp also
+     hoisted the RPN Null (CC101/100 = 127) a sequenced file writes after its
+     Data Entry, so the Data Entry landed on a null RPN and was ignored. That
+     one applied in every format, not only VST3. Same-timestamp events are now
+     ordered by role — reset SysEx, Bank Select, Program Change, ordinary
+     messages, then the RPN machinery — and the RPN machinery is rebuilt per
+     channel as select → write → deselect, using the one thing a VST3 host does
+     preserve (each controller's own queue order). A correctly ordered file is
+     left exactly as written; the suite pins that for RPN with a trailing null,
+     two nulled RPN blocks on one tick, and NRPN followed by RPN on one tick.
+  3. On a replay the host's parameter cache still holds the RPN controllers
+     from the first play and does not send them again — the same mechanism
+     that stripped channel programs in 0.3.x — so the tick-0 reset left the
+     channel at two semitones on every play but the first. A GM/GS/XG reset now
+     re-asserts the bend range the MIDI stream last set on each channel, cents
+     included, exactly as it re-asserts programs, volume and pan. A channel the
+     file never configured still resets to two semitones. The trade-off is
+     recorded in `docs/KNOWN_ISSUES.md`.
+
+  The "sometimes" was the third defect: first play correct, replays wrong, and
+  whichever file had played before deciding what the reset left behind.
+
+### Added
+
+- **Bend range override and bend scale**, in the settings popover and as the
+  parameters `bendRange` and `bendScale`, appended after the frozen Beta 1
+  manifest so no index moves. Both default to off. FL Studio imports every
+  MIDI pitch bend as plus or minus two semitones whatever the file's RPN asked
+  for — reported on the Image-Line forums since 2009, marked fixed in 2023,
+  still reported afterwards — and its wrapper only sends a bend range if asked.
+  *Bend scale* multiplies every incoming bend about centre and clamps to the
+  14-bit range: ×6 restores a rip written for 12 semitones. *Bend range
+  override* forces one range on all 16 channels, outranks the file's RPN and
+  survives a reset, for a host that never delivers the RPN at all. Clearing it
+  returns each channel to the range the file set.
+
+### Changed
+
+- **Version 0.6.1.** The Beta 1 tag stays `0.6.0-beta.1`; this build reads
+  `0.6.1-beta.1` in the status bar and the settings popover.
+- **Same-timestamp groups are bounded at 2048 events.** Beyond that the
+  host's own order is used and nothing is dropped.
+
+### Open
+
+- **Per-channel loudness.** Testers hear some channels louder than they
+  should be. No plugin-side cause was found: the CC7/CC11/velocity curves match
+  BASSMIDI within 0.26 dB on SF2, and FluidSynth 2.5.5's native DLS loader
+  applies the same volume, expression, velocity and pan modulators. What is
+  needed is a named file, channel, instrument, host and reference player; see
+  `docs/KNOWN_ISSUES.md` for what to check on the host side first.
+
 ## 0.6.0-beta.1 — Beta 1
 
 The first release. macOS 11 or later on Apple Silicon, AU and VST3, ad-hoc

@@ -29,10 +29,13 @@ volCh1 .. volCh16,
 panCh1 .. panCh16,
 muteCh1 .. muteCh16,
 soloCh1 .. soloCh16,
-progCh1 .. progCh16
+progCh1 .. progCh16,
+bendRange, bendScale
 ```
 
-That is 89 parameters. The selected-channel `volume` and `pan` parameters that
+That is 89 parameters at Beta 1. `0.6.1` appends `bendRange` and `bendScale`
+after them, 91 in total, so no Beta 1 index moves: a Beta 1 host that never saw
+them ignores them, and a Beta 1 save opens with both at their off defaults. The selected-channel `volume` and `pan` parameters that
 schema 4 carried are **retired**: volume and pan are per channel now, so every
 channel is automatable rather than only whichever row the editor had selected.
 
@@ -99,6 +102,8 @@ progCh9          0x6D8E6EBA    progCh10        0x443F67BE
 progCh11         0x443F67BF    progCh12        0x443F67C0
 progCh13         0x443F67C1    progCh14        0x443F67C2
 progCh15         0x443F67C3    progCh16        0x443F67C4
+
+bendRange        0x284C8F84    bendScale       0x285B5F91
 ```
 
 The 16 `progChN` IDs and all 16 channel unit IDs are **unchanged** from schema 4.
@@ -112,6 +117,8 @@ and `outputLevel` spans -24 to +12 dB. `reverbOn` is a two-state boolean,
 `reverbProfile` is a 3-entry choice (`Universal`, `Soft`, `Custom`, in that
 order — the index is what a host stores, so the order is frozen), and
 `reverbSize`, `reverbDamp`, `reverbWidth` and `reverbLevel` each span 0 to 1.
+`bendRange` spans 0-24 semitones, 0 meaning "follow the MIDI file", and
+`bendScale` spans ×1 to ×24.
 `reverbWidth` is deliberately narrowed from FluidSynth's own 0-100: everything
 musically useful lives below 1, and the full range would put it all inside the
 first one percent of a knob's travel. `bank` reaches 255 rather than 128 because
@@ -119,7 +126,7 @@ a channel's runtime bank is FluidSynth's 128 drum offset plus the Bank Select
 MSB; it was widened on 2026-08-23, before the freeze, and moves no further.
 
 The state root is `MYPLUGINSETTINGS`, the Beta 1 schema is version `6`, and the
-writer persists all 89 parameter values, 16 channel records (each carrying
+writer persists all 91 parameter values, 16 channel records (each carrying
 `bank`, `preset`, `volume`, `pan`, `mute`, and `solo`), UI state, and the
 SoundFont path/bookmark record. See
 this document for migration policy.

@@ -90,7 +90,7 @@ namespace ProjectInfo
 {
     const char* const  projectName    = "Juicy16";
     const char* const  companyName    = "Pokestir";
-    const char* const  versionString  = "0.6.0";
+    const char* const  versionString  = "0.6.1";
     const int          versionNumber  =  0x600;
 }
 #endif

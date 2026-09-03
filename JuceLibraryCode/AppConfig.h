@@ -366,7 +366,7 @@
  #define JucePlugin_VersionCode            0x600
 #endif
 #ifndef  JucePlugin_VersionString
- #define JucePlugin_VersionString          "0.6.0"
+ #define JucePlugin_VersionString          "0.6.1"
 #endif
 #ifndef  JucePlugin_VSTUniqueID
  #define JucePlugin_VSTUniqueID            JucePlugin_PluginCode

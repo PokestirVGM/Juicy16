@@ -15,7 +15,7 @@ cmake_minimum_required(VERSION 3.15)
 # `project()` command. `project()` sets up some helpful variables that describe source/binary
 # directories, and the current project version. This is a standard CMake command.
 
-project(JUICY16 VERSION 0.6.0)
+project(JUICY16 VERSION 0.6.1)
 # Deliberately NOT a plain CACHE default. A cached default is written once and
 # then ignored, so bumping the label here left every existing build directory
 # building - and displaying - the label it was first configured with. The version

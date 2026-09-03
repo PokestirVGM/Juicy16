@@ -9,6 +9,7 @@
 #include <memory>
 #include <map>
 #include <atomic>
+#include <array>
 #include "MidiConstants.h"
 
 using namespace std;
@@ -220,11 +221,11 @@ private:
                                   int numSamples);
 
     // Walks the block's events in timestamp order, rendering the gap before each
-    // one through `renderSegment(from, count)` and then dispatching it.
+    // group through `renderSegment(from, count)` and then dispatching the group.
     // `mapPosition` converts a host sample position into the domain being
     // rendered: the host block itself normally, or the internal FIFO when
-    // oversampling. Both callers share this so the SysEx handling below cannot
-    // drift between them.
+    // oversampling. Everything sharing one timestamp goes through
+    // dispatchTimestampGroup, which puts it in an order the synth can act on.
     template <typename RenderSegment, typename MapPosition>
     void dispatchTimestampedEvents(MidiBuffer& midiMessages,
                                    int numSamples,
@@ -239,68 +240,72 @@ private:
                 renderSegment(renderPosition, target - renderPosition);
                 renderPosition = target;
             }
-
-            // Everything sharing this timestamp, as one group. A MidiBuffer keeps
-            // equal timestamps in insertion order, and under VST3 that order is
-            // the host's parameter-queue order rather than anything musical: each
-            // CC is a separate parameter, so Bank Select can arrive after the
-            // Program Change that consumes it, and an RPN Data Entry can arrive
-            // before the RPN it was meant to set. Selector controllers are
-            // therefore applied first within the group. Correctly ordered input is
-            // unaffected, because there the selectors already come first.
-            const auto groupBegin = it;
             auto groupEnd = it;
             while (groupEnd != midiMessages.end()
                    && juce::jlimit(0, numSamples, (*groupEnd).samplePosition) == eventPosition)
                 ++groupEnd;
-
-            for (int pass = 0; pass < 2; ++pass) {
-                for (auto scan = groupBegin; scan != groupEnd; ++scan) {
-                    const auto metadata = *scan;
-                    // MidiMessage copies anything longer than four bytes to the heap,
-                    // which would allocate on the audio thread for every SysEx - and
-                    // game rips carry a GM/GS/XG reset at tick 0. Dispatch those
-                    // straight from the buffer's own storage instead; short messages
-                    // stay inline and free.
-                    const bool isSysEx{metadata.numBytes > 4 && metadata.data[0] == 0xf0};
-                    if (isSelectorController(metadata.data, metadata.numBytes) != (pass == 0))
-                        continue;
-                    if (isSysEx) {
-                        if (metadata.numBytes >= 2)
-                            dispatchSysEx(metadata.data + 1, metadata.numBytes - 2);
-                        continue;
-                    }
-                    dispatchMidiEvent(metadata.getMessage(), eventPosition);
-                }
-            }
+            dispatchTimestampGroup(it, groupEnd, eventPosition);
             it = groupEnd;
         }
         if (renderLimit > renderPosition)
             renderSegment(renderPosition, renderLimit - renderPosition);
     }
 
-    // Controllers that only select what a following message will act on: Bank
-    // Select MSB/LSB ahead of a Program Change, and the RPN/NRPN selectors ahead
-    // of a Data Entry. They carry no sound of their own, so hoisting them within
-    // one timestamp cannot change what is heard - it can only stop the message
-    // that consumes them acting on a stale selection.
-    static bool isSelectorController(const juce::uint8* data, int numBytes) noexcept {
-        if (data == nullptr || numBytes < 2)
-            return false;
-        if ((data[0] & 0xf0) != 0xb0)
-            return false;
-        switch (data[1]) {
-            case 0:    // Bank Select MSB
-            case 32:   // Bank Select LSB
-            case 98:   // NRPN LSB
-            case 99:   // NRPN MSB
-            case 100:  // RPN LSB
-            case 101:  // RPN MSB
-                return true;
-            default:
-                return false;
-        }
-    }
+    // One timestamp's events. A MidiBuffer keeps equal timestamps in insertion
+    // order, and under VST3 that is the host's parameter-queue order rather than
+    // the file's: each CC is a separate parameter, so Bank Select can follow the
+    // Program Change that consumes it, an RPN Data Entry can precede its
+    // selector, and a GM reset SysEx - an event, not a parameter - lands after
+    // the controllers that were written to follow it. Audio thread; the scratch
+    // is preallocated and a group beyond it is dispatched in buffer order.
+    struct GroupEvent {
+        const juce::uint8* data;
+        int numBytes;
+        int index;          // buffer order, the final tiebreak
+        juce::uint8 kind;   // GroupKind, in the .cpp
+        juce::uint8 channel;
+        juce::uint8 cc;
+        juce::uint8 value;
+        juce::int16 unit;   // RPN ordering keys, see orderChannelRpn
+        juce::int16 round;
+        juce::int16 subTier;
+        juce::int16 ccRank;
+    };
+    static constexpr int kMaxGroupEvents{2048};
+    std::array<GroupEvent, kMaxGroupEvents> groupScratch;
+    std::array<int, kMaxGroupEvents> rpnScratch;
+    void dispatchTimestampGroup(juce::MidiBufferIterator begin,
+                                juce::MidiBufferIterator end,
+                                int eventPosition);
+    void dispatchGroupEvent(const GroupEvent& event, int eventPosition);
+    void orderChannelRpn(int midiCh, int count);
+
+    // The RPN selection as the MIDI stream left it, tracked the way FluidSynth
+    // tracks it, so a Data Entry can be recognised as a bend-range write. Audio
+    // thread only.
+    int rpnMsb[16];
+    int rpnLsb[16];
+    bool nrpnActive[16];
+    int dataMsb[16];
+    int dataLsb[16];
+    void noteControllerForBendRange(int channel, int controller, int value);
+    void resetRpnTracking(int channel);
+    // Bend range the MIDI stream last set, MSB << 7 | LSB; -1 = never. A reset
+    // SysEx re-asserts it exactly as it re-asserts programs and CC7/CC10: a
+    // host whose parameter cache says the RPN is unchanged will not send it
+    // again, and the reset would otherwise leave the channel at two semitones.
+    std::atomic<int> engineBendRange[16];
+    // Host bend compensation. Override forces one range on every channel for a
+    // host that drops the file's RPN; scale multiplies the incoming bend for a
+    // host that shrank it on import. Both are parameters; both default to off.
+    std::atomic<int> bendRangeOverride{0}; // semitones, 0 = follow MIDI
+    std::atomic<bool> bendRangeOverrideDirty{false};
+    std::atomic<int> bendScale{1};
+    void applyBendRangeOverride(int channel);
+    void applyBendRangeChangeFromAudioThread();
+    // Re-send a channel's remembered range through the RPN itself, cents included.
+    void reassertBendRange(int channel);
+
     // mirror a channel's current program into its progChN parameter (guarded so
     // parameterChanged doesn't re-apply it to the synth). Message thread only.
     void syncProgParam(int ch, int preset);

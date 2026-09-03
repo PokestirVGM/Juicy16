@@ -63,7 +63,18 @@ scope and is not built.
 - **macOS 11 itself.** Every binary declares `minos 11.0` and validation proves
   it, but nothing has booted this on 11.
 - **Logic Pro and any host beyond FL Studio and Cubase.**
-- Whatever Beta 1 testing turns up.
+- **What Beta 1 testing turned up**, as of 2026-09-02:
+  - *Pitch-bend range wrong in Cubase, intermittently* — three defects found and
+    fixed offline for `0.6.1` (same-timestamp ordering under VST3, the RPN Null
+    regression from the Beta 1 fix, and a reset undoing the range on replay).
+    Re-confirmation in Cubase is the open step. See `CHANGELOG.md`.
+  - *Pitch bends weak in FL Studio* — FL's MIDI import squashes every bend to
+    plus or minus two semitones. `0.6.1` adds a bend scale and a bend range
+    override in the settings popover. Whether ×6 is the right recipe for FL
+    is for a tester with FL to say.
+  - *Some channels louder than they should be* — still open. No plugin-side
+    cause found; needs a named file, channel and reference. See
+    [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).
 
 ## Open, deliberately deferred
 

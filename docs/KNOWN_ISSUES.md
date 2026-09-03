@@ -52,13 +52,70 @@ interface was inspected in the running plugin. Cosmetic and unresolved.
   against predates the reverb.
 
 
+## Pitch bend
+
+- **A reset SysEx no longer returns the bend range to two semitones on a
+  channel the file has configured.** A GM/GS/XG reset re-asserts the range the
+  MIDI stream last set on that channel, cents included, exactly as it
+  re-asserts programs, volume and pan. The reason is the same as for programs:
+  under VST3 the RPN controllers are host parameters, the host's cache still
+  holds them from the first play, and it never sends them again — so with
+  spec-exact behaviour the tick-0 reset put every replay back to two semitones.
+  The trade-off: play a rip that asks for 12 semitones, then in the same plugin
+  instance play a file that sends no RPN and relies on the reset's default of
+  two, and the second file bends 12. Reload the plugin, or set the bend range
+  override for that file. A channel the first file never configured still
+  resets to two.
+- **What a VST3 host loses cannot all be rebuilt.** Events sharing one
+  timestamp are re-ordered by role, and the RPN machinery is reconstructed from
+  each controller's own queue order, which is the one thing VST3 preserves. Two
+  things it does not survive: a host that keeps only the last of several values
+  of one controller at one sample offset, and several RPN blocks on one tick
+  where only some carry a Data Entry LSB (the LSBs pair with the earliest
+  blocks). Neither pattern appears in the test corpus. A group of more than
+  2048 events at one timestamp is dispatched in the host's order.
+- **FL Studio squashes imported bends.** FL imports every MIDI pitch bend as
+  plus or minus two semitones regardless of the file's RPN, and its wrapper only
+  sends a bend range when asked. The settings popover has two compensations,
+  both off by default: *Bend scale* multiplies incoming bends (×6 for a rip
+  written for 12 semitones), and *Bend range override* forces one range on all
+  channels for a host that drops the RPN altogether. Which one FL needs, and at
+  what value, has not been tried in FL: report what worked.
+
+## Per-channel loudness
+
+Testers hear some channels louder than they should be. Nothing plugin-side has
+been found, and the report is too general to measure, so here is what is known
+and what a useful report contains.
+
+- Velocity, CC7 and CC11 curves match VGMTrans's BASSMIDI within 0.26 dB and
+  per-instrument balance within 0.66 dB, on SF2. FluidSynth 2.5.5's native DLS
+  loader applies the same volume, expression, velocity and pan modulators to
+  DLS banks, so a DLS is not exempt from that measurement.
+- An incoming CC7 or CC10 moves that channel's row knob at the event's
+  timestamp, and a reset SysEx re-asserts the latest values. If a row's knob
+  does **not** show the value the file sent, that is a plugin defect: say so.
+- Things on the host side that change a channel's volume without the file
+  asking: in Cubase, a MIDI track's inspector *Volume* and *Pan* (CC7/CC10 when
+  not "Off"), and the MIDI-file import preferences *Extract First Volume/Pan*
+  and *Extract First Patch*, which move a file's first CC7/CC10/Program Change
+  off the part and onto the track; in FL Studio, whether an imported file's
+  CC7/CC11 reach the plugin at all depends on how the tracks were routed.
+- A useful report names the file, the bank, the channel and instrument, the
+  host and format, what the row's Vol knob shows at the moment it sounds wrong,
+  and what "should be" is measured against (VGMTrans, Fruity LSD, a recording).
+  With that, the difference can be rendered offline and measured.
+
 ## What is and is not validated
 
 Beta 1 ships with these tested, on the packaged artifacts:
 
 - Per-channel Bank Select and Program Change on all 16 channels, in **FL Studio
   and Cubase**, in both **AU and VST3**.
-- Pitch-bend range through RPN, confirmed in Cubase.
+- Pitch-bend range through RPN, confirmed in Cubase on 2026-08-24 — then
+  reported wrong again by testers. `0.6.1` fixes three defects behind that
+  (see *Pitch bend* above and `CHANGELOG.md`), verified offline; the Cubase
+  re-confirmation is still to do.
 - `auval -strict` on the AU, both as built and as extracted from the package.
 - The strict portable Release suite, 15/15, from a clean checkout: arm64-only,
   `minos 11.0` on every Mach-O, no developer-only dynamic library, SF2/SF3/DLS

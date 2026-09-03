@@ -298,8 +298,8 @@ int main(int argc, char** argv)
         }
     }
     // 3 global + 6 reverb + 64 per-channel mixer + 16 program.
-    check(parameters.size() == 89 && namedProgramParameters == 16,
-          "the AU publishes 89 parameters including one program parameter per MIDI channel");
+    check(parameters.size() == 91 && namedProgramParameters == 16,
+          "the AU publishes 91 parameters including one program parameter per MIDI channel");
 
     // Every channel's mixer controls are host-visible in AU too, by name, which
     // is what a host's automation list enumerates.

@@ -247,6 +247,16 @@ AudioProcessorValueTreeState::ParameterLayout JuicySFAudioProcessor::createParam
                 juce::AudioParameterIntAttributes{}.withLabel("Ch" + String(ch) + " Prog"))));
     }
 
+    // Host bend compensation, appended after the Beta 1 manifest so no frozen
+    // index moves. Both are global and both default to off. Override forces one
+    // bend range on every channel, for a host that never delivers the file's
+    // RPN; scale multiplies every incoming bend, for a host that shrank the
+    // bends on import - FL Studio imports every MIDI bend as plus or minus two
+    // semitones whatever the file's RPN said.
+    layout.add(intParam("bendRange", "pitch-bend range override (0 follows the MIDI file)",
+                        0, 24, 0, "Bend Rng"));
+    layout.add(intParam("bendScale", "pitch-bend scale", 1, 24, 1, "Bend x"));
+
     return layout;
 }
 

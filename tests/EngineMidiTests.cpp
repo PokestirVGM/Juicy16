@@ -197,9 +197,10 @@ juce::AudioParameterBool* findBoolParameter(JuicySFAudioProcessor& processor,
     return nullptr;
 }
 
-// The frozen Beta 1 parameter manifest, in order. Built rather than spelled out
-// because 83 identifiers written by hand is a typo waiting to be mistaken for a
-// contract violation; the ORDER encoded here is the contract.
+// The frozen Beta 1 parameter manifest, in order, plus what was appended after
+// it. Built rather than spelled out because 91 identifiers written by hand is a
+// typo waiting to be mistaken for a contract violation; the ORDER encoded here
+// is the contract.
 std::vector<juce::String> beta1ParameterIds()
 {
     std::vector<juce::String> ids{"bank", "preset", "outputLevel",
@@ -210,6 +211,9 @@ std::vector<juce::String> beta1ParameterIds()
             ids.push_back(juce::String{prefix} + juce::String(channel));
     for (int channel = 1; channel <= 16; ++channel)
         ids.push_back("progCh" + juce::String(channel));
+    // Appended after Beta 1: host bend compensation. New indices only.
+    ids.push_back("bendRange");
+    ids.push_back("bendScale");
     return ids;
 }
 
@@ -3114,18 +3118,127 @@ int main(int argc, char** argv)
               "an RPN Data Entry delivered before its selector at the same timestamp "
               "still sets the pitch-bend range");
 
+        const auto sensitivityIs = [&](int channel, int expected) {
+            int sensitivity{-1};
+            return model.getPitchWheelSensitivity(channel, sensitivity)
+                && sensitivity == expected;
+        };
+        const auto rpnBurst = [&](int channel, std::initializer_list<std::pair<int, int>> ccs,
+                                  int sample) {
+            juce::MidiBuffer burst;
+            for (const auto [cc, value] : ccs)
+                burst.addEvent(juce::MidiMessage::controllerEvent(channel + 1, cc, value), sample);
+            return burst;
+        };
+        const auto play = [&](juce::MidiBuffer burst) { render(processor, audio, burst); };
+
+        // A sequenced file usually deselects the RPN on the same tick it wrote
+        // it. The Data Entry must still land between the selection and the null.
+        play(rpnBurst(6, {{101, 0}, {100, 0}, {6, 14}, {38, 0},
+                                              {101, 127}, {100, 127}}, 32));
+        int nullAfter{-1};
+        check(sensitivityIs(6, 14)
+                  && model.getControllerValue(6, 101, nullAfter) && nullAfter == 127,
+              "an RPN written and nulled at one timestamp still sets the bend range");
+
+        // What a VST3 host actually delivers for that: each controller's queue
+        // back to back, in whatever order it likes, with the Data Entry queue
+        // between the two halves of the selector.
+        play(rpnBurst(7, {{101, 0}, {101, 127}, {6, 15},
+                                              {100, 0}, {100, 127}}, 32));
+        check(sensitivityIs(7, 15),
+              "an RPN whose MSB and LSB queues straddle the Data Entry still sets the bend range");
+
+        // Two RPN blocks at one tick, correctly ordered: bend range, then coarse
+        // tune. The second block's Data Entry must not reach the first RPN.
+        play(rpnBurst(10, {{101, 0}, {100, 0}, {6, 17}, {101, 127}, {100, 127},
+                                               {101, 0}, {100, 2}, {6, 64}, {101, 127}, {100, 127}}, 32));
+        check(sensitivityIs(10, 17),
+              "two nulled RPN blocks at one timestamp keep their own Data Entries");
+
+        // NRPN then RPN at one tick, correctly ordered. Nothing to repair, and
+        // nothing may be broken.
+        play(rpnBurst(11, {{99, 1}, {98, 8}, {6, 64},
+                                               {101, 0}, {100, 0}, {6, 18}}, 32));
+        check(sensitivityIs(11, 18),
+              "an NRPN write followed by an RPN write at one timestamp is left in order");
+
+        // The RPN selected on an earlier tick; a later tick writes and nulls.
+        play(rpnBurst(12, {{101, 0}, {100, 0}}, 0));
+        play(rpnBurst(12, {{6, 19}, {101, 127}, {100, 127}}, 0));
+        check(sensitivityIs(12, 19),
+              "a Data Entry for an earlier RPN selection is applied before the null beside it");
+
+        // VST3 order for a game rip's tick 0: the RPN controllers are parameter
+        // changes and the GM reset is an event, so the wrapper queues the reset
+        // LAST. The reset must still come first.
         const juce::uint8 gmReset[]{0x7e, 0x7f, 0x09, 0x01};
+        {
+            juce::MidiBuffer tickZero{rpnBurst(8, {{101, 0}, {100, 0}, {38, 0}, {6, 16}}, 40)};
+            tickZero.addEvent(juce::MidiMessage::createSysExMessage(gmReset, sizeof(gmReset)), 40);
+            render(processor, audio, tickZero);
+        }
+        check(sensitivityIs(8, 16),
+              "a GM reset queued after same-timestamp RPN controllers is applied before them");
+
+        // A reset re-asserts the bend range the file established, exactly as it
+        // re-asserts programs: on a replay a VST3 host's parameter cache still
+        // holds the RPN values and never sends them again. A channel the file
+        // never configured is genuinely reset to two semitones.
         juce::MidiBuffer reset;
         reset.addEvent(juce::MidiMessage::createSysExMessage(gmReset, sizeof(gmReset)), 0);
         render(processor, audio, reset);
-        bool resetRange{true};
-        for (const int channel : channels) {
-            int sensitivity{-1};
-            resetRange = resetRange
-                && model.getPitchWheelSensitivity(channel, sensitivity)
-                && sensitivity == 2;
+        bool resetPolicy{true};
+        for (std::size_t i = 0; i < channels.size(); ++i)
+            resetPolicy = resetPolicy && sensitivityIs(channels[i], ranges[i]);
+        int resetRpn{-1};
+        check(resetPolicy && sensitivityIs(misorderedChannel, misorderedRange)
+                  && sensitivityIs(6, 14) && sensitivityIs(8, 16) && sensitivityIs(13, 2)
+                  && model.getControllerValue(1, 101, resetRpn) && resetRpn == 127,
+              "GM reset re-asserts each channel's MIDI-set bend range, leaves untouched "
+              "channels at two semitones, and leaves the RPN null");
+
+        // Bend range override: every channel, over the file, across a reset,
+        // and back to the file's own ranges when cleared.
+        auto* bendRangeParam{findIntParameter(processor, "bendRange")};
+        auto* bendScaleParam{findIntParameter(processor, "bendScale")};
+        check(bendRangeParam != nullptr && bendRangeParam->get() == 0
+                  && bendScaleParam != nullptr && bendScaleParam->get() == 1,
+              "bend range override and bend scale both default to off");
+        if (bendRangeParam != nullptr && bendScaleParam != nullptr) {
+            *bendRangeParam = 12;
+            render(processor, audio, reset);
+            const bool forcedEverywhere{sensitivityIs(0, 12) && sensitivityIs(13, 12)
+                                        && sensitivityIs(15, 12)};
+            play(rpnBurst(0, {{101, 0}, {100, 0}, {6, 5}}, 0));
+            const bool forcedOverFile{sensitivityIs(0, 12)};
+            render(processor, audio, reset);
+            const bool forcedAcrossReset{sensitivityIs(0, 12) && sensitivityIs(13, 12)};
+            *bendRangeParam = 0;
+            juce::MidiBuffer nothing;
+            render(processor, audio, nothing);
+            check(forcedEverywhere && forcedOverFile && forcedAcrossReset
+                      && sensitivityIs(0, 5) && sensitivityIs(13, 2) && sensitivityIs(1, 12),
+                  "bend range override forces every channel, outranks the file's RPN, survives "
+                  "a reset, and clearing it restores each channel's own range");
+
+            *bendScaleParam = 6;
+            const auto bendReads = [&](int sent, int expected) {
+                juce::MidiBuffer wheel;
+                wheel.addEvent(juce::MidiMessage::pitchWheel(1, sent), 0);
+                render(processor, audio, wheel);
+                int actual{-1};
+                return model.getPitchBend(0, actual) && actual == expected;
+            };
+            const bool scaled{bendReads(8192 + 1000, 8192 + 6000)
+                              && bendReads(8192 - 1000, 8192 - 6000)
+                              && bendReads(16383, 16383) && bendReads(0, 0)
+                              && bendReads(8192 - 2000, 0) && bendReads(8192, 8192)};
+            *bendScaleParam = 1;
+            check(scaled && bendReads(9000, 9000),
+                  "bend scale multiplies the bend about centre, clamps to the 14-bit range, "
+                  "and x1 passes bends through unchanged");
         }
-        check(resetRange, "GM reset restores the default two-semitone bend range");
     }
     {
         constexpr int longBlock{65536};
