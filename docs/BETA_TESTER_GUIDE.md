@@ -187,7 +187,10 @@ Two things to know about the row controls:
   a plugin defect; a knob that agrees means the level is what the file asked
   for, and the report needs the file, channel, instrument, host, and what you
   are comparing against. [KNOWN_ISSUES.md](KNOWN_ISSUES.md) lists host-side
-  settings that change a channel's volume behind the file's back.
+  settings that change a channel's volume behind the file's back. If a channel
+  is only too loud from the second play on — right after you press play the
+  first time, wrong after stop and play — that is the expression reset fixed
+  in `0.6.1-beta.2`; say which build you ran.
 - **Mute and solo do not follow the MIDI file.** Nothing in a MIDI file changes
   them, and no reset clears them. A muted channel stops sounding new notes but
   still receives everything else, so unmuting mid-song picks up correctly.

@@ -305,6 +305,23 @@ private:
     void applyBendRangeChangeFromAudioThread();
     // Re-send a channel's remembered range through the RPN itself, cents included.
     void reassertBendRange(int channel);
+    // Expression (CC11) the MIDI stream last set; -1 = never. Reset All
+    // Controllers and a reset SysEx both return expression to 127, and a VST3
+    // host's parameter cache never resends the file's unchanged CC11 on a
+    // replay - so an echo channel a rip keeps at CC11=74 played at full level
+    // on every play but the first. Re-asserted after either reset, exactly
+    // like programs, CC7/CC10 and the bend range.
+    std::atomic<int> engineExpression[16];
+    void noteControllerForExpression(int channel, int controller, int value);
+    void reassertExpression(int channel);
+    // Sample interpolation quality. FluidSynth keeps this per channel, and
+    // fluid_channel_init - which a GM/GS/XG reset SysEx runs on all 16 - puts it
+    // back to the 4th-order default. Every VGMTrans rip opens with a GM System
+    // On, so the method createSynth sets was gone before the first note of every
+    // file and no rip ever played at the quality this plugin claims. Re-asserted
+    // after a reset, exactly like programs, CC7/CC10, the bend range and CC11.
+    static constexpr int interpolationMethod{FLUID_INTERP_HIGHEST};
+    void applyInterpolationMethod();
 
     // mirror a channel's current program into its progChN parameter (guarded so
     // parameterChanged doesn't re-apply it to the synth). Message thread only.

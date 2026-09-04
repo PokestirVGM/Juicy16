@@ -110,7 +110,7 @@ the Data Entry, the reset queued last). Limits are in `KNOWN_ISSUES.md`.
 | CC91/93 | Per-channel reverb and chorus sends, delivered exactly. CC91 feeds the reverb described below. CC93 reaches the engine but the chorus is switched off, so it does nothing audible — see below. |
 | CC98/99, CC100/101, CC6/38 | FluidSynth NRPN/RPN selection and Data Entry. RPN 0,0 bend range and RPN Null are regression-tested, including same-timestamp order under VST3 (above). |
 | CC120 | All Sound Off immediately silences the addressed channel. |
-| CC121 | Reset All Controllers resets switches, expression, RPN/NRPN selection, pressure, and pitch wheel. FluidSynth intentionally preserves bank, volume, pan, effects sends, sound controls CC70–79, and the configured bend range. |
+| CC121 | Reset All Controllers resets switches, RPN/NRPN selection, pressure, and pitch wheel. FluidSynth intentionally preserves bank, volume, pan, effects sends, sound controls CC70–79, and the configured bend range. Juicy16 then re-asserts the expression (CC11) the stream last set on that channel — hosts send CC121 on stop and never resend an unchanged CC11 under VST3; see `KNOWN_ISSUES.md`. |
 | CC122 | Local Control is accepted/stored by FluidSynth but intentionally has no synthesis action in this plugin engine. |
 | CC123 | All Notes Off releases the addressed channel's notes according to pedal/envelope state; it is not the immediate-kill behavior of CC120. |
 | CC124–127 | Delivered to FluidSynth, then Juicy16 restores its 16-channel layout. See the section below. |
@@ -308,12 +308,15 @@ smoothing so host automation cannot step the gain mid-block. Nothing in a MIDI
 file changes it. FluidSynth's own `synth.gain` stays at its documented default of
 0.2.
 
-The trim **defaults to +1.5 dB**, not 0. Juicy16 renders about 10.4 dB quieter
-than VGMTrans plays the same material, and +1.5 dB is the most that can be given
-back without pushing anything past full scale — across a 24-file corpus the
-loudest rip peaks at -1.61 dBFS. It does not close the gap; that would need a
-limiter, which Beta 1 deliberately does not have. Raise the trim per project if
-you want more.
+The trim **defaults to +1.5 dB**, not 0, and from `0.6.1-beta.3` that default is
+actually applied — before it, the gain was seeded at unity and the default only
+took effect once the knob was moved. Juicy16 renders about 8.6 dB quieter than
+VGMTrans plays the same material, and +1.5 dB is the most that can be given back
+without pushing anything past full scale — across a 24-file corpus the loudest
+rip peaks at -1.61 dBFS. It does not close the gap; that would need a limiter,
+which Beta 1 deliberately does not have, because VGMTrans reaches its own level
+by clipping (over 0 dBFS on six of ten measured rips, up to +7.61 dBFS). Raise
+the trim per project if you want more.
 
 ## Bend range override and bend scale
 

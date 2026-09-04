@@ -2838,9 +2838,10 @@ int main(int argc, char** argv)
     }
 
     {
-        // MIDI CC121 deliberately follows FluidSynth/MIDI reset semantics: it
-        // releases pedals and resets expression/RPN selection/pitch wheel, while
-        // preserving bank, volume, pan, effects sends, bend range, and CC70-79.
+        // MIDI CC121 follows FluidSynth/MIDI reset semantics: it releases pedals
+        // and resets RPN selection/pitch wheel, while preserving bank, volume,
+        // pan, effects sends, bend range, and CC70-79. Expression is the one
+        // deliberate departure: the stream's last CC11 is re-asserted (next block).
         constexpr int channel{4};
         juce::MidiBuffer setup;
         for (const auto [cc, value] : std::array<std::pair<int, int>, 14>{
@@ -2869,7 +2870,7 @@ int main(int argc, char** argv)
         const auto* volume{findIntParameter(processor, "volCh5")};
         const auto* pan{findIntParameter(processor, "panCh5")};
         check(controllerEquals(1, 0)
-                  && controllerEquals(11, 127)
+                  && controllerEquals(11, 55)
                   && controllerEquals(64, 0)
                   && controllerEquals(65, 0)
                   && controllerEquals(7, 77)
@@ -2885,7 +2886,213 @@ int main(int argc, char** argv)
                   // spec, so channel 5's own mixer parameters must survive too.
                   && volume != nullptr && volume->get() == 77
                   && pan != nullptr && pan->get() == 33,
-              "Reset All Controllers releases switches and resets expression/RPN/bend while preserving MIDI-defined persistent controls");
+              "Reset All Controllers releases switches and resets RPN/bend while preserving MIDI-defined persistent controls and the stream's expression");
+    }
+    {
+        // A reset re-asserts the expression the stream last set, as it does
+        // programs, CC7/CC10 and the bend range. Cubase and FL Studio send Reset
+        // All Controllers when the transport stops, and a VST3 host's parameter
+        // cache never resends a CC11 whose value has not changed - so a rip whose
+        // echo channel sits at CC11=74 (BGM_3C) played that channel at 127, within
+        // 2 dB of its melody, on every play but the first. Measured through the
+        // built VST3 before this change: -43.2 dBFS first play, -33.9 dBFS replay.
+        JuicySFAudioProcessor exprProcessor;
+        exprProcessor.prepareToPlay(48000.0, blockSize);
+        const auto exprState{makeState(argv[1])};
+        exprProcessor.setStateInformation(
+            exprState.getData(), static_cast<int>(exprState.getSize()));
+        auto& exprModel{exprProcessor.getFluidSynthModel()};
+        juce::AudioBuffer<float> exprAudio{2, blockSize};
+        constexpr int echoChannel{11}; // MIDI channel 12
+        const auto noteLevel = [&](juce::MidiBuffer prelude) {
+            juce::MidiBuffer off;
+            addAllSoundOff(off);
+            render(exprProcessor, exprAudio, off);
+            juce::MidiBuffer none;
+            for (int i = 0; i < 8; ++i)
+                render(exprProcessor, exprAudio, none);
+            render(exprProcessor, exprAudio, prelude);
+            juce::MidiBuffer note;
+            note.addEvent(juce::MidiMessage::noteOn(echoChannel + 1, 60,
+                                                    static_cast<juce::uint8>(100)), 0);
+            float total{0.0f};
+            render(exprProcessor, exprAudio, note);
+            total += magnitude(exprAudio, 0, blockSize);
+            for (int i = 0; i < 4; ++i) {
+                render(exprProcessor, exprAudio, none);
+                total += magnitude(exprAudio, 0, blockSize);
+            }
+            return total;
+        };
+        const auto expression = [&](int channel, int expected) {
+            int actual{-1};
+            return exprModel.getControllerValue(channel, 11, actual) && actual == expected;
+        };
+        const auto close = [](float a, float b) { return std::abs(a - b) <= 0.03f * b; };
+        juce::MidiBuffer quiet;
+        quiet.addEvent(juce::MidiMessage::controllerEvent(echoChannel + 1, 11, 74), 0);
+        const float quietLevel{noteLevel(quiet)};
+        juce::MidiBuffer loud;
+        loud.addEvent(juce::MidiMessage::controllerEvent(echoChannel + 1, 11, 127), 0);
+        const float loudLevel{noteLevel(loud)};
+        check(quietLevel > audiblePresence && loudLevel > quietLevel * 2.0f,
+              "expression 74 renders well below expression 127 on the same note");
+
+        // Transport stop: CC121 on every channel, the file's CC11 not resent.
+        juce::MidiBuffer stop;
+        stop.addEvent(juce::MidiMessage::controllerEvent(echoChannel + 1, 11, 74), 0);
+        for (int channel = 1; channel <= 16; ++channel)
+            stop.addEvent(juce::MidiMessage::controllerEvent(channel, 121, 0), 1);
+        const float afterResetAll{noteLevel(stop)};
+        check(close(afterResetAll, quietLevel) && expression(echoChannel, 74)
+                  && expression(echoChannel + 1, 127),
+              "Reset All Controllers re-asserts the expression the stream last set on that "
+              "channel and leaves a channel the stream never set at 127");
+
+        // Replay: the tick-0 GM reset, again without the CC11 that followed it.
+        juce::MidiBuffer replay;
+        const juce::uint8 gmReset[]{0x7E, 0x7F, 0x09, 0x01};
+        replay.addEvent(juce::MidiMessage::createSysExMessage(gmReset, sizeof(gmReset)), 0);
+        const float afterSysEx{noteLevel(replay)};
+        check(close(afterSysEx, quietLevel) && expression(echoChannel, 74),
+              "a GM reset re-asserts the expression the stream last set, as it re-asserts "
+              "programs, volume, pan and bend range");
+
+        // The stream stays authoritative: its next CC11 replaces the memory.
+        juce::MidiBuffer later;
+        later.addEvent(juce::MidiMessage::controllerEvent(echoChannel + 1, 11, 127), 0);
+        for (int channel = 1; channel <= 16; ++channel)
+            later.addEvent(juce::MidiMessage::controllerEvent(channel, 121, 0), 1);
+        const float afterLater{noteLevel(later)};
+        check(close(afterLater, loudLevel) && expression(echoChannel, 127),
+              "a later CC11 replaces the remembered expression a reset re-asserts");
+    }
+    {
+        // FluidSynth keeps the sample interpolation method per channel, and
+        // fluid_channel_init - which a GM/GS/XG reset SysEx runs on all 16 -
+        // returns it to the 4th-order default. Every VGMTrans rip opens with a
+        // GM System On at tick 0, so the 7th-order method createSynth sets was
+        // discarded before the first note of every file and no rip ever played
+        // at the quality the plugin claims. The level does not change, only the
+        // spectrum, so this compares waveforms: the same note either side of a
+        // reset must render identically.
+        JuicySFAudioProcessor interpProcessor;
+        interpProcessor.prepareToPlay(48000.0, blockSize);
+        const auto interpState{makeState(argv[1])};
+        interpProcessor.setStateInformation(
+            interpState.getData(), static_cast<int>(interpState.getSize()));
+        constexpr int interpBlocks{6};
+        constexpr int interpFrames{blockSize * interpBlocks};
+        // Notes a semitone and a tritone off any plausible root key, so the
+        // playback ratio is irrational and interpolation is genuinely exercised
+        // whatever rate the bank's samples happen to be stored at.
+        const auto renderNote{[&](bool resetFirst) {
+            juce::AudioBuffer<float> flush{2, blockSize};
+            juce::MidiBuffer off;
+            addAllSoundOff(off);
+            render(interpProcessor, flush, off);
+            juce::MidiBuffer none;
+            for (int i = 0; i < 8; ++i)
+                render(interpProcessor, flush, none);
+            juce::MidiBuffer start;
+            if (resetFirst) {
+                const juce::uint8 gmReset[]{0x7E, 0x7F, 0x09, 0x01};
+                start.addEvent(
+                    juce::MidiMessage::createSysExMessage(gmReset, sizeof(gmReset)), 0);
+            }
+            for (const int note : {61, 67})
+                start.addEvent(
+                    juce::MidiMessage::noteOn(1, note, static_cast<juce::uint8>(110)), 1);
+            juce::AudioBuffer<float> captured{2, interpFrames};
+            captured.clear();
+            juce::AudioBuffer<float> slice{2, blockSize};
+            for (int block = 0; block < interpBlocks; ++block) {
+                juce::MidiBuffer midi;
+                if (block == 0)
+                    midi = start;
+                render(interpProcessor, slice, midi);
+                for (int ch = 0; ch < 2; ++ch)
+                    captured.copyFrom(ch, block * blockSize, slice, ch, 0, blockSize);
+            }
+            return captured;
+        }};
+        const auto beforeReset{renderNote(false)};
+        const auto controlRepeat{renderNote(false)};
+        const auto afterReset{renderNote(true)};
+        const auto differenceDb{[&](const juce::AudioBuffer<float>& x,
+                                    const juce::AudioBuffer<float>& y) {
+            double signal{0.0}, difference{0.0};
+            for (int ch = 0; ch < 2; ++ch)
+                for (int i = 0; i < interpFrames; ++i) {
+                    const double a{x.getSample(ch, i)};
+                    const double b{y.getSample(ch, i)};
+                    signal += a * a;
+                    difference += (a - b) * (a - b);
+                }
+            return 10.0 * std::log10((difference + 1.0e-30) / (signal + 1.0e-30));
+        }};
+        // Two renders of the same note are not bit-identical even with no reset
+        // between them - the first note on a fresh synth lands on a different
+        // internal block phase - so the no-reset repeat is the control, and the
+        // reset must not push the difference beyond it. Against the previous
+        // engine the reset render is 4th-order and this margin is nowhere near
+        // enough; with the interpolation re-asserted the two are equal.
+        const double interpControlDb{differenceDb(beforeReset, controlRepeat)};
+        const double interpDifferenceDb{differenceDb(beforeReset, afterReset)};
+        check(magnitude(beforeReset, 0, interpFrames) > audiblePresence
+                  && interpDifferenceDb <= interpControlDb + 1.0,
+              "a reset SysEx leaves the interpolation quality alone, so a note after "
+              "one renders as the same note does with no reset at all");
+    }
+    {
+        // The master trim parameter defaults to +1.5 dB, but parameterChanged
+        // fires only on a *change*, so nothing ever applied that default: a
+        // fresh instance rendered at unity while the knob read +1.5 dB, and the
+        // trim only started working once the user moved it. Measured through
+        // the built plugin on SEQ_ROAD_D_D before this change: -10.40 dBFS peak
+        // with the parameter untouched, identical to an explicit 0 dB.
+        const auto trimmedLevel{[&](bool writeZeroDb) {
+            JuicySFAudioProcessor trimProcessor;
+            trimProcessor.prepareToPlay(48000.0, blockSize);
+            const auto trimState{makeState(argv[1])};
+            trimProcessor.setStateInformation(
+                trimState.getData(), static_cast<int>(trimState.getSize()));
+            if (writeZeroDb)
+                for (auto* parameter : trimProcessor.getParameters())
+                    if (auto* identified{
+                            dynamic_cast<juce::AudioProcessorParameterWithID*>(parameter)};
+                        identified != nullptr && identified->paramID == "outputLevel")
+                        if (auto* f{dynamic_cast<juce::AudioParameterFloat*>(parameter)})
+                            f->setValueNotifyingHost(
+                                f->getNormalisableRange().convertTo0to1(0.0f));
+            juce::AudioBuffer<float> trimAudio{2, blockSize};
+            // The trim glides over 20 ms, so a parameter written after
+            // prepareToPlay is still on its way down for the first two blocks.
+            // Settle it before the note, or the measurement straddles the ramp.
+            juce::MidiBuffer settle;
+            for (int i = 0; i < 4; ++i)
+                render(trimProcessor, trimAudio, settle);
+            juce::MidiBuffer note;
+            note.addEvent(
+                juce::MidiMessage::noteOn(1, 60, static_cast<juce::uint8>(110)), 0);
+            float total{0.0f};
+            render(trimProcessor, trimAudio, note);
+            total += magnitude(trimAudio, 0, blockSize);
+            juce::MidiBuffer none;
+            for (int i = 0; i < 4; ++i) {
+                render(trimProcessor, trimAudio, none);
+                total += magnitude(trimAudio, 0, blockSize);
+            }
+            return total;
+        }};
+        const float defaultTrim{trimmedLevel(false)};
+        const float zeroTrim{trimmedLevel(true)};
+        const float expectedRatio{
+            juce::Decibels::decibelsToGain(GuiConstants::outputLevelDefaultDb)};
+        check(zeroTrim > audiblePresence
+                  && std::abs(defaultTrim / zeroTrim - expectedRatio) <= 0.01f * expectedRatio,
+              "a fresh instance renders at the trim parameter's own default rather "
+              "than at unity");
     }
     {
         JuicySFAudioProcessor pedalProcessor;

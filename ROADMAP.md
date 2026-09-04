@@ -72,17 +72,28 @@ scope and is not built.
     plus or minus two semitones. `0.6.1` adds a bend scale and a bend range
     override in the settings popover. Whether ×6 is the right recipe for FL
     is for a tester with FL to say.
-  - *Some channels louder than they should be* — still open. No plugin-side
-    cause found; needs a named file, channel and reference. See
-    [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).
+  - *Some channels louder than they should be* — root cause found and fixed
+    in `0.6.1-beta.2`: hosts send Reset All Controllers on stop, which
+    returned every CC11-attenuated echo channel to full expression on replay.
+    Not yet re-heard in a DAW. See [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).
+  - *Too quiet, and rips sound slightly dull* — two defects found and fixed in
+    `0.6.1-beta.3`. A reset SysEx was resetting the interpolation quality on
+    every channel, so no rip ever played at the 7th-order method the plugin
+    asks for; and the master trim's own +1.5 dB default never reached the
+    audio. Neither closes the deliberate level gap to VGMTrans below. Not yet
+    re-heard in a DAW.
 
 ## Open, deliberately deferred
 
-- **Loudness parity with VGMTrans.** Juicy16 renders about 10.4 dB quieter than
-  VGMTrans plays the same material. The default master trim is +1.5 dB, which is
-  the most the test corpus allows without clipping — the loudest of 24 rips peaks
-  at -1.61 dBFS. Closing the rest needs a limiter, which is a real design change
-  for a plugin whose claim is faithful playback.
+- **Loudness parity with VGMTrans.** Juicy16 renders about 8.6 dB quieter than
+  VGMTrans plays the same material, once `0.6.1-beta.3` restores the +1.5 dB
+  default trim that was never being applied. The trim is the most the test
+  corpus allows without clipping — the loudest of 24 rips peaks at -1.61 dBFS.
+  Closing the rest needs a limiter, because VGMTrans reaches its loudness by
+  running past full scale: measured across ten rips it peaks over 0 dBFS on six
+  of them, up to +7.6 dBFS. Matching it by turning Juicy16 up would reproduce
+  that clipping, and a limiter is a real design change for a plugin whose claim
+  is faithful playback.
 - **Chorus.** FluidSynth's chorus is switched off rather than left at an unchosen
   default. It needs controls of its own before it is turned on.
 - **Per-channel reverb sends.** The reverb is global for Beta 1; incoming CC91

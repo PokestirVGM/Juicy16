@@ -216,6 +216,7 @@ FluidSynthModel::FluidSynthModel(
             lastKeyPressureSample[i][value].store(-1, std::memory_order_relaxed);
         }
         engineBendRange[i].store(-1, std::memory_order_relaxed);
+        engineExpression[i].store(-1, std::memory_order_relaxed);
         resetRpnTracking(i);
         for (int c = 0; c < kNumMixerCcs; c++) {
             midiCcValue[i][c].store(-1, std::memory_order_relaxed);
@@ -230,6 +231,14 @@ FluidSynthModel::FluidSynthModel(
     valueTreeState.addParameterListener("bank", this);
     valueTreeState.addParameterListener("preset", this);
     valueTreeState.addParameterListener("outputLevel", this);
+    // ...and seed the gain from that parameter. parameterChanged only fires on a
+    // *change*, so on a fresh instance nothing ever applied the +1.5 dB default:
+    // the knob read +1.5 dB while the audio ran at unity, and the trim only began
+    // working once the user moved it. Measured on SEQ_ROAD_D_D: -10.40 dBFS peak
+    // with the parameter at its default, the same as an explicit 0 dB.
+    if (auto* p{dynamic_cast<juce::AudioParameterFloat*>(
+            valueTreeState.getParameter("outputLevel"))})
+        setOutputLevelDb(p->get());
     valueTreeState.addParameterListener("bendRange", this);
     valueTreeState.addParameterListener("bendScale", this);
     valueTreeState.addParameterListener("reverbOn", this);
@@ -311,8 +320,9 @@ void FluidSynthModel::createSynth() {
     // Gold-standard playback fidelity:
     // - 7th-order ("highest") sample interpolation. FluidSynth defaults to 4th-order,
     //   which audibly rolls off the top octave; 7th-order preserves the high end for
-    //   both SF2 and DLS.
-    fluid_synth_set_interp_method(synth.get(), -1, FLUID_INTERP_HIGHEST);
+    //   both SF2 and DLS. Setting it here is not enough on its own - see
+    //   applyInterpolationMethod, which a reset SysEx calls again.
+    applyInterpolationMethod();
     // Polyphony comes from the settings above, before this synth existed.
 
     // Output gain. FluidSynth's own default, and deliberately back to it.
@@ -1523,6 +1533,7 @@ void FluidSynthModel::refreshBanks() {
             // ...and the bend range the MIDI stream last set, which a rebuilt
             // synth (sample-rate change) would otherwise have forgotten.
             reassertBendRange(chNum);
+            reassertExpression(chNum);
         }
     }
 
@@ -1662,6 +1673,11 @@ void FluidSynthModel::dispatchSysEx(const uint8_t* payload, int payloadBytes) {
     if (!isSystemResetSysex(payload, payloadBytes))
         return;
 
+    // The reset returned every channel to FluidSynth's 4th-order interpolation.
+    // Put the plugin's own method back first: unlike everything below it, it does
+    // not depend on a font being loaded.
+    applyInterpolationMethod();
+
     const int fontId{sfont_id.load(std::memory_order_acquire)};
     if (fontId == -1)
         return;
@@ -1689,6 +1705,7 @@ void FluidSynthModel::dispatchSysEx(const uint8_t* payload, int payloadBytes) {
         // cache still holds the RPN and it is never sent again.
         resetRpnTracking(ch);
         reassertBendRange(ch);
+        reassertExpression(ch);
     }
 }
 
@@ -1739,6 +1756,28 @@ void FluidSynthModel::reassertBendRange(int ch) {
         fluid_synth_cc(synth.get(), ch, RPN_LSB, 127);
     }
     applyBendRangeOverride(ch);
+}
+
+// Remembers the expression the stream sets, and puts it back after a Reset
+// All Controllers. The engine has already applied the reset by the time this
+// runs, so the re-assert lands on the reset channel.
+void FluidSynthModel::noteControllerForExpression(int ch, int cc, int value) {
+    if (cc == EXPRESSION_MSB)
+        engineExpression[ch].store(value, std::memory_order_relaxed);
+    else if (cc == ALL_CTRL_OFF)
+        reassertExpression(ch);
+}
+
+void FluidSynthModel::reassertExpression(int ch) {
+    const int value{engineExpression[ch].load(std::memory_order_relaxed)};
+    if (value >= 0 && synth != nullptr)
+        fluid_synth_cc(synth.get(), ch, static_cast<int>(EXPRESSION_MSB), value);
+}
+
+// One call sets all 16 channels, so this is not per channel like the others.
+void FluidSynthModel::applyInterpolationMethod() {
+    if (synth != nullptr)
+        fluid_synth_set_interp_method(synth.get(), -1, interpolationMethod);
 }
 
 void FluidSynthModel::applyBendRangeChangeFromAudioThread() {
@@ -2050,6 +2089,8 @@ void FluidSynthModel::dispatchMidiEvent(const MidiMessage& m, int samplePosition
                 m.getControllerNumber(),
                 m.getControllerValue());
             noteControllerForBendRange(
+                midiCh, m.getControllerNumber(), m.getControllerValue());
+            noteControllerForExpression(
                 midiCh, m.getControllerNumber(), m.getControllerValue());
             restoreSixteenChannelLayout(m.getControllerNumber());
 

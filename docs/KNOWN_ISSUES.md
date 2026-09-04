@@ -23,19 +23,55 @@ interface was inspected in the running plugin. Cosmetic and unresolved.
 - **Channels start at the GM default reverb send (CC91 = 40).** FluidSynth
   initialises it to 0, which made every reverb control inert on any file that
   did not explicitly ask for reverb. A file's own CC91 still overrides it.
-- **Juicy16 plays about 10 dB quieter than VGMTrans.** Measured end to end on
-  `SEQ_BGM_N_CASTLE`: VGMTrans/BASSMIDI renders it at -16.99 dBFS RMS, Juicy16 at
-  -27.41. The offset is uniform - relative balance between instruments matches
-  BASSMIDI within 0.66 dB, and velocity, CC7 and CC11 curves all match within
-  0.26 dB - but a uniform deficit still reads as "the quiet instruments are too
-  quiet", because the loud ones stay prominent and the quiet ones fall away.
+- **Juicy16 plays about 8.6 dB quieter than VGMTrans**, was about 10.1 dB before
+  `0.6.1-beta.3`. The master trim's own +1.5 dB default was never reaching the
+  audio; that is fixed, and the rest is deliberate. The offset is uniform -
+  relative balance between instruments matches BASSMIDI within 0.66 dB, and
+  velocity, CC7 and CC11 curves all match within 0.26 dB - but a uniform deficit
+  still reads as "the quiet instruments are too quiet", because the loud ones
+  stay prominent and the quiet ones fall away. It also reads as dullness: the
+  same material 10 dB down loses apparent top and bottom before it loses
+  midrange.
+
   Juicy16 uses FluidSynth's documented `synth.gain` default of 0.2, chosen in
-  0.5.1-alpha.5 after gain 1.0 clipped a real rip at +7.32 dBFS. Raising the
-  output to match VGMTrans would clip the loudest banks in the test corpus.
+  0.5.1-alpha.5 after gain 1.0 clipped a real rip at +7.32 dBFS. **VGMTrans gets
+  its extra level by running past full scale**, which is why matching it is not
+  simply a matter of turning Juicy16 up. Measured across ten rips at 48 kHz,
+  decoded to float so overs are preserved rather than clipped:
+
+  | rip | Juicy16 peak | BASSMIDI peak | RMS gap |
+  | --- | ---: | ---: | ---: |
+  | `SEQ_GS_ENDING` | -2.69 | **+7.61** | 10.28 |
+  | `SEQ_BGM_VS_ACHROMA` | -3.24 | **+6.41** | 10.22 |
+  | `SEQ_BGM_VS_GYMLEADER` | -4.78 | **+5.55** | 10.28 |
+  | `SEQ_BGM_C_03` | -6.46 | **+3.50** | 10.22 |
+  | `SEQ_CITY05_D` | -7.94 | **+1.87** | 10.09 |
+  | `BGM_02` | -8.53 | **+1.50** | 10.24 |
+  | `SEQ_BGM_N_CASTLE` | -10.24 | -0.18 | 10.26 |
+  | `SEQ_ROAD_D_D` | -10.40 | -0.09 | 10.09 |
+  | `Majestic Castle` | -11.50 | -5.40 | 6.12 |
+  | `BGM_SHIRO` | -14.77 | -4.44 | 10.27 |
+
+  BASSMIDI is over full scale on six of the ten. Reproducing its loudness would
+  reproduce that clipping, so closing the remaining gap needs a limiter rather
+  than a larger number, and that is deferred - see `MILESTONE_PLAN.md`.
   Workaround today: raise the master output trim, which spans -24 to +12 dB.
+  (Juicy16 figures are at the default trim as it shipped in Beta 1; the fix
+  above moves each of them 1.5 dB louder.)
+- **Rips sounded slightly dull — partly fixed in 0.6.1-beta.3, not yet re-heard
+  in a DAW.** Every rip was playing at FluidSynth's 4th-order interpolation
+  instead of the 7th-order Juicy16 asks for, because a GM/GS/XG reset SysEx
+  resets the method on all 16 channels and every VGMTrans rip opens with one.
+  Restoring it puts 0.2–0.6 dB back into 4–8 kHz and takes about 0.5 dB of
+  imaging noise off the top, on banks whose samples are stored well below the
+  host rate. It changes nothing on a bank already sampled near 44 kHz. The
+  remainder of any dullness is the level deficit above: material played 8–10 dB
+  quieter loses apparent top and bottom before it loses midrange, which is a
+  property of hearing rather than of the filter chain.
 - **Some material sounds different from other players.** Juicy16 reproduces
   FluidSynth faithfully — measured within 0.03 dB RMS of stock FluidSynth on the
-  same rip, with velocity, CC7, CC11, per-instrument balance and the volume
+  same rip, and its whole-file spectrum matches stock FluidSynth band for band
+  within 0.1 dB, with velocity, CC7, CC11, per-instrument balance and the volume
   envelope all matching VGMTrans's own BASSMIDI within 0.7 dB. What differs is
   overall level, above. If something still sounds wrong to you, a report naming
   the file, the channel and the instrument is far more useful than a general
@@ -84,9 +120,25 @@ interface was inspected in the running plugin. Cosmetic and unresolved.
 
 ## Per-channel loudness
 
-Testers hear some channels louder than they should be. Nothing plugin-side has
-been found, and the report is too general to measure, so here is what is known
-and what a useful report contains.
+- **Echo channels loud from the second play on — fixed in 0.6.1-beta.2, not
+  yet re-heard in a DAW.** A rip's echo channel is often quieter than its
+  melody only through CC11 expression (BGM_3C: echo 74, melody 104, identical
+  notes and velocities). Cubase and FL send Reset All Controllers on stop,
+  which returns expression to 127, and a VST3 host's parameter cache never
+  resends an unchanged CC11 — so every play after the first had the echo at
+  full level. Both resets now re-assert the expression the stream last set on
+  that channel, as they already re-assert programs, CC7, CC10 and the bend
+  range. **Trade-off:** a file that sends CC121 itself to return expression to
+  127 mid-song gets its previous expression back instead. No file in the
+  4,146-rip corpus sends CC121.
+- **A channel loud from the very first play is not this.** Velocity, CC7 and
+  CC11 all measured correct in the engine, in the plugin's processing path and
+  through the built VST3 — a CC7-attenuated echo (SEQ_BGM_C_03: 45 against 97)
+  sits 13.4 dB under its melody in every one of them, first play and replay.
+  If it does not in a DAW, the CC7 is not arriving, and the row's Vol knob
+  will say so.
+
+What is known, and what a useful report contains:
 
 - Velocity, CC7 and CC11 curves match VGMTrans's BASSMIDI within 0.26 dB and
   per-instrument balance within 0.66 dB, on SF2. FluidSynth 2.5.5's native DLS

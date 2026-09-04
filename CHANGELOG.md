@@ -1,13 +1,58 @@
 # Changelog
 
-## 0.6.1-beta.1 — unreleased
+## 0.6.1-beta.3 — unreleased
 
 What Beta 1 testing turned up. Offline evidence only so far: the engine suite
-grew from 149 to 158 checks and the eight new ones fail against the Beta 1
-engine; nothing below has been re-confirmed in a DAW yet.
+grew from 149 to 164 checks and thirteen of the fifteen new ones fail against
+the Beta 1 engine; nothing below has been re-confirmed in a DAW yet.
 
 ### Fixed
 
+- **Every rip played at the wrong interpolation quality.** FluidSynth keeps the
+  sample interpolation method per channel, and `fluid_channel_init` — which a
+  GM/GS/XG reset SysEx runs on all 16 channels — returns it to the 4th-order
+  default. Every VGMTrans rip opens with a GM System On at tick 0, so the
+  7th-order method Juicy16 sets when it builds the synth was being thrown away
+  before the first note of every file: no rip has ever played at the quality
+  the plugin claims. It is now re-asserted after a reset, exactly as programs,
+  CC7/CC10, the bend range and CC11 already were. The level does not change,
+  only the spectrum. Measured on `SEQ_ROAD_D_D`, whole piece: 4–6 kHz rises
+  from −22.0 to −21.8 dB and 6–8 kHz from −29.2 to −28.9 dB relative to total,
+  while the imaging noise above 8 kHz drops by 0.5 dB and above 11 kHz by
+  0.6 dB. It only shows on banks whose samples are stored well below the host
+  rate and so need real interpolation: `SEQ_GS_ENDING` gains 0.4 dB at 4–6 kHz
+  and 0.6 dB at 6–8 kHz, while `BGM_02`, whose samples average 39 kHz, does not
+  move at all. `SEQ_ROAD_D_D` keeps 85% of its samples at or below 16 kHz — the
+  lowest of the 25 banks measured — which is why it is the file where this is
+  easiest to hear.
+- **The master trim's own default was never applied.** The parameter defaults to
+  +1.5 dB, but the value only reached the audio through `parameterChanged`,
+  which fires on a *change*. On a fresh instance nothing ever changed it, so the
+  knob read +1.5 dB while the plugin rendered at unity, and the trim only began
+  working once the user moved it. Measured through the built plugin on
+  `SEQ_ROAD_D_D`: −10.40 dBFS peak with the parameter untouched, identical to an
+  explicit 0.0 dB, against −8.87 dBFS now. The gain is seeded from the parameter
+  at construction, so a fresh instance renders at the default the decision log
+  approved on 2026-08-24.
+
+- **Echo channels almost as loud as the melody, from the second play on.**
+  Many VGMTrans rips make an echo channel quieter only through CC11
+  expression: BGM_3C holds its echo at 74 and the melody at 104, with the same
+  notes and velocities on both. Cubase and FL Studio send Reset All
+  Controllers (CC121) when the transport stops, which returns expression to
+  127, and under VST3 the host's parameter cache never resends a CC11 whose
+  value has not changed — so on every play but the first the echo channel
+  sounded at full expression. Measured through the built VST3 with a host that
+  behaves that way: the echo channel rendered at −43.2 dBFS on the first play
+  and −33.9 dBFS on the replay, 2 dB under its melody. A Reset All
+  Controllers, and a GM/GS/XG reset SysEx, now re-assert the expression the
+  MIDI stream last set on that channel, exactly as they re-assert programs,
+  volume, pan and bend range; a channel the file never set still resets to
+  127. Rips that attenuate their echo by velocity or CC7 were never affected —
+  CC121 preserves CC7 by specification and the reset SysEx already re-asserted
+  it — which is why the plugin measured correct on those files. Four engine
+  checks added, three of which fail against the previous engine. The
+  trade-off is recorded in `docs/KNOWN_ISSUES.md`.
 - **Pitch-bend range wrong in Cubase, on some files, some of the time.** Two
   defects in how events sharing one timestamp are ordered, and a third in what
   a reset does to the range.
@@ -57,18 +102,21 @@ engine; nothing below has been re-confirmed in a DAW yet.
 ### Changed
 
 - **Version 0.6.1.** The Beta 1 tag stays `0.6.0-beta.1`; this build reads
-  `0.6.1-beta.1` in the status bar and the settings popover.
+  `0.6.1-beta.3` in the status bar and the settings popover.
 - **Same-timestamp groups are bounded at 2048 events.** Beyond that the
   host's own order is used and nothing is dropped.
 
 ### Open
 
-- **Per-channel loudness.** Testers hear some channels louder than they
-  should be. No plugin-side cause was found: the CC7/CC11/velocity curves match
-  BASSMIDI within 0.26 dB on SF2, and FluidSynth 2.5.5's native DLS loader
-  applies the same volume, expression, velocity and pan modulators. What is
-  needed is a named file, channel, instrument, host and reference player; see
-  `docs/KNOWN_ISSUES.md` for what to check on the host side first.
+- **DAW confirmation.** Everything above is proven offline, through the
+  engine suite and the built VST3 driven the way Cubase and FL drive it.
+  None of it has been re-heard in a DAW yet. For the loudness fix the test
+  is simple: play a rip with a CC11-attenuated echo channel, stop, play
+  again; the second play must sound like the first.
+- **Loudness on the first play** of a CC7-attenuated echo is not touched by
+  this change: the plugin measured correct there in every path. If a channel
+  is loud from the very first play, the file's CC7 is not reaching the plugin
+  — `docs/KNOWN_ISSUES.md` lists the host settings that do that.
 
 ## 0.6.0-beta.1 — Beta 1
 
