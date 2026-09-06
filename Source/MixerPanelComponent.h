@@ -10,15 +10,16 @@
 #pragma once
 
 #include "../JuceLibraryCode/JuceHeader.h"
+#include "FluidSynthModel.h"
 
 using namespace std;
 using SliderAttachment = AudioProcessorValueTreeState::SliderAttachment;
 
 class MixerPanelComponent : public Component,
-                            private ValueTree::Listener
+                            private ValueTree::Listener, private juce::Timer
 {
 public:
-    explicit MixerPanelComponent(AudioProcessorValueTreeState& state);
+    explicit MixerPanelComponent(AudioProcessorValueTreeState& state, FluidSynthModel& model);
     ~MixerPanelComponent() override;
 
     void paint(Graphics&) override;
@@ -37,7 +38,21 @@ private:
     void valueTreeParentChanged(ValueTree&) override {}
     void valueTreeRedirected(ValueTree&) override {}
 
+    void timerCallback() override;
     void syncOutputLevelReadout();
+    FluidSynthModel& fluidSynthModel;
+    Label channelInfo, channelState, channelPatch, channelPatchDetail;
+    juce::OwnedArray<Label> diagnosticLabels, diagnosticValues;
+    class PeakReadout : public juce::TextButton {
+    public:
+        void setPeak(float value, bool over);
+        void paintButton(juce::Graphics&, bool highlighted, bool down) override;
+    private:
+        float peak{0.0f};
+        bool overload{false};
+    };
+    PeakReadout peakReadout;
+    float displayPeak{0.0f};
     void syncBankSummary();
 
     AudioProcessorValueTreeState& valueTreeState;
@@ -48,7 +63,15 @@ private:
     Label outputLevelUnit;
     unique_ptr<SliderAttachment> outputLevelSliderAttachment;
 
-    Label reverbHeading;
+    void selectEffect(bool chorus);
+    juce::TextButton reverbTab{"Reverb"}, chorusTab{"Chorus"};
+    juce::ToggleButton chorusEnable;
+    unique_ptr<AudioProcessorValueTreeState::ButtonAttachment> chorusEnableAttachment;
+    juce::ComboBox chorusWaveform;
+    unique_ptr<AudioProcessorValueTreeState::ComboBoxAttachment> chorusWaveformAttachment;
+    juce::OwnedArray<Slider> chorusKnobs;
+    juce::OwnedArray<Label> chorusLabels;
+    juce::OwnedArray<SliderAttachment> chorusAttachments;
     juce::ToggleButton reverbEnable;
     unique_ptr<AudioProcessorValueTreeState::ButtonAttachment> reverbEnableAttachment;
     juce::ComboBox reverbProfile;

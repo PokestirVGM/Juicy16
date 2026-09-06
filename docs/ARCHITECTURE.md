@@ -1,5 +1,9 @@
 # Architecture notes
 
+## Playback reliability extension (unreleased)
+
+FluidSynth 2.5.7 provides 16 internal dry stereo groups and 16 effect groups, one per MIDI channel, mixed into the existing stereo host bus. All groups share global reverb and chorus settings. Chorus is disabled by default and opt-in through its own parameters. The existing effects scratch sums each group's reverb and chorus before channel trim; CC93 and bank routing still determine the chorus input. Preallocated scratch buffers allow each channel's smoothed audio trim to cover dry audio and wet tails. The host bus layout is unchanged. Diagnostic counters, peaks and controller snapshots are atomic. Metering reads those snapshots; the selected program readout also resolves the current font bank offset. Program/fallback resolution is captured when the engine applies a program. State schema and parameter identity are owned by COMPATIBILITY.md.
+
 The two parts of Juicy16 that are not obvious from the code, and that a change
 can silently break.
 

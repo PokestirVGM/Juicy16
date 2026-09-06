@@ -1,5 +1,15 @@
 # Beta 1 tester guide
 
+## Chorus checks for the development build
+
+Select the Chorus tab, enable it and send CC93 above zero on a test track. Check both waveforms, automate level/rate/depth, and verify save/close/reopen and sample-rate changes. A zero-send channel should remain dry; channel Trim should scale its chorus along with its dry sound. Switching effects tabs must not change either enable state. Existing projects should reopen with chorus off. These checks still require real FL Studio/Cubase sessions.
+
+## Unreleased playback changes: schema 9
+
+New project saves require the new plugin build; earlier builds reject schema 9. Keep a separate older project copy for rollback. Older saves load with DAW recovery and 0 dB channel trims; saves before schema 9 also load with unity CC1 vibrato strength.
+
+Compare a rip's first play, stop/replay and save/close/reopen in FL Studio and Cubase, across all 16 channels. Confirm retained expression/bend range in DAW recovery, and controller defaults after a GM reset in Standard MIDI. Check that Trim stays fixed when MIDI volume changes, Signal distinguishes incoming MIDI from audio, missing patches report their fallback, and Peak/OVER reflects loud passages. Existing per-channel reverb sends, additional host outputs and an internal MIDI player are not part of this change. Audio response still has FluidSynth's 64-sample buffering limit.
+
 ## Required warning
 
 Juicy16 Beta 1 is pre-release audio software. Use copies of important DAW projects and banks, save incremental project versions, and do not depend on Beta state for irreplaceable work. A Beta candidate may be withdrawn for crashes, state corruption, invalid signatures/dependencies, licensing problems, or incorrect multichannel MIDI behavior.
@@ -218,7 +228,7 @@ written, but please do not report it as a defect.
 - Every channel starts at the General MIDI default reverb send (CC91 = 40), so
   the reverb is audible without the file asking for it. A file that sends its own
   CC91 overrides that, per channel.
-- Chorus is switched off. CC93 still reaches the engine but drives nothing yet.
+- Chorus is off by default. The Chorus tab exposes its global controls; it follows the bank and MIDI CC93, which defaults to zero. The selected-channel diagnostics display the send value.
 
 Nobody has listened to these profiles on real rips yet — they were chosen by
 measurement. Reports on how they actually sound are exactly what is wanted.
@@ -279,3 +289,8 @@ Use the Beta issue form or email `contact@pokestir.com` with a subject beginning
 Channel-1-only Cubase behavior, missed later Program Changes, state corruption, invalid signatures, missing dependencies, crashes, and severe audio corruption are priority regressions. Stop using the candidate on important projects until triaged.
 
 Beta 1 displays its version and latest bank-load result but does not collect or copy a diagnostic bundle. Include only the requested non-sensitive facts manually; remove private paths and project/font contents unless explicit submission terms have been approved.
+
+
+### CC1 vibrato strength
+
+Open **Settings → MIDI**, choose **CC1 channel**, and set **CC1 scale** beside Bend scale. The channel picker and rack selection follow each other. Watch **CC1 received** to confirm the host is delivering modulation; “0 (inactive)” means the multiplier has no CC1-driven vibrato to boost. Compare ×1 with ×10 on a rip with weak CC1 vibrato; other channels should stay unchanged. Check a held note while changing the setting, replay after stop, save/reopen, and switch channels to verify each setting is independent. Bank rate/delay remain unchanged; ×10 is a selectable compensation value, not a claim of matching DS hardware. The current build needs the patched FluidSynth dependency documented in DEPENDENCIES.md.

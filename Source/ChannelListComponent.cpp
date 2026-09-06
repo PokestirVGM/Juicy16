@@ -61,7 +61,7 @@ void ChannelListComponent::PatchCell::setRow(int newRow) {
         combo.setSelectedId(id, juce::dontSendNotification);
     else if (chNode.isValid())
         // saved patch isn't present in the loaded font: show a bank/preset placeholder
-        combo.setText(String(static_cast<int>(chNode.getProperty("bank", 0))) + "/"
+        combo.setText("Missing " + String(static_cast<int>(chNode.getProperty("bank", 0))) + ":"
                       + String(static_cast<int>(chNode.getProperty("preset", 0))),
                       juce::dontSendNotification);
     else
@@ -97,6 +97,7 @@ void ChannelListComponent::MuteSoloCell::lookAndFeelChanged() {
     // red in every accent. Both carry a dark label, which is legible on either
     // fill - a near-white fill with a dark letter read as a blank white box.
     auto& lookAndFeel{getLookAndFeel()};
+        if (!lookAndFeel.isColourSpecified(Juicy16::textPrimaryColourId)) return;
     solo.setColour(juce::TextButton::buttonOnColourId,
                    lookAndFeel.findColour(Juicy16::accentColourId));
     mute.setColour(juce::TextButton::buttonOnColourId,
@@ -167,12 +168,18 @@ void ChannelListComponent::MixerCell::setRow(int newRow) {
     row = newRow;
 
     const bool isVolume{columnId == volumeColumn};
+    const bool isTrim{columnId == trimColumn};
     const String prefix{channelPrefix(row)};
-    const String name{prefix + (isVolume ? " volume" : " pan")};
+    const String name{prefix + (isTrim ? " independent trim" : isVolume ? " volume" : " pan")};
     knob.setName(name);
     knob.setTitle(name);
     knob.setDescription(name);
-    knob.setHelpText(isVolume
+    knob.getProperties().set("bipolar", isTrim || columnId == panColumn);
+    if (isTrim) knob.setDoubleClickReturnValue(true, 0.0);
+    knob.setHelpText(isTrim
+        ? "Independent audio trim in dB, including this channel's effects. Incoming MIDI "
+          "does not change it. Double-click for 0 dB."
+        : isVolume
         ? "Volume (CC7) for this channel. Default 100. Incoming CC7 on this "
           "channel replaces this value."
         : "Pan (CC10) for this channel. 64 is centre, 0 is hard left, 127 is "
@@ -182,7 +189,7 @@ void ChannelListComponent::MixerCell::setRow(int newRow) {
     attachment.reset();
     attachment = make_unique<AudioProcessorValueTreeState::SliderAttachment>(
         owner.valueTreeState,
-        (isVolume ? "volCh" : "panCh") + String(row + 1),
+        (isTrim ? "trimCh" : isVolume ? "volCh" : "panCh") + String(row + 1),
         knob);
 }
 
@@ -246,11 +253,14 @@ ChannelListComponent::ChannelListComponent(
               Justification::centredLeft);
     addColumn("Instrument", instrumentColumn, GuiConstants::minInstrumentWidth, false,
               Justification::centredLeft);
-    addColumn("Vol",        volumeColumn,     GuiConstants::mixerCellWidth,     true,
+    addColumn("Volume",        volumeColumn,     GuiConstants::mixerCellWidth,     true,
               Justification::centred);
     addColumn("Pan",        panColumn,        GuiConstants::mixerCellWidth,     true,
               Justification::centred);
 
+    addColumn("Trim dB", trimColumn, GuiConstants::mixerCellWidth, true, Justification::centred);
+    addColumn("Signal", activityColumn, GuiConstants::activityWidth, true, Justification::centred);
+    startTimerHz(20);
     // Keyboard-reachable: arrow keys move the selection, Return opens the
     // selected row's instrument list. Nothing drives row selection from MIDI, so
     // there is no selection for the keyboard to fight.
@@ -264,6 +274,7 @@ ChannelListComponent::ChannelListComponent(
 }
 
 ChannelListComponent::~ChannelListComponent() {
+    stopTimer();
     valueTreeState.state.removeListener(this);
 }
 
@@ -337,7 +348,7 @@ void ChannelListComponent::refreshSilencedRows() {
         const float alpha{(mask & (1u << row)) != 0 ? 0.45f : 1.0f};
         // Mute and solo stay at full strength: they are how the user gets the
         // channel back, so they must not recede with the rest of the row.
-        for (const int column : {instrumentColumn, volumeColumn, panColumn})
+        for (const int column : {instrumentColumn, volumeColumn, panColumn, trimColumn})
             if (auto* cell{table.getCellComponent(column, row)})
                 cell->setAlpha(alpha);
     }
@@ -352,8 +363,21 @@ void ChannelListComponent::paintCell(
     int height,
     bool /*rowIsSelected*/
 ) {
-    if (rowNumber < 0 || rowNumber >= numChannels || columnId != channelColumn)
-        return; // every other column is drawn by its own control
+    if (rowNumber < 0 || rowNumber >= numChannels) return;
+    if (columnId == activityColumn) {
+        const auto d = fluidSynthModel.getChannelDiagnostics(rowNumber);
+        const auto accent = getLookAndFeel().findColour(Juicy16::accentColourId);
+        g.setColour(midiLampTicks[static_cast<size_t>(rowNumber)] > 0 ? accent : accent.withAlpha(0.15f));
+        g.fillEllipse(4.0f, static_cast<float>(height / 2 - 3), 6.0f, 6.0f);
+        const float level = juce::jlimit(0.0f, 1.0f,
+            (juce::Decibels::gainToDecibels(d.peak, -60.0f) + 60.0f) / 60.0f);
+        g.setColour(accent.withAlpha(0.15f));
+        g.fillRect(15, height / 2 - 3, width - 20, 6);
+        g.setColour(d.peak > 1.0f ? getLookAndFeel().findColour(Juicy16::textErrorColourId) : accent);
+        g.fillRect(15, height / 2 - 3, juce::roundToInt(static_cast<float>(width - 20) * level), 6);
+        return;
+    }
+    if (columnId != channelColumn) return; // every other column is drawn by its own control
 
     auto& lookAndFeel{getLookAndFeel()};
     g.setColour(lookAndFeel.findColour(rowNumber == getSelectedChannelIndex()
@@ -373,7 +397,7 @@ Component* ChannelListComponent::refreshComponentForCell(
     bool /*isRowSelected*/,
     Component* existingComponentToUpdate
 ) {
-    if (columnId == channelColumn) {
+    if (columnId == channelColumn || columnId == activityColumn) {
         // painted, not a control
         jassert(existingComponentToUpdate == nullptr);
         return nullptr;
@@ -399,7 +423,8 @@ Component* ChannelListComponent::refreshComponentForCell(
             return cell;
         }
         case volumeColumn:
-        case panColumn: {
+        case panColumn:
+        case trimColumn: {
             auto* cell{static_cast<MixerCell*>(existingComponentToUpdate)};
             if (cell == nullptr)
                 cell = new MixerCell(*this, columnId);
@@ -487,10 +512,36 @@ int ChannelListComponent::instrumentColumnWidth() const {
         getWidth()
             - GuiConstants::channelNumberWidth
             - GuiConstants::muteSoloWidth
-            - 2 * GuiConstants::mixerCellWidth);
+            - 3 * GuiConstants::mixerCellWidth - GuiConstants::activityWidth);
 }
 
 void ChannelListComponent::resized() {
     table.setBoundsInset(BorderSize<int>(0));
     table.getHeader().setColumnWidth(instrumentColumn, instrumentColumnWidth());
+    // Header changes notify asynchronously. Lay out recycled cells now so the
+    // controls stay under their headings during the first frame and resizing.
+    table.updateContent();
+}
+
+void ChannelListComponent::timerCallback() {
+    for (int ch = 0; ch < 16; ++ch) {
+        const auto d = fluidSynthModel.getChannelDiagnostics(ch);
+        const auto i = static_cast<size_t>(ch);
+        if (d.midiEvents != lastMidiEvents[i]) midiLampTicks[i] = 4;
+        else midiLampTicks[i] = juce::jmax(0, midiLampTicks[i] - 1);
+        lastMidiEvents[i] = d.midiEvents;
+        if (auto* cell = dynamic_cast<PatchCell*>(table.getCellComponent(instrumentColumn, ch))) {
+            const auto saved = valueTreeState.state.getChildWithName("channelPrograms").getChildWithProperty("num", ch);
+            const int bank = saved.getProperty("bank", 0), program = saved.getProperty("preset", 0);
+            String description = "Requested " + String(bank) + ":" + String(program);
+            if (d.soundingBank < 0) description += " - no playable instrument";
+            else if (d.soundingBank != bank || d.soundingPreset != program) {
+                const int idx = patchIndexFor(d.soundingBank, d.soundingPreset);
+                description += " - FALLBACK: " + (idx >= 0 ? patchLabel(patches[static_cast<size_t>(idx)])
+                    : String(d.soundingBank) + ":" + String(d.soundingPreset));
+            }
+            cell->getCombo().setTooltip(description);
+        }
+    }
+    table.repaint();
 }

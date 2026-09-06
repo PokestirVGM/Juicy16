@@ -102,8 +102,8 @@ apply_patch() {
 }
 
 fetch_source fluidsynth \
-  https://github.com/FluidSynth/fluidsynth/archive/refs/tags/v2.5.5.tar.gz \
-  0827eefc06f66157c332d7bd0d65ee81be5d4c795f214db7ba0e1c70ee394430
+  https://github.com/FluidSynth/fluidsynth/archive/refs/tags/v2.5.7.tar.gz \
+  ce27840221ab00dd59bf27e85ecbba480c6c2a7c9fbec4243658f68f59c07f4a
 fetch_source gcem \
   https://github.com/kthohr/gcem/archive/012ae73c6d0a2cb09ffe86475f5c6fba3926e200.tar.gz \
   34ab0ee87a9eb26d3087fa9b49c2572ea8ee03db0c9705b83648301a3a3fc172
@@ -131,6 +131,8 @@ apply_patch "$work_dir/sndfile" \
   src/ircam.c \
   52fab7073b1c7716902ee217769a48117577c1f33e84fb038232e2fe41088470 \
   27c25a5938d0c2571f9aaf0910ecedee57c440e62be66cf55f7708fa5ba3a1ab
+
+cmake -DFLUID_SOURCE="$work_dir/fluidsynth" -P "$repo_dir/vendor/fluidsynth_patched/apply.cmake"
 
 mkdir -p "$work_dir/fluidsynth/gcem"
 cmake -E copy_directory "$work_dir/gcem" "$work_dir/fluidsynth/gcem"

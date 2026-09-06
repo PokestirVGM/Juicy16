@@ -214,6 +214,12 @@ std::vector<juce::String> beta1ParameterIds()
     // Appended after Beta 1: host bend compensation. New indices only.
     ids.push_back("bendRange");
     ids.push_back("bendScale");
+    ids.push_back("resetPolicy");
+    for (int channel = 1; channel <= 16; ++channel)
+        ids.push_back("trimCh" + juce::String(channel));
+    ids.insert(ids.end(), {"chorusOn", "chorusVoices", "chorusLevel",
+                           "chorusRate", "chorusDepth", "chorusWaveform"});
+    for (int ch = 1; ch <= 16; ++ch) ids.push_back("vibratoScaleCh" + juce::String(ch));
     return ids;
 }
 
@@ -830,7 +836,7 @@ int main(int argc, char** argv)
                 dynamic_cast<juce::AudioProcessorParameterWithID*>(parameters[static_cast<int>(i)])};
             parameterContract = identified != nullptr
                 && identified->paramID == expectedParameterIds[i]
-                && identified->getVersionHint() == 1;
+                && identified->getVersionHint() == (i < 91 ? 1 : i < 108 ? 2 : i < 114 ? 3 : 4);
             if (!parameterContract)
                 std::printf("    parameter %d expected %s got %s\n",
                             static_cast<int>(i),
@@ -3688,7 +3694,7 @@ int main(int argc, char** argv)
                     allChannelProperties = allChannelProperties
                         && ch->hasAttribute(property);
         check(xml != nullptr && xml->hasTagName("MYPLUGINSETTINGS")
-                  && xml->getIntAttribute("stateVersion", -1) == 6
+                  && xml->getIntAttribute("stateVersion", -1) == 9
                   && allParams && allChannelProperties
                   && font != nullptr && font->hasAttribute("path")
                   && font->hasAttribute("bookmark"),
@@ -3921,7 +3927,7 @@ int main(int argc, char** argv)
         const auto* rewrittenParams{
             rewrittenXml != nullptr ? rewrittenXml->getChildByName("params") : nullptr};
         check(rewrittenXml != nullptr
-                  && rewrittenXml->getIntAttribute("stateVersion", -1) == 6
+                  && rewrittenXml->getIntAttribute("stateVersion", -1) == 9
                   && rewrittenParams != nullptr
                   && !rewrittenParams->hasAttribute("volume")
                   && !rewrittenParams->hasAttribute("pan")
@@ -3966,7 +3972,7 @@ int main(int argc, char** argv)
 
         // A save from a FUTURE schema is still refused rather than half-applied.
         juce::XmlElement future{"MYPLUGINSETTINGS"};
-        future.setAttribute("stateVersion", 7);
+        future.setAttribute("stateVersion", 10);
         juce::MemoryBlock futureState;
         juce::AudioProcessor::copyXmlToBinary(future, futureState);
         migrated.setStateInformation(

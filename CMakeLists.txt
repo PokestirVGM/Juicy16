@@ -23,7 +23,7 @@ project(JUICY16 VERSION 0.6.1)
 # copy, so a stale one is worse than none. Editing this line now wins everywhere;
 # -DJUICYSF_PRERELEASE_LABEL=... on the command line still overrides it, and keeps
 # overriding it for that build directory until the cache entry is removed.
-set(JUICYSF_PRERELEASE_LABEL_DEFAULT "beta.3")
+set(JUICYSF_PRERELEASE_LABEL_DEFAULT "beta.4")
 # A build directory configured once with -DJUICYSF_PRERELEASE_LABEL=... keeps that
 # label forever, silently, and goes on displaying it in the status bar after the
 # line above has moved on. That is precisely the case the status bar exists to
@@ -238,9 +238,9 @@ else ()
     set(FLUIDSYNTH_STATIC_LINK_LIBRARIES "${_juicysf_static_closure}")
   endif ()
 endif ()
-if (JUICYSF_RELEASE_VALIDATION AND NOT FLUIDSYNTH_VERSION VERSION_EQUAL "2.5.5")
+if (JUICYSF_RELEASE_VALIDATION AND NOT FLUIDSYNTH_VERSION VERSION_EQUAL "2.5.7")
   message(FATAL_ERROR
-    "Beta 1 release validation requires FluidSynth 2.5.5 exactly; found ${FLUIDSYNTH_VERSION}. "
+    "Beta 1 release validation requires FluidSynth 2.5.7 exactly; found ${FLUIDSYNTH_VERSION}. "
     "Use the pinned dependency recipe for a reviewed ABI and feature set.")
 endif ()
 if (JUICYSF_RELEASE_VALIDATION)
@@ -979,4 +979,16 @@ if (BUILD_TESTING)
       message(STATUS "  Game-rip tests: ${_juicysf_game_rip_tests}")
     endif ()
   endif ()
+endif ()
+
+if (BUILD_TESTING)
+  add_executable(JuicySFPlaybackReliabilityTests tests/PlaybackReliabilityTests.cpp)
+  juicysf_treat_warnings_as_errors(tests/PlaybackReliabilityTests.cpp)
+  target_include_directories(JuicySFPlaybackReliabilityTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Source")
+  target_link_libraries(JuicySFPlaybackReliabilityTests PRIVATE
+    JuicySFPlugin juce::juce_audio_utils juce::juce_gui_extra ${FLUIDSYNTH_TARGET})
+  target_compile_features(JuicySFPlaybackReliabilityTests PRIVATE cxx_std_17)
+  target_compile_definitions(JuicySFPlaybackReliabilityTests PRIVATE JUCE_LOG_ASSERTIONS=1)
+  add_test(NAME playback_reliability COMMAND JuicySFPlaybackReliabilityTests)
+  set_tests_properties(playback_reliability PROPERTIES LABELS "engine;playback")
 endif ()

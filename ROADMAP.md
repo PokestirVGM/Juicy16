@@ -1,5 +1,11 @@
 # Roadmap and release status
 
+## Current development — 0.6.1-beta.4, 2026-09-06
+
+Playback reliability work adds FluidSynth 2.5.7, explicit reset policies, immediate controller/project recall, independent channel audio trims, and MIDI/audio/fallback/overload diagnostics. Global chorus now shares the effects panel with reverb, with explicit controls and MIDI CC93 routing. The interface cleanup adds readable effect values, a master peak meter, aligned channel diagnostics and properly synchronized row layout. Per-channel CC1 vibrato strength adds a ×1–×24 multiplier without rewriting MIDI values. State advances to schema 9 with migration from older saves. The internal MIDI player, separate host outputs and per-channel reverb-send controls remain out of scope.
+
+The local beta.4 AU and VST3 were refreshed on 2026-09-06 after the CC1 controls moved beside pitch controls in MIDI settings, with an explicit channel picker and live received-CC1 readout. Strict Release passed 16/16 tests and both installed bundles passed their format smoke tests. A channel-1 render of the private Shitenno MIDI/SF2 confirms ×24 changes the audio after its first nonzero CC1 at 17.052606 seconds, with identical audio beforehand; this does not establish hardware parity or FL Studio controller delivery. This work is not a published release. FL Studio and Cubase replay/save/reopen validation remains open. Audio-onset tests expose an existing FluidSynth limit of up to 63 additional engine samples; sample-accurate synthesis is still an unresolved requirement.
+
 ## Where the project is
 
 **`0.6.0-beta.1` — Beta 1, released.** macOS 11 or later on Apple Silicon, AU
@@ -94,8 +100,6 @@ scope and is not built.
   of them, up to +7.6 dBFS. Matching it by turning Juicy16 up would reproduce
   that clipping, and a limiter is a real design change for a plugin whose claim
   is faithful playback.
-- **Chorus.** FluidSynth's chorus is switched off rather than left at an unchosen
-  default. It needs controls of its own before it is turned on.
 - **Per-channel reverb sends.** The reverb is global for Beta 1; incoming CC91
   still drives each channel's send from the MIDI file.
 - **Sandbox entitlements.** Declared in the build but discarded by the post-build

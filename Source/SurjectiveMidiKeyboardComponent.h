@@ -214,9 +214,11 @@ public:
         mouseOverKeyOverlayColourId     = 0x1005003,  /**< This colour will be overlaid on the normal note colour. */
         keyDownOverlayColourId          = 0x1005004,  /**< This colour will be overlaid on the normal note colour. */
         textLabelColourId               = 0x1005005,
-        upDownButtonBackgroundColourId  = 0x1005006,
-        upDownButtonArrowColourId       = 0x1005007,
-        shadowColourId                  = 0x1005008
+        // JUCE moved these IDs when it introduced KeyboardComponentBase.
+        // Use the current IDs so this keyboard receives the registered theme.
+        upDownButtonBackgroundColourId  = MidiKeyboardComponent::upDownButtonBackgroundColourId,
+        upDownButtonArrowColourId       = MidiKeyboardComponent::upDownButtonArrowColourId,
+        shadowColourId                  = MidiKeyboardComponent::shadowColourId
     };
 
     /** Returns the position within the component of the left-hand edge of a key.

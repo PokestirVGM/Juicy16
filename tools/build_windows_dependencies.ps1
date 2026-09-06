@@ -153,8 +153,8 @@ try {
     # Versions and checksums are identical to tools/build_macos_dependencies.sh.
     # Change them in both places or the two platforms stop sharing one inventory.
     Get-PinnedSource -Name 'fluidsynth' `
-        -Url 'https://github.com/FluidSynth/fluidsynth/archive/refs/tags/v2.5.5.tar.gz' `
-        -ExpectedSha256 '0827eefc06f66157c332d7bd0d65ee81be5d4c795f214db7ba0e1c70ee394430'
+        -Url 'https://github.com/FluidSynth/fluidsynth/archive/refs/tags/v2.5.7.tar.gz' `
+        -ExpectedSha256 'ce27840221ab00dd59bf27e85ecbba480c6c2a7c9fbec4243658f68f59c07f4a'
     Get-PinnedSource -Name 'gcem' `
         -Url 'https://github.com/kthohr/gcem/archive/012ae73c6d0a2cb09ffe86475f5c6fba3926e200.tar.gz' `
         -ExpectedSha256 '34ab0ee87a9eb26d3087fa9b49c2572ea8ee03db0c9705b83648301a3a3fc172'
@@ -175,6 +175,9 @@ try {
         -ExpectedSha256 'ffe12ef8add3eaca876f04087734e6e8e029350082f3251f565fa9da55b52121'
 
     Repair-SndfileIrcam -SourceDir (Join-Path $workDir 'sndfile')
+
+    & cmake "-DFLUID_SOURCE=$(Join-Path $workDir 'fluidsynth')" -P (Join-Path $PSScriptRoot '../vendor/fluidsynth_patched/apply.cmake')
+    if ($LASTEXITCODE -ne 0) { throw 'FluidSynth vibrato patch failed' }
 
     # FluidSynth vendors GCEM in-tree rather than finding it.
     $gcemTarget = Join-Path $workDir 'fluidsynth\gcem'

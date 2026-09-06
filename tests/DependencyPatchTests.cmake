@@ -96,3 +96,26 @@ foreach (RECORDED_HASH IN ITEMS
 endforeach ()
 
 message(STATUS "libsndfile IRCAM hardening patch, both recipes, and the README agree")
+
+# Both platforms must download the same reviewed synthesis engine archive.
+foreach (recipe tools/build_macos_dependencies.sh tools/build_windows_dependencies.ps1)
+  file(READ "${SOURCE_ROOT}/${recipe}" ENGINE_RECIPE)
+  string(FIND "${ENGINE_RECIPE}" "ce27840221ab00dd59bf27e85ecbba480c6c2a7c9fbec4243658f68f59c07f4a" ENGINE_HASH_AT)
+  string(FIND "${ENGINE_RECIPE}" "2.5.7" ENGINE_VERSION_AT)
+  if (ENGINE_HASH_AT LESS 0 OR ENGINE_VERSION_AT LESS 0)
+    message(FATAL_ERROR "FluidSynth 2.5.7 pin/checksum drift in ${recipe}")
+  endif ()
+endforeach ()
+
+# Both platforms share the exact reviewed CC1 vibrato extension.
+file(SHA256 "${SOURCE_ROOT}/vendor/fluidsynth_patched/apply.cmake" VIBRATO_HASH)
+if(NOT VIBRATO_HASH STREQUAL "5652f9b49f23927da025a69c5922078c09430fa9ba671775980633adcbf54689")
+  message(FATAL_ERROR "Unreviewed vibrato apply.cmake; refresh evidence when changing the engine patch")
+endif()
+file(SHA256 "${SOURCE_ROOT}/vendor/fluidsynth_patched/cc1-vibrato-scale.patch" VIBRATO_HASH)
+if(NOT VIBRATO_HASH STREQUAL "ad2549f3b64b2ce8bba850656e45e45583c8fdc3b601f7212f0832c3322f9f8d")
+  message(FATAL_ERROR "Unreviewed vibrato cc1-vibrato-scale.patch; refresh evidence when changing the engine patch")
+endif()
+foreach(recipe "${MACOS_RECIPE}" "${WINDOWS_RECIPE}")
+  assert_contains("FluidSynth dependency recipe" "${recipe}" "vendor/fluidsynth_patched/apply.cmake")
+endforeach()

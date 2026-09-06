@@ -69,7 +69,11 @@ inline juce::MemoryBlock listChunk(const char* listType, const juce::MemoryBlock
 // Builds a complete SF2 image. One instrument and one sample per preset, each
 // instrument a single zone that loops its sample continuously with scaleTuning 0,
 // so every key sounds the sample's own frequency.
-inline juce::MemoryBlock build(const std::vector<PresetSpec>& presets)
+struct ModSpec {
+    int source, destination, amount, secondarySource{0}, transform{0};
+};
+inline juce::MemoryBlock build(const std::vector<PresetSpec>& presets,
+                               const std::vector<ModSpec>& modulators = {})
 {
     jassert(!presets.empty());
 
@@ -218,7 +222,7 @@ inline juce::MemoryBlock build(const std::vector<PresetSpec>& presets)
             juce::MemoryOutputStream out{ibag, false};
             for (int i = 0; i <= count; ++i) {
                 out.writeShort(static_cast<int16_t>(i * gensPerInstrumentZone));
-                out.writeShort(0);
+                out.writeShort(static_cast<int16_t>(i * static_cast<int>(modulators.size())));
             }
             out.flush();
         }
@@ -227,6 +231,14 @@ inline juce::MemoryBlock build(const std::vector<PresetSpec>& presets)
         juce::MemoryBlock imod;
         {
             juce::MemoryOutputStream out{imod, false};
+            for (int instrument = 0; instrument < count; ++instrument)
+                for (const auto& mod : modulators) {
+                    out.writeShort(static_cast<int16_t>(mod.source));
+                    out.writeShort(static_cast<int16_t>(mod.destination));
+                    out.writeShort(static_cast<int16_t>(mod.amount));
+                    out.writeShort(static_cast<int16_t>(mod.secondarySource));
+                    out.writeShort(static_cast<int16_t>(mod.transform));
+                }
             for (int i = 0; i < 10; ++i)
                 out.writeByte(0);
             out.flush();

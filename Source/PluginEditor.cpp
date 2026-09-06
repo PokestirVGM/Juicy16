@@ -66,7 +66,7 @@ public:
 // The facts are KEY/VALUE rows, not a block of text. As a bare four-line label
 // they read as debug output: "Standalone" and "48000 Hz" with nothing saying
 // what either one is.
-class SettingsPanel final : public Component {
+class SettingsPanel final : public Component, private juce::Timer, private ValueTree::Listener {
 public:
     struct Fact { String key; String value; };
 
@@ -82,15 +82,16 @@ public:
     }
 
     SettingsPanel(AudioProcessorValueTreeState& state,
+                  FluidSynthModel& model,
                   Juicy16::Accent current,
                   std::vector<Fact> factsToShow,
                   std::function<void(Juicy16::Accent)> onAccentChosen)
-    : facts{std::move(factsToShow)}
+    : valueTreeState{state}, fluidSynthModel{model}, facts{std::move(factsToShow)}
     , chooseAccent{std::move(onAccentChosen)}
     {
         setName("Settings");
         setTitle("Settings");
-        setDescription("Juicy16 settings: accent colour, MIDI bend compensation, and build information");
+        setDescription("Juicy16 settings: accent colour, MIDI bend and vibrato compensation, and build information");
 
         midiHeading.setText("MIDI", dontSendNotification);
         midiHeading.setFont(Font{juce::FontOptions{GuiConstants::labelFontHeight}});
@@ -138,6 +139,52 @@ public:
                                      + (factor == 1 ? " (off)" : ""),
                                  factor);
         addAndMakeVisible(bendScaleBox);
+        for (auto* label : {&vibratoChannelLabel, &vibratoScaleLabel, &cc1Label}) {
+            label->setFont(Font{juce::FontOptions{GuiConstants::valueFontHeight}});
+            label->setAccessible(false);
+            addAndMakeVisible(*label);
+        }
+        vibratoChannelLabel.setText("CC1 channel", dontSendNotification);
+        vibratoScaleLabel.setText("CC1 scale", dontSendNotification);
+        cc1Label.setText("CC1 received", dontSendNotification);
+        vibratoChannelBox.setName("CC1 MIDI channel");
+        vibratoChannelBox.setTooltip("Choose the channel whose CC1 vibrato strength is edited. Also selects that channel in the rack.");
+        vibratoScaleBox.setName("Selected channel CC1 vibrato strength");
+        vibratoScaleBox.setTooltip("Scales CC1-driven pitch vibrato on this channel. x1 follows the bank. "
+            "CC1 must be delivered by the host: at zero this does not create vibrato. Bank rate and delay are preserved.");
+        for (int ch = 1; ch <= 16; ++ch) vibratoChannelBox.addItem("Channel " + String(ch), ch);
+        for (int factor = 1; factor <= 24; ++factor)
+            vibratoScaleBox.addItem(String::fromUTF8("\xc3\x97") + String(factor)
+                + (factor == 1 ? " (off)" : ""), factor);
+        for (auto* box : {&vibratoChannelBox, &vibratoScaleBox}) {
+            box->setWantsKeyboardFocus(true);
+            addAndMakeVisible(*box);
+        }
+        vibratoChannelBox.onChange = [this] {
+            fluidSynthModel.selectChannelForEditing(vibratoChannelBox.getSelectedId() - 1);
+            syncVibratoChannel();
+        };
+        cc1Value.setName("Received CC1 value");
+        cc1Value.setFont(Font{juce::FontOptions{GuiConstants::valueFontHeight}});
+        cc1Value.setJustificationType(Justification::centredRight);
+        cc1Value.setTooltip("Current modulation controller received by Juicy16 on the selected channel. "
+            "If this stays zero while the MIDI file contains modulation, check its controller routing in the host.");
+        addAndMakeVisible(cc1Value);
+        valueTreeState.state.addListener(this);
+        syncVibratoChannel();
+        startTimerHz(20);
+        resetPolicyLabel.setText("Reset policy", dontSendNotification);
+        resetPolicyLabel.setFont(Font{juce::FontOptions{GuiConstants::valueFontHeight}});
+        resetPolicyLabel.setAccessible(false);
+        addAndMakeVisible(resetPolicyLabel);
+        resetPolicyBox.addItemList({"DAW recovery", "Standard MIDI"}, 1);
+        resetPolicyBox.setName("MIDI reset policy");
+        resetPolicyBox.setTooltip("DAW recovery preserves setup across resets and reconstructs "
+            "same-timestamp controller order. Standard MIDI honors incoming order and resets. "
+            "Choose before starting playback; it does not reset the current sound.");
+        addAndMakeVisible(resetPolicyBox);
+        resetPolicyAttachment = std::make_unique<AudioProcessorValueTreeState::ComboBoxAttachment>(
+            state, "resetPolicy", resetPolicyBox);
         bendRangeAttachment = std::make_unique<AudioProcessorValueTreeState::ComboBoxAttachment>(
             state, "bendRange", bendRangeBox);
         bendScaleAttachment = std::make_unique<AudioProcessorValueTreeState::ComboBoxAttachment>(
@@ -207,13 +254,15 @@ public:
                     + kHeadingHeight + kHeadingGap + kSwatchHeight
                     + GuiConstants::groupGap + 1 + GuiConstants::groupGap
                     + kHeadingHeight + kHeadingGap
-                    + 2 * kControlRowHeight + kControlRowGap
+                    + 6 * kControlRowHeight + 5 * kControlRowGap
                     + GuiConstants::groupGap + 1 + GuiConstants::groupGap
                     + kHeadingHeight + kHeadingGap
                     + static_cast<int>(facts.size()) * kFactRowHeight);
     }
 
     ~SettingsPanel() override {
+        stopTimer();
+        valueTreeState.state.removeListener(this);
         // The scoped LookAndFeel is a member, so it must be off the ComboBox
         // before either goes away.
         accentBox.setLookAndFeel(nullptr);
@@ -228,10 +277,13 @@ public:
 
     void lookAndFeelChanged() override {
         auto& lookAndFeel{getLookAndFeel()};
+        if (!lookAndFeel.isColourSpecified(Juicy16::textPrimaryColourId)) return;
         const Colour label{lookAndFeel.findColour(Juicy16::textLabelColourId)};
         for (Label* heading : {&accentHeading, &midiHeading, &buildHeading,
-                               &bendRangeLabel, &bendScaleLabel})
+                               &bendRangeLabel, &bendScaleLabel, &resetPolicyLabel,
+                               &vibratoChannelLabel, &vibratoScaleLabel, &cc1Label})
             heading->setColour(Label::textColourId, label);
+        cc1Value.setColour(Label::textColourId, lookAndFeel.findColour(Juicy16::textPrimaryColourId));
         // The closed dropdown draws its text in the accent it currently selects,
         // so the chosen hue is visible without opening the list.
         accentBox.setColour(juce::ComboBox::textColourId,
@@ -264,6 +316,22 @@ public:
             row = r.removeFromTop(kControlRowHeight);
             bendScaleBox.setBounds(row.removeFromRight(row.getWidth() * 3 / 5));
             bendScaleLabel.setBounds(row);
+            r.removeFromTop(kControlRowGap);
+            row = r.removeFromTop(kControlRowHeight);
+            vibratoChannelBox.setBounds(row.removeFromRight(row.getWidth() * 3 / 5));
+            vibratoChannelLabel.setBounds(row);
+            r.removeFromTop(kControlRowGap);
+            row = r.removeFromTop(kControlRowHeight);
+            vibratoScaleBox.setBounds(row.removeFromRight(row.getWidth() * 3 / 5));
+            vibratoScaleLabel.setBounds(row);
+            r.removeFromTop(kControlRowGap);
+            row = r.removeFromTop(kControlRowHeight);
+            cc1Value.setBounds(row.removeFromRight(row.getWidth() * 3 / 5));
+            cc1Label.setBounds(row);
+            r.removeFromTop(kControlRowGap);
+            auto policyRow = r.removeFromTop(kControlRowHeight);
+            resetPolicyBox.setBounds(policyRow.removeFromRight(policyRow.getWidth() * 3 / 5));
+            resetPolicyLabel.setBounds(policyRow);
         }
 
         r.removeFromTop(GuiConstants::groupGap);
@@ -288,13 +356,40 @@ private:
     static constexpr int kControlRowHeight{24};
     static constexpr int kControlRowGap{6};
 
+    void timerCallback() override {
+        const int value = fluidSynthModel.getChannelDiagnostics(attachedVibratoChannel).modulation;
+        cc1Value.setText(String(value) + (value == 0 ? " (inactive)" : ""), dontSendNotification);
+    }
+    void syncVibratoChannel() {
+        const int ch = juce::jlimit(0, 15, static_cast<int>(valueTreeState.state
+            .getChildWithName("uiState").getProperty("selectedChannel", 1)) - 1);
+        if (ch != attachedVibratoChannel) {
+            vibratoScaleAttachment.reset();
+            attachedVibratoChannel = ch;
+            vibratoChannelBox.setSelectedId(ch + 1, dontSendNotification);
+            vibratoScaleAttachment = std::make_unique<AudioProcessorValueTreeState::ComboBoxAttachment>(
+                valueTreeState, "vibratoScaleCh" + String(ch + 1), vibratoScaleBox);
+        }
+        timerCallback();
+    }
+    void valueTreePropertyChanged(ValueTree& tree, const Identifier& property) override {
+        if (tree.getType() == StringRef("uiState") && property == StringRef("selectedChannel"))
+            syncVibratoChannel();
+    }
+    AudioProcessorValueTreeState& valueTreeState;
+    FluidSynthModel& fluidSynthModel;
+    Label vibratoChannelLabel, vibratoScaleLabel, cc1Label, cc1Value;
+    juce::ComboBox vibratoChannelBox, vibratoScaleBox;
+    std::unique_ptr<AudioProcessorValueTreeState::ComboBoxAttachment> vibratoScaleAttachment;
+    int attachedVibratoChannel{-1};
     std::vector<Fact> facts;
     Label accentHeading, midiHeading, buildHeading;
-    Label bendRangeLabel, bendScaleLabel;
+    Label bendRangeLabel, bendScaleLabel, resetPolicyLabel;
     AccentListLookAndFeel accentListLookAndFeel;
     juce::ComboBox accentBox;
-    juce::ComboBox bendRangeBox, bendScaleBox;
+    juce::ComboBox bendRangeBox, bendScaleBox, resetPolicyBox;
     // Declared after the boxes they attach to, so they are destroyed first.
+    std::unique_ptr<AudioProcessorValueTreeState::ComboBoxAttachment> resetPolicyAttachment;
     std::unique_ptr<AudioProcessorValueTreeState::ComboBoxAttachment> bendRangeAttachment;
     std::unique_ptr<AudioProcessorValueTreeState::ComboBoxAttachment> bendScaleAttachment;
     juce::OwnedArray<Label> factKeys, factValues;
@@ -315,7 +410,7 @@ JuicySFAudioProcessorEditor::JuicySFAudioProcessorEditor(
 , midiKeyboard{p.keyboardState, SurjectiveMidiKeyboardComponent::horizontalKeyboard}
 , channelRack{state, p.getFluidSynthModel()}
 , filePicker{state}
-, mixerPanel{state}
+, mixerPanel{state, p.getFluidSynthModel()}
 {
     // Install the palette before any child is constructed below reads a colour.
     // Set on the editor rather than globally: a host runs several plugins in one
@@ -354,7 +449,8 @@ JuicySFAudioProcessorEditor::JuicySFAudioProcessorEditor(
     lastUIHeight.referTo(state.state.getChildWithName("uiState").getPropertyAsValue("height", nullptr));
 
     // set our component's initial size to be the last one that was stored in the filter's settings
-    setSize(lastUIWidth.getValue(), lastUIHeight.getValue());
+    setBoundsConstrained({getX(), getY(), static_cast<int>(lastUIWidth.getValue()),
+                          static_cast<int>(lastUIHeight.getValue())});
 
     lastUIWidth.addListener(this);
     lastUIHeight.addListener(this);
@@ -414,6 +510,8 @@ void JuicySFAudioProcessorEditor::applyAccentFromState() {
 }
 
 void JuicySFAudioProcessorEditor::showSettings() {
+    settingsCallout.reset();
+    settingsContent.reset();
     // Named facts, in the order a bug report wants them.
     std::vector<SettingsPanel::Fact> facts{
         SettingsPanel::Fact{"Version", JUICY16_VERSION},
@@ -426,6 +524,7 @@ void JuicySFAudioProcessorEditor::showSettings() {
 
     auto panel{std::make_unique<SettingsPanel>(
         valueTreeState,
+        audioProcessor.getFluidSynthModel(),
         lookAndFeel.getAccent(),
         std::move(facts),
         [this](Juicy16::Accent accent) {
@@ -443,10 +542,10 @@ void JuicySFAudioProcessorEditor::showSettings() {
                 top->repaint();
         })};
     panel->setLookAndFeel(&lookAndFeel);
-    juce::CallOutBox::launchAsynchronously(
-        std::move(panel),
-        getLocalArea(&logoButton, logoButton.getLocalBounds()),
-        this);
+    settingsContent = std::move(panel);
+    settingsCallout = std::make_unique<juce::CallOutBox>(
+        *settingsContent, getLocalArea(&logoButton, logoButton.getLocalBounds()), this);
+    settingsCallout->enterModalState(isShowing());
 }
 
 void JuicySFAudioProcessorEditor::syncKeyboardChannel() {
@@ -482,11 +581,15 @@ void JuicySFAudioProcessorEditor::valueTreePropertyChanged(ValueTree& tree, cons
 
 // called when the stored window size changes
 void JuicySFAudioProcessorEditor::valueChanged(Value&) {
-    setSize(lastUIWidth.getValue(), lastUIHeight.getValue());
+    setBoundsConstrained({getX(), getY(), static_cast<int>(lastUIWidth.getValue()),
+                          static_cast<int>(lastUIHeight.getValue())});
 }
 
 JuicySFAudioProcessorEditor::~JuicySFAudioProcessorEditor()
 {
+    // Settings listeners and parameter attachments must die before the processor.
+    settingsCallout.reset();
+    settingsContent.reset();
     removeMouseListener(this);
     valueTreeState.state.removeListener(this);
     lastUIWidth.removeListener(this);

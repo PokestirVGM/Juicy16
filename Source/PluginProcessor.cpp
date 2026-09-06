@@ -13,6 +13,7 @@
 #include "MidiConstants.h"
 #include "Util.h"
 #include "GuiConstants.h"
+#include <limits>
 
 using namespace std;
 using Parameter = AudioProcessorValueTreeState::Parameter;
@@ -257,6 +258,38 @@ AudioProcessorValueTreeState::ParameterLayout JuicySFAudioProcessor::createParam
                         0, 24, 0, "Bend Rng"));
     layout.add(intParam("bendScale", "pitch-bend scale", 1, 24, 1, "Bend x"));
 
+    layout.add(make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{"resetPolicy", 2}, "MIDI reset policy",
+        juce::StringArray{"DAW recovery", "Standard MIDI"}, 0));
+    for (int ch = 1; ch <= 16; ++ch)
+        layout.add(make_unique<juce::AudioParameterFloat>(
+            juce::ParameterID{"trimCh" + String(ch), 2},
+            "independent trim for MIDI channel " + String(ch),
+            juce::NormalisableRange<float>{-24.0f, 12.0f, 0.1f}, 0.0f,
+            juce::AudioParameterFloatAttributes{}.withLabel("dB")));
+    layout.add(make_unique<juce::AudioParameterBool>(
+        juce::ParameterID{"chorusOn", 3}, "Chorus enabled", false));
+    layout.add(make_unique<juce::AudioParameterInt>(
+        juce::ParameterID{"chorusVoices", 3}, "Chorus voices", 1, 8, 3));
+    layout.add(make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"chorusLevel", 3}, "Chorus level",
+        juce::NormalisableRange<float>{0.0f, 1.0f, 0.001f}, 0.6f));
+    layout.add(make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"chorusRate", 3}, "Chorus rate",
+        juce::NormalisableRange<float>{0.1f, 5.0f, 0.01f}, 0.2f,
+        juce::AudioParameterFloatAttributes{}.withLabel("Hz")));
+    layout.add(make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"chorusDepth", 3}, "Chorus depth",
+        juce::NormalisableRange<float>{0.0f, 21.0f, 0.01f}, 4.25f,
+        juce::AudioParameterFloatAttributes{}.withLabel("ms")));
+    layout.add(make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{"chorusWaveform", 3}, "Chorus waveform",
+        juce::StringArray{"Sine", "Triangle"}, 0));
+    for (int ch = 1; ch <= 16; ++ch)
+        layout.add(make_unique<juce::AudioParameterInt>(
+            juce::ParameterID{"vibratoScaleCh" + String(ch), 4},
+            "CC1 vibrato strength for MIDI channel " + String(ch), 1, 24, 1,
+            juce::AudioParameterIntAttributes{}.withLabel("x")));
     return layout;
 }
 
@@ -294,7 +327,9 @@ bool JuicySFAudioProcessor::producesMidi() const
 
 double JuicySFAudioProcessor::getTailLengthSeconds() const
 {
-    return 0.0;
+    // A bank can contain sustained/looped voices and arbitrarily long releases.
+    // Do not advertise silence to hosts while an instrument or reverb is ringing.
+    return std::numeric_limits<double>::infinity();
 }
 
 int JuicySFAudioProcessor::getNumPrograms()
@@ -434,7 +469,21 @@ void JuicySFAudioProcessor::getStateInformation (MemoryBlock& destData)
     XmlElement* params{xml.createNewChildElement("params")};
     for (auto* param : getParameters()) {
          if (auto* p = dynamic_cast<AudioProcessorParameterWithID*> (param)) {
-             params->setAttribute(p->paramID, p->getValue());
+             float value = p->getValue();
+             int channelIndex = FluidSynthModel::progParamChannel(p->paramID);
+             if (p->paramID.startsWith("volCh") || p->paramID.startsWith("panCh")) {
+                 channelIndex = p->paramID.substring(5).getIntValue() - 1;
+                 if (channelIndex >= 0 && channelIndex < 16)
+                     value = static_cast<float>(fluidSynthModel.savedMixerValue(
+                         channelIndex, p->paramID.startsWith("volCh") ? 0 : 1)) / 127.0f;
+             } else if (channelIndex >= 0 || p->paramID == "bank" || p->paramID == "preset") {
+                 if (channelIndex < 0) channelIndex = fluidSynthModel.getSelectedChannel();
+                 int bank{0}, program{0};
+                 if (fluidSynthModel.getAppliedChannelProgram(channelIndex, bank, program))
+                     value = p->paramID == "bank" ? static_cast<float>(bank) / 255.0f
+                         : static_cast<float>(program) / 127.0f;
+             }
+             params->setAttribute(p->paramID, value);
          }
     }
     {
@@ -461,12 +510,19 @@ void JuicySFAudioProcessor::getStateInformation (MemoryBlock& destData)
             ValueTree ch{tree.getChild(i)};
             XmlElement* chElement{channelProgramsElement->createNewChildElement("ch")};
             chElement->setAttribute("num", static_cast<int>(ch.getProperty("num", i)));
+            int liveBank{0}, liveProgram{0};
+            const bool live = fluidSynthModel.getAppliedChannelProgram(i, liveBank, liveProgram);
+            chElement->setAttribute("expression", fluidSynthModel.rememberedExpression(i));
+            chElement->setAttribute("bendRange", fluidSynthModel.rememberedBendRange(i));
             // Driven off the model's own list so the writer and the reader cannot
             // drift apart when the per-channel schema changes.
             for (const String& p : FluidSynthModel::perChannelParams) {
                 chElement->setAttribute(
-                    p, static_cast<int>(
-                           ch.getProperty(p, FluidSynthModel::defaultParamValue(p))));
+                    p, p == "bank" && live ? liveBank
+                       : p == "preset" && live ? liveProgram
+                       : p == "volume" ? fluidSynthModel.savedMixerValue(i, 0)
+                       : p == "pan" ? fluidSynthModel.savedMixerValue(i, 1)
+                       : static_cast<int>(ch.getProperty(p, FluidSynthModel::defaultParamValue(p))));
             }
         }
     }
@@ -524,6 +580,22 @@ void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInByt
             // ignored rather than migrated, because there is no meaningful
             // mapping from an envelope control to a mixer control.
             const bool restoreMixer{stateVersion >= 3};
+            fluidSynthModel.discardPendingStateUpdates();
+            for (int ch = 0; ch < 16; ++ch)
+                fluidSynthModel.restoreRememberedControllers(ch, -1, -1);
+            if (stateVersion < 7) {
+                valueTreeState.getParameter("resetPolicy")->setValueNotifyingHost(0.0f);
+                for (int ch = 1; ch <= 16; ++ch)
+                    valueTreeState.getParameter("trimCh" + String(ch))->setValueNotifyingHost(2.0f / 3.0f);
+            }
+            if (stateVersion < 9)
+                for (int ch = 1; ch <= 16; ++ch)
+                    valueTreeState.getParameter("vibratoScaleCh" + String(ch))->setValueNotifyingHost(0.0f);
+            if (stateVersion < 8)
+                for (const auto& id : FluidSynthModel::chorusParamIds) {
+                    auto* control = valueTreeState.getParameter(id);
+                    control->setValueNotifyingHost(control->getDefaultValue());
+                }
             // Restore per-channel assignments BEFORE the soundFont, so that the
             // font load (triggered below) re-applies them to the synth.
             {
@@ -618,6 +690,14 @@ void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInByt
             // Ensure the global params + UI reflect the restored selected channel,
             // now that the font has loaded.
             fluidSynthModel.syncToSelectedChannel();
+            if (auto* channels = xmlState->getChildByName("channelPrograms"))
+                for (auto* saved : channels->getChildIterator()) {
+                    const int ch = saved->getIntAttribute("num", -1);
+                    if (ch >= 0 && ch < 16)
+                        fluidSynthModel.restoreRememberedControllers(ch,
+                            stateVersion >= 7 ? saved->getIntAttribute("expression", -1) : -1,
+                            stateVersion >= 7 ? saved->getIntAttribute("bendRange", -1) : -1);
+                }
         }
     }
 }

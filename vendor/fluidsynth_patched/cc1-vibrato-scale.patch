@@ -1,0 +1,69 @@
+--- a/include/fluidsynth/synth.h
++++ b/include/fluidsynth/synth.h
+@@ -101,6 +101,9 @@
+ FLUIDSYNTH_API int fluid_synth_set_gen(fluid_synth_t *synth, int chan,
+                                        int param, float value);
+ FLUIDSYNTH_API float fluid_synth_get_gen(fluid_synth_t *synth, int chan, int param);
++/* Juicy16 extension: CC1-driven pitch LFO depth only, without rewriting MIDI. */
++#define FLUIDSYNTH_JUICY16_VIBRATO_SCALE 1
++FLUIDSYNTH_API int fluid_synth_set_cc1_vibrato_scale(fluid_synth_t *synth, int chan, float scale);
+ /** @} MIDI Channel Messages */
+ 
+ 
+--- a/src/synth/fluid_chan.h
++++ b/src/synth/fluid_chan.h
+@@ -83,6 +83,7 @@
+ {
+     fluid_synth_t *synth;                 /**< Parent synthesizer instance */
+     int channum;                          /**< MIDI channel number */
++    float cc1_vibrato_scale;              /* Juicy16 setting, survives MIDI resets */
+ 
+     /* Poly Mono variables see macro access description */
+     int mode;								/**< Poly Mono mode */
+--- a/src/synth/fluid_chan.c
++++ b/src/synth/fluid_chan.c
+@@ -53,6 +53,7 @@
+ 
+     chan->synth = synth;
+     chan->channum = num;
++    chan->cc1_vibrato_scale = 1.0f;
+     chan->preset = NULL;
+     chan->tuning = NULL;
+ 
+--- a/src/synth/fluid_mod.c
++++ b/src/synth/fluid_mod.c
+@@ -498,6 +498,14 @@
+     {
+         final_value = FLUID_FABS(final_value);
+     }
++    /* Scale only CC1 contributions to pitch LFO depth. Bank curves, secondary
++     * sources, explicit zero overrides and all other destinations stay intact. */
++    if((mod->dest == GEN_VIBLFOTOPITCH || mod->dest == GEN_MODLFOTOPITCH)
++            && (((mod->flags1 & FLUID_MOD_CC) && mod->src1 == 1)
++                || ((mod->flags2 & FLUID_MOD_CC) && mod->src2 == 1)))
++    {
++        final_value *= voice->channel->cc1_vibrato_scale;
++    }
+     return final_value;
+ }
+ 
+--- a/src/synth/fluid_synth.c
++++ b/src/synth/fluid_synth.c
+@@ -144,6 +144,17 @@
+ static void fluid_synth_handle_reverb_chorus_num(void *data, const char *name, double value);
+ static void fluid_synth_handle_reverb_chorus_int(void *data, const char *name, int value);
+ 
++
++/* Juicy16 extension. Uses the usual API lock; updates held and future voices.
++ * Range validation rejects NaN as well as values outside the public control. */
++int fluid_synth_set_cc1_vibrato_scale(fluid_synth_t *synth, int chan, float scale)
++{
++    fluid_return_val_if_fail(scale >= 1.0f && scale <= 24.0f, FLUID_FAILED);
++    FLUID_API_ENTRY_CHAN(FLUID_FAILED);
++    synth->channel[chan]->cc1_vibrato_scale = scale;
++    fluid_synth_modulate_voices_LOCAL(synth, chan, 1, 1);
++    FLUID_API_RETURN(FLUID_OK);
++}
+ 
+ static void fluid_synth_reset_basic_channel_LOCAL(fluid_synth_t *synth, int chan, int nbr_chan);
+ static int fluid_synth_check_next_basic_channel(fluid_synth_t *synth, int basicchan, int mode, int val);

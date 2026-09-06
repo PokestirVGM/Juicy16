@@ -1,13 +1,16 @@
 # Beta 1 known issues and unverified areas
 
+## Current development limitations — 2026-09-05
+
+- FluidSynth 2.5.7 still buffers synthesis in 64-sample units. Measured note onset can lag its dispatched timestamp by 0–63 additional engine samples. Existing MIDI-dispatch trace tests do not establish exact audio-onset accuracy. Above 96 kHz, the engine-rate resampling path adds its own timing conversion.
+- The new schema 9 reset policies, trims, chorus, vibrato strength and diagnostics require fresh FL Studio/Cubase replay and project save/reopen validation. Offline harness results do not close that host gate.
+- Channel audio metering includes reverb tails. Idle reverb groups can contain approximately -155 dBFS anti-denormal noise; this is below the visible meter range.
+
 Known limitations and unverified areas in `0.6.0-beta.1`, the Beta 1 release. Read this before reporting a bug: several entries below are deliberate, and one of them is probably what you are hearing.
 
-## Debug-only: LookAndFeel assertions
+## Theme assertions — fixed in current development
 
-Debug builds emit assertion messages from `juce_LookAndFeel.cpp` when the editor
-is constructed — a colour ID that was never registered, which returns black.
-Release builds compile these out and no surface is affected: every part of the
-interface was inspected in the running plugin. Cosmetic and unresolved.
+The UI cleanup resolves custom theme colours only after the plugin theme is attached. It also replaces three stale colour IDs in the copied piano keyboard with JUCE 8's current IDs: keyboard shadow and octave-button background/arrow. Previously those lookups returned black and asserted. The playback harness now logs assertions and renders both effects pages; construction and painting complete with zero JUCE assertions. Explicit UTF-8 conversion also fixes the new labels' string assertions and mojibake. Actual DAW validation remains separate.
 
 ## Reverb
 
@@ -206,7 +209,7 @@ an oversight.
 ## Intentional limitations
 
 - One stereo output for all 16 channels.
-- FluidSynth 2.5.5 renders no higher than 96 kHz. Above that Juicy16 renders at an integer fraction of the host rate and interpolates each block up, so a 192 kHz project plays; MIDI event timing then quantises to one internal sample (about 10 microseconds at 96 kHz) instead of one host sample. Below FluidSynth's 8 kHz floor there is no equivalent path and playback is still muted rather than detuned.
+- FluidSynth 2.5.7 renders no higher than 96 kHz. Above that Juicy16 renders at an integer fraction of the host rate and interpolates each block up, so a 192 kHz project plays; event dispatch then quantises to one internal sample (about 10 microseconds at 96 kHz) instead of one host sample; synthesis additionally has the 64-sample buffering limitation above. Below FluidSynth's 8 kHz floor there is no equivalent path and playback is still muted rather than detuned.
 - A drum channel's bank reaches 255, because FluidSynth adds its 128 drum offset to the Bank Select MSB. That is the number the engine, the UI, the host parameter, and the saved state all report; the font itself still defines only banks 0-128, so the kit heard on such a bank is FluidSynth's substitution.
 
 - Beta 1 is **ad-hoc signed by decision**, not Developer ID signed and not notarized. Every macOS install therefore requires clearing the quarantine attribute; see [BETA_TESTER_GUIDE.md](BETA_TESTER_GUIDE.md). The `ADHOC` label in the package filename is expected for Beta 1 and is not a disqualifier. `LOCAL-DIRTY` still is.

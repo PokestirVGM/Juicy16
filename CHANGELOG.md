@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.6.1-beta.4 — unreleased, 2026-09-05
+
+### Per-channel CC1 vibrato strength
+
+- Added a per-channel ×1–×24 dropdown in MIDI settings beside Bend scale, default ×1, with a channel picker and live received-CC1 readout. Scales the bank's CC1-driven pitch-LFO contribution, preserves incoming controller values and unrelated routes, and updates held notes.
+- Added the reproducible FluidSynth 2.5.7 extension to both dependency recipes. Rebuild the dependency prefix for this feature.
+- Appended 16 parameters with AU hint 4 (130 total), advanced state to schema 9, and restored unity when loading older saves. Existing parameter identities and program units are unchanged. MIDI resets and sample-rate rebuilds retain the strength setting.
+- Added audio and recall regression coverage, including bank overrides, secondary modulation sources and channel isolation. Game-reference matching and actual FL Studio/Cubase validation remain open.
+
+
+### Interface cleanup
+
+- Give all 16 channel rows more vertical room, use clearer typography and lighter knob arcs, and widen the instrument/sidebar layout. The default and minimum editor now fit all rows at 903×712.
+- Separate the effects tabs from the enable/profile row, and add editable percentage/Hz/ms readouts beneath the knobs. Percentages are display/input formatting; parameter ranges and automation IDs stay unchanged.
+- Replace the diagnostic paragraph with instrument/fallback context and aligned controller labels/values. Replace the boxed peak text with an output meter, a 0 dBFS marker and overload indication.
+- Refresh row-cell geometry immediately after column resizing so controls stay under their headings. Clamp older saved window sizes on opening and recall. Avoid resolving theme tokens before the plugin theme is attached, fix three stale piano-keyboard colour IDs, and use explicit UTF-8 conversion for non-ASCII labels.
+
+### Global chorus extension
+
+- Add global enable, voices, level, rate, depth and Sine/Triangle waveform controls on a Chorus tab beside Reverb. Chorus is off by default. The effect follows bank routing and MIDI CC93; enabling it does not inject or overwrite channel sends. The selected-channel readout shows CC93.
+- Apply the same chorus settings to all internal effect groups and include their wet contribution in each channel's independent trim. Smooth continuous controls and retain settings across project recall, MIDI resets and synth/sample-rate rebuilds.
+- State writer advances to schema 8; six parameters append after the existing 108 with AU hint 3, for 114 total. Schema 1–7 migration resets chorus to its off defaults, including in a used instance. Older plugin builds reject the new schema; retain a separate older project copy for rollback.
+- Synthetic audio tests cover both waveforms, zero send, channels 1/16, trim scaling, all-group settings, CC93 diagnostics and project/reset/96 kHz rebuild/legacy-state behavior. Actual DAW and listening comparisons remain open.
+
+### Playback reliability
+
+- Update the pinned FluidSynth engine to 2.5.7 in CMake and both dependency recipes, including the upstream DLS/SF2 fixes since 2.5.5. JUCE stays at 8.0.14.
+- Add an explicit reset policy: DAW recovery preserves the existing host-replay behavior; Standard MIDI respects delivered event order and allows GM/GS/XG resets and CC121 to restore engine controller defaults.
+- Save the most recently applied program, CC7/CC10, expression and bend range without waiting for the editor to catch up. A pending Bank Select alone does not become a saved patch change.
+- Add independent -24 to +12 dB audio trims, MIDI/audio indicators on all 16 rows, actual fallback-instrument diagnostics, and a master peak/overload indicator. Channel trims include each channel's reverb contribution; all reverb settings remain global and MIDI CC91 keeps its existing role.
+- Report an unbounded instrument tail to hosts instead of zero.
+- State migration: writer schema 7 adds expression/range channel records and 17 appended parameters (resetPolicy and trimCh1–16), for 108 total. Existing 91 IDs/order/version hints remain unchanged; additions use AU version hint 2. Older saves open in DAW recovery with unity trims and no remembered controller overrides, including in a used instance. Older plugin builds reject schema 7; keep an older project copy for rollback.
+- Timing characterization exposes FluidSynth's existing 64-sample render quantum: dispatch preserves host timestamps, but synthesis response can lag by another 0–63 engine samples. This engine upgrade does not fix that limitation.
+
+Automated validation is recorded in the local MILESTONE_PLAN.md. This work has not yet been rechecked in FL Studio or Cubase or released as a package.
+
 ## 0.6.1-beta.3 — unreleased
 
 What Beta 1 testing turned up. Offline evidence only so far: the engine suite

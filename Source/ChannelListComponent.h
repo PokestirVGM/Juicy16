@@ -23,7 +23,8 @@ using namespace std;
 
 class ChannelListComponent : public Component,
                              public TableListBoxModel,
-                             public ValueTree::Listener {
+                             public ValueTree::Listener,
+                             private juce::Timer {
 public:
     // Column ids, in the row's left-to-right order.
     enum ColumnId {
@@ -32,6 +33,8 @@ public:
         instrumentColumn,
         volumeColumn,
         panColumn,
+        trimColumn,
+        activityColumn,
     };
 
     ChannelListComponent(
@@ -92,6 +95,9 @@ public:
     void valueTreeRedirected(ValueTree&) override {}
 
 private:
+    void timerCallback() override;
+    std::array<unsigned int, 16> lastMidiEvents{};
+    std::array<int, 16> midiLampTicks{};
     // TableListBox creates a cell component before handing it to the table, so a
     // control built in a cell's constructor resolves the DEFAULT LookAndFeel and
     // caches its colours from it - the theme is only reachable once the cell is

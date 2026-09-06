@@ -18,7 +18,7 @@ This file records the host-facing identifiers frozen by Beta 1, which is the com
 
 ## Parameters and state
 
-The parameter version hint is `1`. This avoids JUCE's Audio Unit assertion for
+The original 91 parameters retain version hint `1`. The 17 playback parameters use hint `2`; the six chorus parameters use hint `3`; the sixteen vibrato parameters use hint `4`. This avoids JUCE's Audio Unit assertion for
 unversioned parameters and establishes the first public ordering baseline. The
 parameter order and string IDs are:
 
@@ -30,7 +30,9 @@ panCh1 .. panCh16,
 muteCh1 .. muteCh16,
 soloCh1 .. soloCh16,
 progCh1 .. progCh16,
-bendRange, bendScale
+bendRange, bendScale,
+resetPolicy, trimCh1 .. trimCh16,
+chorusOn, chorusVoices, chorusLevel, chorusRate, chorusDepth, chorusWaveform
 ```
 
 That is 89 parameters at Beta 1. `0.6.1` appends `bendRange` and `bendScale`
@@ -126,8 +128,8 @@ a channel's runtime bank is FluidSynth's 128 drum offset plus the Bank Select
 MSB; it was widened on 2026-08-23, before the freeze, and moves no further.
 
 The state root is `MYPLUGINSETTINGS`, the Beta 1 schema is version `6`, and the
-writer persists all 91 parameter values, 16 channel records (each carrying
-`bank`, `preset`, `volume`, `pan`, `mute`, and `solo`), UI state, and the
+current writer uses schema `9` and persists all 130 parameter values, 16 channel records (each carrying
+`bank`, `preset`, `volume`, `pan`, `mute`, `solo`, `expression`, and `bendRange`), UI state, and the
 SoundFont path/bookmark record. See
 this document for migration policy.
 
@@ -147,6 +149,12 @@ Automated metadata, engine, and VST3 smoke tests enforce this manifest. Host ses
 ---
 
 ## State schema policy
+
+Version 9 appends `vibratoScaleCh1`–`vibratoScaleCh16`, integers 1–24, default 1, ungrouped with AU hint 4. Existing 114 indices/hints and program-unit identities stay fixed. Schemas 1–8 restore unity for the new controls, including when loaded into a used instance. Older builds reject schema 9. Keep an older project copy when rollback is needed.
+
+Version 8 appends six ungrouped chorus parameters after the existing 108, using AU version hint 3. Their IDs, ranges and defaults are recorded in CONTROLLER_SUPPORT.md. Schema 1–7 loads reset chorus to its off defaults even in a used processor. Older schema 7 builds reject schema 8 rather than silently losing the effect. The original parameter IDs/order and 16 program units remain unchanged. Regression tests verify all-group settings, project recall, reset survival, sample-rate rebuild and legacy migration.
+
+Version 7 appends `resetPolicy` (DAW recovery=0, Standard MIDI=1) and `trimCh1`–`trimCh16` (-24 to +12 dB, default 0), all ungrouped with AU hint 2. The original 91 parameter indices and hints, program list and 16 channel units are unchanged. Channel records add remembered `expression` (-1 means unset) and `bendRange` (-1 unset, otherwise semitones in the upper 7 bits and cents in the lower 7). Reading schema 1–6 resets the new trims/policy and clears controller memory even in a used processor. Schema 7 recall restores that memory after bank/parameter restoration; pending UI updates from the previous state are discarded. Tests cover immediate save before UI synchronization, old-state loading into a used instance and newer-schema rejection.
 
 Juicy16 Beta 1 writes state schema version 6. Beta 2 and the first stable release must continue to read version 6 unless a stop-ship defect makes that unsafe. The automated suite must retain the older-version migration and version 6 round-trip cases for as long as those versions are supported.
 

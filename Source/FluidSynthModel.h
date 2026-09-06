@@ -70,6 +70,7 @@ public:
     bool getPitchBend(int channel, int& value) const;
     bool getPitchWheelSensitivity(int channel, int& semitones) const;
     bool getChannelProgram(int channel, int& bank, int& preset) const;
+    bool getAppliedChannelProgram(int channel, int& bank, int& preset) const;
     unsigned int getProgramApplyFailureMask() const;
     bool getLastDispatchedController(int channel, int controller, int& value, int& sample) const;
     bool getLastDispatchedNoteOnProgram(int channel,
@@ -199,7 +200,47 @@ public:
     // definition of the per-channel schema instead of repeating it and drifting.
     static const StringArray perChannelParams;
 
+    // Appended host parameters: keep this order and its AU version hint frozen.
+    inline static const StringArray chorusParamIds{"chorusOn", "chorusVoices",
+        "chorusLevel", "chorusRate", "chorusDepth", "chorusWaveform"};
+    enum ChorusParam { chorusOn, chorusVoices, chorusLevel, chorusRate, chorusDepth,
+                       chorusWaveform, numChorusParams };
+    bool getChorusSetting(int parameter, int group, double& value) const;
+
+    struct ChannelDiagnostics {
+        unsigned int midiEvents{0};
+        float peak{0.0f};
+        int expression{127}, bendRange{256}, pitchBend{8192}, sustain{0}, chorusSend{0}, modulation{0};
+        int soundingBank{-1}, soundingPreset{-1};
+    };
+    ChannelDiagnostics getChannelDiagnostics(int channel) const;
+    int rememberedExpression(int channel) const;
+    int rememberedBendRange(int channel) const;
+    int savedMixerValue(int channel, int index) const;
+    void restoreRememberedControllers(int channel, int expression, int range);
+    void discardPendingStateUpdates();
+    float consumeMasterPeak();
+    bool hasOutputOverload() const;
+    void clearOutputOverload();
+
 private:
+    std::atomic<float> chorusTarget[numChorusParams]{};
+    float chorusApplied[numChorusParams]{};
+    bool chorusEverApplied{false};
+    juce::SmoothedValue<float> chorusSmoother[3]; // level, rate, depth
+    void resetChorusToParameters();
+    void applyChorusFromAudioThread(int numSamples);
+    std::atomic<bool> standardMidiResets{false};
+    std::atomic<float> channelTrimGain[16];
+    juce::SmoothedValue<float> channelTrimSmoother[16];
+    std::atomic<float> channelPeak[16];
+    std::atomic<unsigned int> channelMidiEvents[16];
+    std::atomic<int> soundingBank[16], soundingPreset[16];
+    std::atomic<int> diagnosticExpression[16], diagnosticBendRange[16];
+    std::atomic<int> diagnosticBend[16], diagnosticSustain[16];
+    std::atomic<float> masterPeak{0.0f};
+    std::atomic<bool> outputOverload{false};
+    AudioBuffer<float> channelScratch;
     static const StringArray programChangeParams;
 
     // True only on the thread synchronously mirroring engine/channel state into
@@ -301,6 +342,9 @@ private:
     std::atomic<int> bendRangeOverride{0}; // semitones, 0 = follow MIDI
     std::atomic<bool> bendRangeOverrideDirty{false};
     std::atomic<int> bendScale{1};
+    std::atomic<int> vibratoScale[16];
+    int appliedVibratoScale[16]{};
+    void applyVibratoScaleFromAudioThread();
     void applyBendRangeOverride(int channel);
     void applyBendRangeChangeFromAudioThread();
     // Re-send a channel's remembered range through the RPN itself, cents included.
@@ -358,6 +402,8 @@ private:
     // Voice ceiling. Dense 16-channel material must never steal voices.
     static constexpr int maximumPolyphony{512};
     static constexpr int kNumChannels{16};
+    std::atomic<int> diagnosticChorusSend[kNumChannels]{};
+    std::atomic<int> diagnosticModulation[kNumChannels]{};
     static constexpr int kNumMixerCcs{2}; // CC7 volume, CC10 pan (see ccIndexOrder)
 
     // shared audio-thread path for "set this channel's program" (MIDI PC or the

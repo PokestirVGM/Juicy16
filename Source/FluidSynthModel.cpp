@@ -9,6 +9,10 @@
 #include <algorithm>
 #include <fluidsynth.h>
 #include "FluidSynthModel.h"
+
+#ifndef FLUIDSYNTH_JUICY16_VIBRATO_SCALE
+#error "Rebuild the FluidSynth dependency with tools/build_macos_dependencies.sh or tools/build_windows_dependencies.ps1 (Juicy16 vibrato extension required)."
+#endif
 #include "MidiConstants.h"
 #include "Util.h"
 #include "GuiConstants.h"
@@ -217,6 +221,16 @@ FluidSynthModel::FluidSynthModel(
         }
         engineBendRange[i].store(-1, std::memory_order_relaxed);
         engineExpression[i].store(-1, std::memory_order_relaxed);
+        channelTrimGain[i].store(1.0f);
+        vibratoScale[i].store(1);
+        channelPeak[i].store(0.0f);
+        channelMidiEvents[i].store(0);
+        soundingBank[i].store(-1);
+        soundingPreset[i].store(-1);
+        diagnosticExpression[i].store(127);
+        diagnosticBendRange[i].store(256);
+        diagnosticBend[i].store(8192);
+        diagnosticSustain[i].store(0);
         resetRpnTracking(i);
         for (int c = 0; c < kNumMixerCcs; c++) {
             midiCcValue[i][c].store(-1, std::memory_order_relaxed);
@@ -239,8 +253,15 @@ FluidSynthModel::FluidSynthModel(
     if (auto* p{dynamic_cast<juce::AudioParameterFloat*>(
             valueTreeState.getParameter("outputLevel"))})
         setOutputLevelDb(p->get());
+    for (const auto& id : chorusParamIds)
+        valueTreeState.addParameterListener(id, this);
+    valueTreeState.addParameterListener("resetPolicy", this);
+    for (int ch = 0; ch < 16; ++ch)
+        valueTreeState.addParameterListener("trimCh" + String(ch + 1), this);
     valueTreeState.addParameterListener("bendRange", this);
     valueTreeState.addParameterListener("bendScale", this);
+    for (int ch = 1; ch <= 16; ++ch)
+        valueTreeState.addParameterListener("vibratoScaleCh" + String(ch), this);
     valueTreeState.addParameterListener("reverbOn", this);
     valueTreeState.addParameterListener("reverbProfile", this);
     for (int i = 0; i < numReverbParams; ++i) {
@@ -259,6 +280,11 @@ FluidSynthModel::FluidSynthModel(
 
 FluidSynthModel::~FluidSynthModel() {
     cancelPendingUpdate();
+    for (const auto& id : chorusParamIds)
+        valueTreeState.removeParameterListener(id, this);
+    valueTreeState.removeParameterListener("resetPolicy", this);
+    for (int ch = 0; ch < 16; ++ch)
+        valueTreeState.removeParameterListener("trimCh" + String(ch + 1), this);
     clearRepairedTemp();
     for (int ch = 0; ch < kNumChannels; ch++) {
         valueTreeState.removeParameterListener(progParamId(ch), this);
@@ -274,6 +300,8 @@ FluidSynthModel::~FluidSynthModel() {
     valueTreeState.removeParameterListener("outputLevel", this);
     valueTreeState.removeParameterListener("bendRange", this);
     valueTreeState.removeParameterListener("bendScale", this);
+    for (int ch = 1; ch <= 16; ++ch)
+        valueTreeState.removeParameterListener("vibratoScaleCh" + String(ch), this);
     valueTreeState.removeParameterListener("reverbOn", this);
     valueTreeState.removeParameterListener("reverbProfile", this);
     for (int i = 0; i < numReverbParams; ++i)
@@ -311,11 +339,19 @@ void FluidSynthModel::initialise() {
     // it overflowed continuously, dropping rvoice events and emitting thousands of
     // "Ringbuffer full" warnings per second. Measured with tools/perf_probe.cpp.
     fluid_settings_setint(settings.get(), "synth.polyphony", maximumPolyphony);
+    // Internal stems allow independent audio trims and honest per-channel meters.
+    // The plugin still exposes ONE stereo output. Identical effects settings are
+    // applied to every internal group; no per-channel effects control is exposed.
+    fluid_settings_setint(settings.get(), "synth.audio-channels", 16);
+    fluid_settings_setint(settings.get(), "synth.audio-groups", 16);
+    fluid_settings_setint(settings.get(), "synth.effects-groups", 16);
     createSynth();
 }
 
 void FluidSynthModel::createSynth() {
     synth = { new_fluid_synth(settings.get()), delete_fluid_synth };
+    std::fill(std::begin(appliedVibratoScale), std::end(appliedVibratoScale), 0);
+    applyVibratoScaleFromAudioThread();
 
     // Gold-standard playback fidelity:
     // - 7th-order ("highest") sample interpolation. FluidSynth defaults to 4th-order,
@@ -343,12 +379,11 @@ void FluidSynthModel::createSynth() {
     // after rendering with smoothing, rather than by moving this.
     fluid_synth_set_gain(synth.get(), 0.2f);
 
-    // Chorus off, deliberately. Now that the effects bus is mixed into the
-    // output (see renderSamples), leaving FluidSynth's `synth.chorus.active`
-    // default alone would un-mute a chorus nobody chose, on every rip — the
-    // exact class of unchosen default this phase exists to remove. Chorus stays
-    // off until it has parameters of its own. CC93 still reaches the engine.
-    fluid_synth_chorus_on(synth.get(), -1, 0);
+    // Chorus is opt-in. Rebuild from plugin parameters, retaining native bank
+    // routing and MIDI CC93 (zero by default) rather than injecting new sends.
+    resetChorusToParameters();
+    for (auto& send : diagnosticChorusSend) send.store(0);
+    for (auto& value : diagnosticModulation) value.store(0);
 
     // The reverb belongs to the synth, so a (re)created synth starts from the
     // parameters rather than from FluidSynth's own defaults.
@@ -421,7 +456,15 @@ void FluidSynthModel::prepareToPlay(double sampleRate, int samplesPerBlock) {
     // so the common path renders in one call; renderSamples chunks against this
     // capacity, so a host that ignores its own maximum block size still cannot
     // overrun it or allocate on the audio thread.
-    effectsScratch.setSize(2, jmax(64, samplesPerBlock), false, false, true);
+    effectsScratch.setSize(32, jmax(64, samplesPerBlock), false, false, true);
+    channelScratch.setSize(32, jmax(64, samplesPerBlock), false, false, true);
+    for (int ch = 0; ch < 16; ++ch) {
+        channelTrimSmoother[ch].reset(currentSampleRate, 0.02);
+        channelTrimSmoother[ch].setCurrentAndTargetValue(channelTrimGain[ch].load());
+        channelPeak[ch].store(0.0f);
+    }
+    masterPeak.store(0.0f);
+    outputOverload.store(false);
     // ...and the oversampling FIFO, which holds one block's worth of internal
     // samples plus the interpolator's read-ahead and whatever the previous block
     // left behind.
@@ -483,6 +526,13 @@ bool FluidSynthModel::applyProgramToEngine(int midiCh,
         return false;
     }
 
+    if (auto* voicePreset = fluid_synth_get_channel_preset(synth.get(), midiCh)) {
+        soundingBank[midiCh].store(fluid_preset_get_banknum(voicePreset));
+        soundingPreset[midiCh].store(fluid_preset_get_num(voicePreset));
+    } else {
+        soundingBank[midiCh].store(-1);
+        soundingPreset[midiCh].store(-1);
+    }
     midiBank[midiCh].store(actual.rawBank, std::memory_order_relaxed);
     midiPreset[midiCh].store(actual.preset, std::memory_order_relaxed);
     engineBank[midiCh].store(actual.rawBank, std::memory_order_relaxed);
@@ -533,6 +583,29 @@ void FluidSynthModel::parameterChanged(const String& parameterID, float /*newVal
     // re-sending it to the synth is at best redundant and at worst applies an
     // invalid intermediate program (bank set before preset), and saving it back
     // would clobber the tree we just read. Skip entirely.
+    if (const int index = chorusParamIds.indexOf(parameterID); index >= 0) {
+        chorusTarget[index].store(valueTreeState.getRawParameterValue(parameterID)->load(),
+                                  std::memory_order_relaxed);
+        return;
+    }
+    if (parameterID.startsWith("vibratoScaleCh")) {
+        const int ch = parameterID.substring(14).getIntValue() - 1;
+        if (ch >= 0 && ch < 16)
+            vibratoScale[ch].store(juce::jlimit(1, 24, juce::roundToInt(
+                valueTreeState.getRawParameterValue(parameterID)->load())));
+        return;
+    }
+    if (parameterID == "resetPolicy") {
+        standardMidiResets.store(valueTreeState.getRawParameterValue(parameterID)->load() > 0.5f);
+        return;
+    }
+    if (parameterID.startsWith("trimCh")) {
+        const int ch = channelSuffixOf(parameterID, "trimCh", 6);
+        if (ch >= 0 && ch < 16)
+            channelTrimGain[ch].store(juce::Decibels::decibelsToGain(
+                valueTreeState.getRawParameterValue(parameterID)->load()));
+        return;
+    }
     if (parameterID == "outputLevel") {
         // May arrive on the audio thread from host automation. Only stores an
         // atomic; the smoothing happens in processBlock.
@@ -966,6 +1039,7 @@ void FluidSynthModel::setControllerValue(int controller, int value) {
         || !juce::isPositiveAndBelow(value, 128))
         return;
     fluid_synth_cc(synth.get(), static_cast<int>(ch), controller, value);
+    if (controller == 1 || controller == 121) diagnosticModulation[ch].store(controller == 1 ? value : 0);
     if (const int idx{ccToIndex(controller)}; idx >= 0)
         engineCc[ch][idx].store(value, std::memory_order_relaxed);
 }
@@ -976,6 +1050,7 @@ void FluidSynthModel::setChannelControllerValue(int channelToWrite, int controll
         || !juce::isPositiveAndBelow(value, 128))
         return;
     fluid_synth_cc(synth.get(), channelToWrite, controller, value);
+    if (controller == 1 || controller == 121) diagnosticModulation[channelToWrite].store(controller == 1 ? value : 0);
     if (const int idx{ccToIndex(controller)}; idx >= 0)
         engineCc[channelToWrite][idx].store(value, std::memory_order_relaxed);
 }
@@ -1012,6 +1087,59 @@ bool FluidSynthModel::isChannelSilenced(int channelToRead) const {
 
 unsigned int FluidSynthModel::getSilencedMask() const {
     return silencedMask.load(std::memory_order_acquire);
+}
+
+void FluidSynthModel::resetChorusToParameters() {
+    for (int i = 0; i < numChorusParams; ++i)
+        chorusTarget[i].store(valueTreeState.getRawParameterValue(chorusParamIds[i])->load());
+    for (int i = 0; i < 3; ++i) {
+        chorusSmoother[i].reset(currentSampleRate, 0.02);
+        chorusSmoother[i].setCurrentAndTargetValue(chorusTarget[chorusLevel + i].load());
+    }
+    chorusEverApplied = false;
+    applyChorusFromAudioThread(0);
+}
+
+void FluidSynthModel::applyChorusFromAudioThread(int numSamples) {
+    if (synth == nullptr) return;
+    for (int i = 0; i < numChorusParams; ++i) {
+        float value = chorusTarget[i].load(std::memory_order_relaxed);
+        if (i >= chorusLevel && i <= chorusDepth) {
+            auto& smoother = chorusSmoother[i - chorusLevel];
+            smoother.setTargetValue(value);
+            value = smoother.skip(numSamples);
+        }
+        if (chorusEverApplied && std::abs(value - chorusApplied[i]) < 1.0e-5f)
+            continue;
+        switch (i) {
+            case chorusOn: fluid_synth_chorus_on(synth.get(), -1, value > 0.5f ? 1 : 0); break;
+            case chorusVoices: fluid_synth_set_chorus_group_nr(synth.get(), -1, static_cast<int>(value)); break;
+            case chorusLevel: fluid_synth_set_chorus_group_level(synth.get(), -1, value); break;
+            case chorusRate: fluid_synth_set_chorus_group_speed(synth.get(), -1, value); break;
+            case chorusDepth: fluid_synth_set_chorus_group_depth(synth.get(), -1, value); break;
+            case chorusWaveform: fluid_synth_set_chorus_group_type(synth.get(), -1, static_cast<int>(value)); break;
+            default: break;
+        }
+        chorusApplied[i] = value;
+    }
+    chorusEverApplied = true;
+}
+
+bool FluidSynthModel::getChorusSetting(int parameter, int group, double& value) const {
+    if (synth == nullptr || group < 0 || group >= kNumChannels) return false;
+    int integer{0};
+    switch (parameter) {
+        case chorusVoices:
+            if (fluid_synth_get_chorus_group_nr(synth.get(), group, &integer) != FLUID_OK) return false;
+            value = integer; return true;
+        case chorusLevel: return fluid_synth_get_chorus_group_level(synth.get(), group, &value) == FLUID_OK;
+        case chorusRate: return fluid_synth_get_chorus_group_speed(synth.get(), group, &value) == FLUID_OK;
+        case chorusDepth: return fluid_synth_get_chorus_group_depth(synth.get(), group, &value) == FLUID_OK;
+        case chorusWaveform:
+            if (fluid_synth_get_chorus_group_type(synth.get(), group, &integer) != FLUID_OK) return false;
+            value = integer; return true;
+        default: return false;
+    }
 }
 
 void FluidSynthModel::applyReverbFromAudioThread(int numSamples) {
@@ -1116,6 +1244,15 @@ bool FluidSynthModel::getPitchWheelSensitivity(int channelToRead, int& semitones
 int FluidSynthModel::loadedFontBankOffset() const {
     int offset{0};
     return getLoadedFontBankOffset(offset) ? offset : 0;
+}
+
+bool FluidSynthModel::getAppliedChannelProgram(int ch, int& bank, int& preset) const {
+    if (ch < 0 || ch >= kNumChannels || sfont_id.load() < 0) return false;
+    // Only completed program selections belong in project state. Bank Select
+    // alone changes FluidSynth's pending bank, not the sounding instrument.
+    bank = engineBank[ch].load() - loadedFontBankOffset();
+    preset = enginePreset[ch].load();
+    return true;
 }
 
 bool FluidSynthModel::getChannelProgram(int channelToRead, int& bank, int& preset) const {
@@ -1672,6 +1809,8 @@ void FluidSynthModel::dispatchSysEx(const uint8_t* payload, int payloadBytes) {
 
     if (!isSystemResetSysex(payload, payloadBytes))
         return;
+    for (auto& send : diagnosticChorusSend) send.store(0);
+    for (auto& value : diagnosticModulation) value.store(0);
 
     // The reset returned every channel to FluidSynth's 4th-order interpolation.
     // Put the plugin's own method back first: unlike everything below it, it does
@@ -1682,6 +1821,34 @@ void FluidSynthModel::dispatchSysEx(const uint8_t* payload, int payloadBytes) {
     if (fontId == -1)
         return;
 
+    if (standardMidiResets.load()) {
+        for (int ch = 0; ch < kNumChannels; ++ch) {
+            engineExpression[ch].store(-1);
+            engineBendRange[ch].store(-1);
+            resetRpnTracking(ch);
+            int volume{100}, pan{64};
+            fluid_synth_get_cc(synth.get(), ch, 7, &volume);
+            fluid_synth_get_cc(synth.get(), ch, 10, &pan);
+            engineCc[ch][0].store(volume); midiCcValue[ch][0].store(volume);
+            engineCc[ch][1].store(pan); midiCcValue[ch][1].store(pan);
+            // Capture and publish the engine's reset assignment, without restoring
+            // the previous song's program or controller values.
+            int id{-1}, bank{0}, program{0};
+            if (fluid_synth_get_program(synth.get(), ch, &id, &bank, &program) == FLUID_OK)
+                applyProgramToEngine(ch, bank, program, false, true);
+            fluid_synth_cc(synth.get(), ch, 91, MidiConstants::defaultReverbSend);
+            applyBendRangeOverride(ch);
+            diagnosticExpression[ch].store(127);
+            diagnosticBendRange[ch].store(bendRangeOverride.load() > 0
+                ? bendRangeOverride.load() << 7 : 256);
+            diagnosticBend[ch].store(8192);
+            diagnosticSustain[ch].store(0);
+            diagnosticChorusSend[ch].store(0);
+        }
+        midiCcDirtyMask.fetch_or(0xffffu);
+        triggerAsyncUpdate();
+        return;
+    }
     for (int ch = 0; ch < kNumChannels; ch++) {
         applyProgramToEngine(
             ch,
@@ -1735,6 +1902,8 @@ void FluidSynthModel::noteControllerForBendRange(int ch, int cc, int value) {
         return;
     engineBendRange[ch].store((dataMsb[ch] << 7) | dataLsb[ch], std::memory_order_relaxed);
     applyBendRangeOverride(ch); // the override outranks the file
+    diagnosticBendRange[ch].store(bendRangeOverride.load() > 0
+        ? bendRangeOverride.load() << 7 : (dataMsb[ch] << 7) | dataLsb[ch]);
 }
 
 void FluidSynthModel::applyBendRangeOverride(int ch) {
@@ -1756,22 +1925,36 @@ void FluidSynthModel::reassertBendRange(int ch) {
         fluid_synth_cc(synth.get(), ch, RPN_LSB, 127);
     }
     applyBendRangeOverride(ch);
+    diagnosticBendRange[ch].store(bendRangeOverride.load() > 0
+        ? bendRangeOverride.load() << 7 : (range >= 0 ? range : 256));
+    diagnosticBend[ch].store(8192);
+    diagnosticSustain[ch].store(0);
 }
 
 // Remembers the expression the stream sets, and puts it back after a Reset
 // All Controllers. The engine has already applied the reset by the time this
 // runs, so the re-assert lands on the reset channel.
 void FluidSynthModel::noteControllerForExpression(int ch, int cc, int value) {
-    if (cc == EXPRESSION_MSB)
+    if (cc == EXPRESSION_MSB) {
         engineExpression[ch].store(value, std::memory_order_relaxed);
-    else if (cc == ALL_CTRL_OFF)
-        reassertExpression(ch);
+        diagnosticExpression[ch].store(value);
+    } else if (cc == ALL_CTRL_OFF) {
+        if (standardMidiResets.load()) {
+            engineExpression[ch].store(-1);
+            diagnosticExpression[ch].store(127);
+        } else {
+            reassertExpression(ch);
+        }
+        diagnosticBend[ch].store(8192);
+        diagnosticSustain[ch].store(0);
+    }
 }
 
 void FluidSynthModel::reassertExpression(int ch) {
     const int value{engineExpression[ch].load(std::memory_order_relaxed)};
     if (value >= 0 && synth != nullptr)
         fluid_synth_cc(synth.get(), ch, static_cast<int>(EXPRESSION_MSB), value);
+    diagnosticExpression[ch].store(value >= 0 ? value : 127);
 }
 
 // One call sets all 16 channels, so this is not per channel like the others.
@@ -1780,11 +1963,24 @@ void FluidSynthModel::applyInterpolationMethod() {
         fluid_synth_set_interp_method(synth.get(), -1, interpolationMethod);
 }
 
+void FluidSynthModel::applyVibratoScaleFromAudioThread() {
+    for (int ch = 0; ch < 16; ++ch) {
+        const int scale = vibratoScale[ch].load(std::memory_order_relaxed);
+        if (scale != appliedVibratoScale[ch]) {
+            fluid_synth_set_cc1_vibrato_scale(synth.get(), ch, static_cast<float>(scale));
+            appliedVibratoScale[ch] = scale;
+        }
+    }
+}
+
 void FluidSynthModel::applyBendRangeChangeFromAudioThread() {
     if (!bendRangeOverrideDirty.exchange(false, std::memory_order_acq_rel) || synth == nullptr)
         return;
     const int forced{bendRangeOverride.load(std::memory_order_relaxed)};
     for (int ch = 0; ch < kNumChannels; ++ch) {
+        const int remembered = engineBendRange[ch].load();
+        diagnosticBendRange[ch].store(forced > 0 ? forced << 7
+            : (remembered >= 0 ? (remembered >> 7) << 7 : 256));
         if (forced > 0) {
             fluid_synth_pitch_wheel_sens(synth.get(), ch, forced);
             continue;
@@ -1883,6 +2079,18 @@ void FluidSynthModel::dispatchGroupEvent(const GroupEvent& e, int eventPosition)
 void FluidSynthModel::dispatchTimestampGroup(juce::MidiBufferIterator begin,
                                              juce::MidiBufferIterator end,
                                              int eventPosition) {
+    if (standardMidiResets.load()) {
+        for (auto it = begin; it != end; ++it) {
+            const auto m = *it;
+            GroupEvent raw{};
+            int ch{0}, cc{0}, value{0};
+            raw.data = m.data;
+            raw.numBytes = m.numBytes;
+            raw.kind = classifyGroupEvent(m.data, m.numBytes, ch, cc, value);
+            dispatchGroupEvent(raw, eventPosition);
+        }
+        return;
+    }
     int count{0};
     bool plain{true};
     for (auto it = begin; it != end; ++it) {
@@ -2051,6 +2259,7 @@ void FluidSynthModel::dispatchMidiEvent(const MidiMessage& m, int samplePosition
         if (channelIndex < 0 || channelIndex >= kNumChannels)
             return;
         const int midiCh{channelIndex};
+        channelMidiEvents[midiCh].fetch_add(1, std::memory_order_relaxed);
         if (m.isNoteOn()) {
             // Muted, or not soloed while something else is. Drop the note-on and
             // do not record it in the trace: no note sounded. Note-offs, CCs,
@@ -2088,6 +2297,14 @@ void FluidSynthModel::dispatchMidiEvent(const MidiMessage& m, int samplePosition
                 midiCh,
                 m.getControllerNumber(),
                 m.getControllerValue());
+            if (m.getControllerNumber() == 1)
+                diagnosticModulation[midiCh].store(m.getControllerValue());
+            if (m.getControllerNumber() == 121)
+                diagnosticModulation[midiCh].store(0);
+            if (m.getControllerNumber() == 93)
+                diagnosticChorusSend[midiCh].store(m.getControllerValue());
+            if (m.getControllerNumber() == 64)
+                diagnosticSustain[midiCh].store(m.getControllerValue());
             noteControllerForBendRange(
                 midiCh, m.getControllerNumber(), m.getControllerValue());
             noteControllerForExpression(
@@ -2113,6 +2330,7 @@ void FluidSynthModel::dispatchMidiEvent(const MidiMessage& m, int samplePosition
             if (const int scale{bendScale.load(std::memory_order_relaxed)}; scale > 1)
                 bend = juce::jlimit(0, 16383, 8192 + (bend - 8192) * scale);
             fluid_synth_pitch_bend(synth.get(), midiCh, bend);
+            diagnosticBend[midiCh].store(bend);
         } else if (m.isChannelPressure()) {
             lastChannelPressureValue[midiCh].store(
                 m.getChannelPressureValue(), std::memory_order_relaxed);
@@ -2139,9 +2357,9 @@ void FluidSynthModel::dispatchMidiEvent(const MidiMessage& m, int samplePosition
 // It must be called with an EFFECTS bus: `fluid_synth_process(synth, n, 0,
 // nullptr, 2, out)` renders the dry voices and DISCARDS the reverb and chorus
 // buses, which is why Juicy16's reverb was inaudible before 0.6.0-alpha.1.
-// `nfx=2` returns one stereo bus carrying reverb and chorus together; chorus is
-// switched off in createSynth so enabling this did not un-mute an effect nobody
-// chose.
+// Each MIDI channel now has an internal dry/effect group so its audio trim
+// scales the complete contribution. The host still receives one stereo mix.
+// All reverb and chorus groups use the same global settings.
 void FluidSynthModel::renderSamples(AudioBuffer<float>& buffer, int startSample, int numSamples) {
     if (numSamples <= 0)
         return;
@@ -2184,16 +2402,37 @@ void FluidSynthModel::renderSamples(AudioBuffer<float>& buffer, int startSample,
 // top. `numSamples` must not exceed the preallocated effects scratch.
 void FluidSynthModel::renderWithEffects(float* const* outputs, int numSamples) {
     jassert(numSamples <= effectsScratch.getNumSamples());
-    effectsScratch.clear(0, 0, numSamples);
-    effectsScratch.clear(1, 0, numSamples);
-    float* effects[] { effectsScratch.getWritePointer(0),
-                       effectsScratch.getWritePointer(1) };
-    fluid_synth_process(synth.get(), numSamples, 2, effects, 2,
-                        const_cast<float**>(outputs));
-    // fluid_synth_process ADDS into its buffers rather than overwriting them, so
-    // both the dry and the wet sides accumulate the same way here.
-    juce::FloatVectorOperations::add(outputs[0], effects[0], numSamples);
-    juce::FloatVectorOperations::add(outputs[1], effects[1], numSamples);
+    effectsScratch.clear();
+    channelScratch.clear();
+    std::array<float*, 64> effects{};
+    std::array<float*, 32> dry{};
+    for (int i = 0; i < 32; ++i) {
+        dry[static_cast<size_t>(i)] = channelScratch.getWritePointer(i);
+        // Reverb and chorus for each group add into the same stereo scratch.
+        const int group = i / 2, side = i % 2;
+        effects[static_cast<size_t>(4 * group + side)] = effectsScratch.getWritePointer(i);
+        effects[static_cast<size_t>(4 * group + 2 + side)] = effectsScratch.getWritePointer(i);
+    }
+    fluid_synth_process(synth.get(), numSamples, 64, effects.data(), 32, dry.data());
+    for (int ch = 0; ch < 16; ++ch) {
+        auto& smooth = channelTrimSmoother[ch];
+        smooth.setTargetValue(channelTrimGain[ch].load(std::memory_order_relaxed));
+        float peak{0.0f};
+        for (int i = 0; i < numSamples; ++i) {
+            const float gain = smooth.getNextValue();
+            const float left = (dry[static_cast<size_t>(2 * ch)][i]
+                + effectsScratch.getSample(2 * ch, i)) * gain;
+            const float right = (dry[static_cast<size_t>(2 * ch + 1)][i]
+                + effectsScratch.getSample(2 * ch + 1, i)) * gain;
+            outputs[0][i] += left;
+            outputs[1][i] += right;
+            peak = juce::jmax(peak, std::abs(left), std::abs(right));
+        }
+        // Peak envelope advances with audio time, independent of whether the UI
+        // is open. Release is 20 dB/s; the UI never locks or calls FluidSynth.
+        const float decay = std::pow(0.1f, static_cast<float>(numSamples) / currentSampleRate);
+        channelPeak[ch].store(juce::jmax(peak, channelPeak[ch].load() * decay));
+    }
 }
 
 void FluidSynthModel::renderIntoFifo(int startSample, int numSamples) {
@@ -2296,7 +2535,9 @@ void FluidSynthModel::processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiM
     // Reverb settings first, so a note rendered in this block is heard through
     // the reverb this block was asked for rather than the previous one's.
     applyReverbFromAudioThread(numSamples);
+    applyChorusFromAudioThread(numSamples);
     applyBendRangeChangeFromAudioThread();
+    applyVibratoScaleFromAudioThread();
 
     // MidiBuffer is timestamp ordered. Render the audio before each event, apply all
     // events at that timestamp in buffer order, then continue. This preserves Bank
@@ -2314,4 +2555,56 @@ void FluidSynthModel::processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiM
     // rendered. Smoothed so host automation cannot step the gain mid-block.
     outputLevelSmoother.setTargetValue(outputLevelGain.load(std::memory_order_relaxed));
     outputLevelSmoother.applyGain(buffer, numSamples);
+    float peak{0.0f};
+    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+        peak = juce::jmax(peak, buffer.getMagnitude(ch, 0, numSamples));
+    // Single audio producer and UI exchange consumer: compare/exchange preserves
+    // peaks if the UI reads between the initial load and publication.
+    float old = masterPeak.load();
+    while (old < peak && !masterPeak.compare_exchange_weak(old, peak)) {}
+    if (peak > 1.0f)
+        outputOverload.store(true);
 }
+
+FluidSynthModel::ChannelDiagnostics FluidSynthModel::getChannelDiagnostics(int ch) const {
+    ChannelDiagnostics d;
+    if (ch < 0 || ch >= 16) return d;
+    d.midiEvents = channelMidiEvents[ch].load(); d.peak = channelPeak[ch].load();
+    d.expression = diagnosticExpression[ch].load(); d.bendRange = diagnosticBendRange[ch].load();
+    d.pitchBend = diagnosticBend[ch].load(); d.sustain = diagnosticSustain[ch].load();
+    d.chorusSend = diagnosticChorusSend[ch].load();
+    d.modulation = diagnosticModulation[ch].load();
+    d.soundingBank = soundingBank[ch].load(); d.soundingPreset = soundingPreset[ch].load();
+    return d;
+}
+int FluidSynthModel::rememberedExpression(int ch) const { return engineExpression[ch].load(); }
+int FluidSynthModel::rememberedBendRange(int ch) const { return engineBendRange[ch].load(); }
+int FluidSynthModel::savedMixerValue(int ch, int index) const { return engineCc[ch][index].load(); }
+void FluidSynthModel::discardPendingStateUpdates() {
+    cancelPendingUpdate();
+    midiProgramDirtyMask.store(0);
+    midiCcDirtyMask.store(0);
+    pendingMuteSoloSync.store(false);
+    pendingReverbProfile.store(-1);
+    pendingReverbCustom.store(false);
+}
+
+void FluidSynthModel::restoreRememberedControllers(int ch, int expression, int range) {
+    if (ch < 0 || ch >= kNumChannels) return;
+    expression = juce::jlimit(-1, 127, expression);
+    range = juce::jlimit(-1, 16383, range);
+    diagnosticExpression[ch].store(expression >= 0 ? expression : 127);
+    diagnosticBendRange[ch].store(range >= 0 ? range : (2 << 7));
+    engineExpression[ch].store(juce::jlimit(-1, 127, expression));
+    engineBendRange[ch].store(juce::jlimit(-1, 16383, range));
+    resetRpnTracking(ch);
+    if (synth != nullptr) {
+        fluid_synth_cc(synth.get(), ch, 11, expression >= 0 ? expression : 127);
+        if (range < 0) fluid_synth_pitch_wheel_sens(synth.get(), ch, 2);
+        reassertBendRange(ch);
+        reassertExpression(ch);
+    }
+}
+float FluidSynthModel::consumeMasterPeak() { return masterPeak.exchange(0.0f); }
+bool FluidSynthModel::hasOutputOverload() const { return outputOverload.load(); }
+void FluidSynthModel::clearOutputOverload() { outputOverload.store(false); }

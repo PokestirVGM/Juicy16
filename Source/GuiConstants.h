@@ -30,18 +30,18 @@ struct GuiConstants {
     inline static const float cornerRadius = 2.0f;
 
     // Type scale.
-    inline static const float bodyFontHeight = 13.0f;
-    inline static const float valueFontHeight = 12.0f;
+    inline static const float bodyFontHeight = 14.0f;
+    inline static const float valueFontHeight = 13.0f;
     inline static const float labelFontHeight = 12.0f;
-    inline static const float masterValueFontHeight = 19.0f;
+    inline static const float masterValueFontHeight = 26.0f;
 
     // Knob arc thickness as a fraction of the knob's diameter, so a row knob and
     // a panel knob keep the same weight at different sizes.
-    inline static const float knobArcThickness = 0.16f;
+    inline static const float knobArcThickness = 0.11f;
 
     // Header strip: the wordmark (which opens settings) and the bank picker.
-    inline static const int headerHeight = 38;
-    inline static const int filePickerHeight = 24;
+    inline static const int headerHeight = 48;
+    inline static const int filePickerHeight = 30;
     inline static const int logoHeight = 14;
     // The folder is the header's only icon now that the settings cog is gone, so
     // it carries the corner on its own and is drawn a little larger than the 14px
@@ -49,30 +49,37 @@ struct GuiConstants {
     inline static const int folderIconSize = 16;
 
     inline static const int pianoHeight = 66;
-    inline static const int statusBarHeight = 22;
+    inline static const int statusBarHeight = 24;
 
-    // Right-hand panel: master trim, reverb, and the loaded bank.
-    inline static const int panelWidth = 236;
+    // Right-hand panel: shared section rhythm, including the selected channel.
+    inline static const int panelInset = 16;
+    inline static const int panelSectionGap = 12;
+    inline static const int masterSectionHeight = 118;
+    inline static const int effectsSectionHeight = 188;
+    inline static const int bankSectionHeight = 72;
+    // Right-hand panel: master trim, effects, bank and channel state.
+    inline static const int panelWidth = 288;
 
     // Channel rack metrics. The column widths are the row's anatomy, left to
     // right, and minInstrumentWidth is what an instrument name needs before the
     // window stops shrinking.
-    inline static const int channelHeaderHeight = 24;
-    inline static const int channelRowHeight = 28;
+    inline static const int channelHeaderHeight = 30;
+    inline static const int channelRowHeight = 34;
     inline static const int numMidiChannels = 16;
     inline static const int channelNumberWidth = 34;
     inline static const int muteSoloWidth = 60;
     inline static const int mixerCellWidth = 80;
-    inline static const int minInstrumentWidth = 140;
+    inline static const int minInstrumentWidth = 180;
+    inline static const int activityWidth = 80;
     // The knob inside a mixer cell, and the value readout beside it.
-    inline static const int rowKnobSize = 22;
+    inline static const int rowKnobSize = 24;
     inline static const int rowValueWidth = 30;
 
     // Derived, not guessed. Minimum width is the narrowest row that keeps every
     // control usable, plus the fixed right-hand panel and its divider.
     inline static const int minRackWidth =
         channelNumberWidth + muteSoloWidth + minInstrumentWidth
-        + 2 * mixerCellWidth + 2 * padding;
+        + 3 * mixerCellWidth + activityWidth + 2 * padding;
     inline static const int minWidth = minRackWidth + panelWidth + 1;
 
     // Default window height: the header, the column header, all 16 rows, the
@@ -84,10 +91,6 @@ struct GuiConstants {
         + pianoHeight
         + statusBarHeight;
 
-    // Small floor: the user can shrink well below defaultHeight - the channel
-    // rack just becomes scrollable (TableListBox provides that for free). The
-    // floor is what the fixed strips need plus a few rows.
-    inline static const int minHeight =
-        headerHeight + channelHeaderHeight + 4 * channelRowHeight
-        + pianoHeight + statusBarHeight;
+    // The master, bank and channel diagnostics must fit above the keyboard.
+    inline static const int minHeight = defaultHeight;
 };

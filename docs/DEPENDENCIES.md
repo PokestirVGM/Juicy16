@@ -1,5 +1,9 @@
 # Dependency inventory and security review
 
+## Development update — 2026-09-05
+
+Both dependency recipes now apply the [CC1 vibrato extension](../vendor/fluidsynth_patched/README.md) to pinned FluidSynth 2.5.7, archive SHA-256 `ce27840221ab00dd59bf27e85ecbba480c6c2a7c9fbec4243658f68f59c07f4a`. The complete macOS arm64 static closure was rebuilt locally; the Windows recipe was updated but not built. This adopts the DLS/SF2 fixes in [2.5.6](https://github.com/FluidSynth/fluidsynth/releases/tag/v2.5.6) and further DLS fixes in [2.5.7](https://github.com/FluidSynth/fluidsynth/releases/tag/v2.5.7). The historical installed-artifact review below applies to the earlier 2.5.5 release and is not a validation of a new distributable.
+
 Everything statically linked into or embedded in a Juicy16 macOS release artifact, with the version actually built. Licensing obligations are in [LICENSING.md](LICENSING.md) and [NOTICE.md](../NOTICE.md); this document tracks **what is present and whether it is current**.
 
 The pinned versions and their checksums live in `tools/build_macos_dependencies.sh`, which is the authority. Anything below that disagrees with that script is stale.
@@ -9,7 +13,7 @@ The pinned versions and their checksums live in `tools/build_macos_dependencies.
 | Component | Version built | Source | Role |
 | --- | --- | --- | --- |
 | JUCE | 8.0.14 (exact) | juce-framework/JUCE | Framework, plugin wrappers, embedded HarfBuzz/SheenBidi/zlib/libpng/IJG JPEG |
-| FluidSynth | 2.5.5 (exact) | FluidSynth/fluidsynth | Synthesis engine, SF2/SF3/DLS loading |
+| FluidSynth | 2.5.7 (exact) | FluidSynth/fluidsynth | Synthesis engine, SF2/SF3/DLS loading |
 | GCEM | commit `012ae73c` | kthohr/gcem | Header-only constexpr math required by FluidSynth |
 | libsndfile | 1.2.2 + IRCAM hardening patch | libsndfile/libsndfile | SF3 sample decoding; see `vendor/libsndfile_patched/` |
 | FLAC | 1.5.0 | xiph/flac | libsndfile codec |

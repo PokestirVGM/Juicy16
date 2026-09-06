@@ -29,7 +29,7 @@ public:
     LogoButton() : juce::Button{"Settings"} {
         setTitle("Settings");
         setDescription("Open Juicy16 settings");
-        setHelpText("Accent colour and build information.");
+        setHelpText("Accent colour, MIDI bend and vibrato settings, and build information.");
         setTooltip(getHelpText());
         setWantsKeyboardFocus(true);
     }
@@ -143,6 +143,11 @@ private:
 
     // status bar: build version plus the latest bank-load result
     juce::Label statusLabel;
+
+    // The editor owns modal content so asynchronous dismissal cannot outlive
+    // the processor, its parameter state, or the editor theme.
+    std::unique_ptr<juce::Component> settingsContent;
+    std::unique_ptr<juce::CallOutBox> settingsCallout;
 
     bool focusInitialized{false};
 

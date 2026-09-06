@@ -1,5 +1,17 @@
 # MIDI controller support contract
 
+## Playback policy and diagnostics (unreleased)
+
+Settings now offers **DAW recovery** (default, including older projects) and **Standard MIDI**. The recovery-specific reset and same-timestamp reconciliation described below applies to DAW recovery. Standard MIDI preserves the event order actually delivered by the host, lets GM/GS/XG reset select defaults, and lets CC121 clear expression. Host transport controls and channel isolation remain unchanged; an explicit bend-range override still takes precedence. Standard MIDI cannot recover ordering information a host has already discarded.
+
+Expression and bend-range memory are saved per channel, including cents, so recovery survives reopening a project. Program and CC7/CC10 snapshots use the engine's latest applied state rather than its deferred UI mirror. Bank Select without Program Change remains pending.
+
+Each **Trim** is an independent audio gain (-24 to +12 dB, default 0), smoothed over 20 ms, after synthesis and including that channel's reverb contribution. MIDI CC7 and CC11 do not overwrite it. Sixteen internal dry/effect groups are summed into the existing stereo output; the reverb still has one shared set of controls and no new send controls. Chorus remains off by default and has its own global controls below.
+
+**Signal** shows a MIDI activity dot and post-trim channel audio peak. The selected-channel panel shows expression, sustain, bend range/value and the actual fallback bank/program when it differs from the requested patch. **Peak** shows master output after trim; **OVER** latches when samples exceed 0 dBFS and clears on click. It does not limit the signal. The host tail is reported as unbounded because an instrument or sustain pedal can continue indefinitely.
+
+Event dispatch uses host sample offsets, but FluidSynth renders internally in 64-sample units. Measured synthesis onset has an additional 0–63 engine-sample delay (up to 1.31 ms at 48 kHz). Exact sample-accurate synthesis is not yet achieved.
+
 This document describes Juicy16 Beta 1 with the pinned FluidSynth 2.5.5 engine.
 It separates message delivery—which Juicy16 controls—from audible interpretation,
 which may depend on FluidSynth mode and modulators in the loaded DLS/SF2/SF3 bank.
@@ -107,7 +119,7 @@ the Data Entry, the reset queued last). Limits are in `KNOWN_ISSUES.md`.
 | CC64 | FluidSynth sustain pedal. Releasing it damps voices held by sustain. |
 | CC66 | FluidSynth sostenuto pedal. It captures voices already active when the pedal is pressed. |
 | CC67 | Delivered as the soft-pedal controller; audible behavior depends on bank modulators. |
-| CC91/93 | Per-channel reverb and chorus sends, delivered exactly. CC91 feeds the reverb described below. CC93 reaches the engine but the chorus is switched off, so it does nothing audible — see below. |
+| CC91/93 | Per-channel reverb and chorus sends, delivered exactly. CC91 feeds the reverb described below. CC93 feeds the optional chorus described below and defaults to zero. |
 | CC98/99, CC100/101, CC6/38 | FluidSynth NRPN/RPN selection and Data Entry. RPN 0,0 bend range and RPN Null are regression-tested, including same-timestamp order under VST3 (above). |
 | CC120 | All Sound Off immediately silences the addressed channel. |
 | CC121 | Reset All Controllers resets switches, RPN/NRPN selection, pressure, and pitch wheel. FluidSynth intentionally preserves bank, volume, pan, effects sends, sound controls CC70–79, and the configured bend range. Juicy16 then re-asserts the expression (CC11) the stream last set on that channel — hosts send CC121 on stop and never resend an unchanged CC11 under VST3; see `KNOWN_ISSUES.md`. |
@@ -208,7 +220,7 @@ carries the GM default send.
 | Width | `reverbWidth` | 0–1 | 0.85 | 1.00 |
 | Level | `reverbLevel` | 0–1 | 0.55 | 0.55 |
 
-- **What the engine does.** FluidSynth 2.5.5's reverb is jjceresa's FDN late
+- **What the engine does.** FluidSynth 2.5.7's reverb is jjceresa's FDN late
   reverb, which replaced Freeverb in 2.0. Juicy16 adds no DSP of its own; these
   controls set that reverb.
 - **What you control, and what the MIDI file controls.** You set the reverb.
@@ -247,12 +259,26 @@ adds **+0.92 dB**, and Soft adds **+0.47 dB**. Universal is a present but not
 dominant space; Soft is a much smaller room at full width — width without a long
 tail. Neither clips, and neither raises the peak above the dry material's.
 
-### Chorus is off
+### Global chorus (unreleased)
 
-FluidSynth's chorus was being discarded by the same bug. Rather than un-mute a
-chorus nobody chose the moment the effects bus started working, it is switched
-off explicitly. CC93 still reaches the engine and is still delivered exactly; it
-simply has nothing to drive until the chorus gets controls of its own.
+The **Reverb / Chorus** tabs share the same effects panel; switching tabs does not enable or bypass either effect. Chorus is off by default, including when older projects are reopened. Enable it with the switch on the Chorus tab.
+
+| Control | Parameter | Range | Default |
+| --- | --- | --- | --- |
+| Enable | `chorusOn` | off/on | off |
+| Voices | `chorusVoices` | 1–8 | 3 |
+| Level | `chorusLevel` | 0–1 | 0.6 |
+| Rate | `chorusRate` | 0.1–5 Hz | 0.2 Hz |
+| Depth | `chorusDepth` | 0–21 ms | 4.25 ms |
+| Waveform | `chorusWaveform` | Sine / Triangle | Sine |
+
+The Level readout uses percent (60% means parameter value 0.6); Rate and Depth show Hz and ms. Reverb knob readouts also use percent. These fields are editable, and percentage input is converted back to the unchanged normalized parameter range.
+
+These control FluidSynth's built-in chorus on all 16 internal effect groups. Level, rate and depth use 20 ms parameter smoothing, applied once per audio block; voices and waveform are discrete. Bypass switches off processing. The depth range is limited to the engine's safe range through 96 kHz; higher host rates use the existing resampling path. See the [FluidSynth chorus API](https://www.fluidsynth.org/api/group__chorus__effect.html).
+
+Chorus input follows the bank's generators/modulators and per-channel **MIDI CC93**, which starts at **0**. For an ordinary SoundFont, send CC93 above zero to hear the enabled effect. Turning the effect on does not overwrite a rip's sends. The selected-channel readout displays the current CC93 value; CC121 preserves it while a GM/GS/XG reset returns it to zero. No manual per-channel send controls are added. Each channel's Trim scales its dry, reverb and chorus contribution together.
+
+All six chorus parameters automate and save with the project and survive synth rebuilds and MIDI resets. Chorus settings do not claim hardware/VGMTrans sound parity; listening and actual-host validation remain open.
 
 ## Mute and solo are not MIDI controllers
 
@@ -336,3 +362,14 @@ range* is off by default and sends one range on one channel. For a 12-semitone
 rip start with bend scale ×6. If FL never delivers the RPN to the plugin at all,
 bend range override 12 is the fix instead — a ×6 on full-size bends would clamp.
 Which of the two FL actually needs has not been established in FL.
+
+
+## Per-channel CC1 vibrato strength
+
+Open **Settings → MIDI** for **CC1 channel** and **CC1 scale**, ×1–×24, beside Bend scale. The channel picker also selects the rack channel; selecting a rack channel selects its CC1 setting. ×1 (off) preserves bank playback. Each channel has its own saved, automatable setting; changing channel immediately displays its value. MIDI resets do not alter this plugin setting.
+
+The engine scales CC1-driven pitch-LFO modulation after the bank's mapping, preserving controller values, source curves, secondary sources and bank overrides. It does not multiply/clamp CC1 to 127 or scale unrelated pressure, volume or filter modulation. It affects held and future notes. Bank vibrato speed and delay remain unchanged. This is compensation for weak exported vibrato, not a validated Nintendo DS emulation preset.
+
+**CC1 received** shows the selected channel’s current raw modulation value, updated from audio-thread diagnostics. Zero displays “0 (inactive)”: a strength multiplier does not create vibrato when CC1 is zero. CC121 and synth/reset initialization clear this readout. The readout helps distinguish a quiet passage from controller messages missing from the host.
+
+Parameters: `vibratoScaleCh1`–`vibratoScaleCh16`, integer 1–24, default 1. Requires the repository's patched FluidSynth 2.5.7 dependency; see [dependency patch](../vendor/fluidsynth_patched/README.md).
