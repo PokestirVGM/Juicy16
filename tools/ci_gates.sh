@@ -19,8 +19,21 @@ repo_dir=$(cd -- "$script_dir/.." && pwd)
 juce_prefix=${JUICE_PREFIX:-"$HOME/juicydeps"}
 build_jobs=${JUICY16_BUILD_JOBS:-8}
 gate=${1:-all}
+deps_prefix=${JUICY16_DEPS_PREFIX:-"$repo_dir/build/macos11-deps"}
 
 cd "$repo_dir"
+
+# Refresh FluidSynth CMake cache entries at configure time too: FindPkgConfig
+# otherwise retains the former Homebrew prefix when PKG_CONFIG_PATH changes.
+prepare_dependencies() {
+  if [[ ! -f "$deps_prefix/lib/pkgconfig/fluidsynth.pc" ]] || \
+     ! grep -q '^#define FLUIDSYNTH_JUICY16_VIBRATO_SCALE 1$' \
+       "$deps_prefix/include/fluidsynth/synth.h"; then
+    JUICY16_BUILD_JOBS="$build_jobs" tools/build_macos_dependencies.sh "$deps_prefix"
+  fi
+  export PKG_CONFIG_PATH="$deps_prefix/lib/pkgconfig"
+  export PKG_CONFIG_LIBDIR="$deps_prefix/lib/pkgconfig"
+}
 
 run_docs() {
   echo "== docs: internal Markdown links =="
@@ -29,10 +42,11 @@ run_docs() {
 
 run_debug() {
   echo "== debug: build with first-party warnings as errors =="
-  cmake -S . -B build-ci-debug \
+  prepare_dependencies
+  cmake -U '*FLUIDSYNTH*' -S . -B build-ci-debug \
     -DCMAKE_BUILD_TYPE=Debug \
-    -DCMAKE_PREFIX_PATH="$juce_prefix;/opt/homebrew" \
-    -DFLUIDSYNTH_LINK_STATIC=OFF \
+    -DCMAKE_PREFIX_PATH="$juce_prefix;$deps_prefix" \
+    -DFLUIDSYNTH_LINK_STATIC=ON \
     -DJUICYSF_COPY_PLUGIN_AFTER_BUILD=OFF \
     -DJUICYSF_WARNINGS_AS_ERRORS=ON
   cmake --build build-ci-debug --config Debug --parallel "$build_jobs"
@@ -41,12 +55,13 @@ run_debug() {
 
 run_asan() {
   echo "== asan: sanitized offline harnesses =="
+  prepare_dependencies
   # Only the offline harnesses are sanitized; an unsanitized host cannot load a
   # sanitized plugin bundle.
-  cmake -S . -B build-ci-asan \
+  cmake -U '*FLUIDSYNTH*' -S . -B build-ci-asan \
     -DCMAKE_BUILD_TYPE=Debug \
-    -DCMAKE_PREFIX_PATH="$juce_prefix;/opt/homebrew" \
-    -DFLUIDSYNTH_LINK_STATIC=OFF \
+    -DCMAKE_PREFIX_PATH="$juce_prefix;$deps_prefix" \
+    -DFLUIDSYNTH_LINK_STATIC=ON \
     -DJUICYSF_COPY_PLUGIN_AFTER_BUILD=OFF \
     -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
     -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
@@ -124,15 +139,12 @@ run_release() {
       ;;
   esac
 
-  local deps_prefix="$repo_dir/build/macos11-deps"
-  if [[ ! -f "$deps_prefix/lib/pkgconfig/fluidsynth.pc" ]]; then
-    JUICY16_BUILD_JOBS="$build_jobs" tools/build_macos_dependencies.sh "$deps_prefix"
-  fi
+  prepare_dependencies
 
   env \
     PKG_CONFIG_PATH="$deps_prefix/lib/pkgconfig" \
     PKG_CONFIG_LIBDIR="$deps_prefix/lib/pkgconfig" \
-  cmake -S . -B build-release \
+  cmake -U '*FLUIDSYNTH*' -S . -B build-release \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
     -DCMAKE_OSX_ARCHITECTURES=arm64 \

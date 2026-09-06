@@ -14,12 +14,12 @@ These commands describe the locally verified developer build. They do not by the
 - CMake 3.15 or newer
 - Xcode Command Line Tools or Xcode with a C++17 compiler
 - JUCE exactly 8.0.14, installed as a CMake package
-- FluidSynth 2.x and pkg-config
+- The repository-patched FluidSynth 2.5.7 and pkg-config
 
 Example dependencies using Homebrew:
 
 ```bash
-brew install cmake pkg-config fluid-synth
+brew install cmake pkg-config
 ```
 
 Install the pinned JUCE version to a prefix of your choice:
@@ -36,13 +36,17 @@ cmake --build cmake-build-install --target install -j 8
 
 ## Debug build
 
-From the Juicy16 repository:
+From the Juicy16 repository, build the pinned dependency closure first. Stock
+Homebrew FluidSynth does not include the required CC1 vibrato extension.
 
 ```bash
+tools/build_macos_dependencies.sh "$PWD/build/macos11-deps"
+env PKG_CONFIG_PATH="$PWD/build/macos11-deps/lib/pkgconfig" \
+    PKG_CONFIG_LIBDIR="$PWD/build/macos11-deps/lib/pkgconfig" \
 cmake -S . -B build \
   -DCMAKE_BUILD_TYPE=Debug \
-  -DCMAKE_PREFIX_PATH="$HOME/juicydeps;/opt/homebrew" \
-  -DFLUIDSYNTH_LINK_STATIC=OFF \
+  -DCMAKE_PREFIX_PATH="$HOME/juicydeps;$PWD/build/macos11-deps" \
+  -DFLUIDSYNTH_LINK_STATIC=ON \
   -DJUICYSF_COPY_PLUGIN_AFTER_BUILD=OFF
 cmake --build build --config Debug -j 8
 ctest --test-dir build -C Debug --output-on-failure
@@ -60,7 +64,7 @@ Beta artifacts must not depend on a developer's Homebrew paths. Build the pinned
 tools/build_macos_dependencies.sh build/macos11-deps
 ```
 
-The script downloads checksum-pinned FluidSynth 2.5.5, GCEM, libogg 1.3.6, libvorbis 1.3.7, FLAC 1.5.0, Opus 1.6.1, and libsndfile 1.2.2 sources. It builds static arm64 archives with a macOS 11 deployment target. FluidSynth uses C++ threading, native DLS, and libsndfile-backed SF3; unused drivers, networking, shell editing, and its default-bank path are disabled.
+The script downloads checksum-pinned FluidSynth 2.5.7, GCEM, libogg 1.3.6, libvorbis 1.3.7, FLAC 1.5.0, Opus 1.6.1, and libsndfile 1.2.2 sources, and applies the repository's CC1 vibrato extension. It builds static arm64 archives with a macOS 11 deployment target. FluidSynth uses C++ threading, native DLS, and libsndfile-backed SF3; unused drivers, networking, shell editing, and its default-bank path are disabled.
 
 Configure Juicy16 so pkg-config can see only that dependency prefix:
 

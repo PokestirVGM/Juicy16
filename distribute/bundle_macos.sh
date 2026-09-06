@@ -110,6 +110,11 @@ for document in ARCHITECTURE.md BETA_TESTER_GUIDE.md COMPATIBILITY.md \
                 LICENSING.md TROUBLESHOOTING.md; do
   cp "$repo_dir/docs/$document" "$staging_dir/docs/"
 done
+mkdir -p "$staging_dir/vendor/fluidsynth_patched"
+cp "$repo_dir/vendor/fluidsynth_patched/README.md" \
+   "$repo_dir/vendor/fluidsynth_patched/cc1-vibrato-scale.patch" \
+   "$repo_dir/vendor/fluidsynth_patched/apply.cmake" \
+   "$staging_dir/vendor/fluidsynth_patched/"
 for notice in JUCE-framework_AGPL3.txt JUCE-AudioUnitSDK.txt JUCE-HarfBuzz.txt \
               JUCE-libpng.txt JUCE-SheenBidi.txt JUCE-VST3_SDK.txt JUCE-zlib.txt \
               gcem_Apache_2.0.txt libflac_New_BSD.txt libfluidsynth_LGPL_2.1.txt \

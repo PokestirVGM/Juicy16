@@ -57,7 +57,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/macos11-deps
-          key: macos11-deps-${{ hashFiles('tools/build_macos_dependencies.sh') }}-${{ runner.arch }}
+          key: macos11-deps-${{ hashFiles('tools/build_macos_dependencies.sh', 'vendor/fluidsynth_patched/**', 'vendor/libsndfile_patched/**') }}-${{ runner.arch }}
 
       - name: Strict Release gate
         run: JUICY16_BUILD_JOBS=3 tools/ci_gates.sh release

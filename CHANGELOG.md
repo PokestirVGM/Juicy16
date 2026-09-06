@@ -2,6 +2,13 @@
 
 ## 0.6.1-beta.4 — unreleased, 2026-09-05
 
+### Release preparation — 2026-09-06
+
+- Include the FluidSynth patch documentation and source edits in the macOS archive so its documentation links resolve after extraction.
+- Use the patched static dependency in every macOS CI build mode, refresh cached FluidSynth discovery, and include dependency patches in macOS/Windows cache keys.
+- Supply the static codec closure to FluidSynth's C++ CLI linker; update the macOS source-build instructions for the required patched 2.5.7 engine.
+- Local Debug and sanitizer checks pass, but the leak gate reports outstanding FluidSynth thread and AU parameter-string allocations. Public release approval remains open along with current-candidate host validation; see `ROADMAP.md`.
+
 ### Per-channel CC1 vibrato strength
 
 - Added a per-channel ×1–×24 dropdown in MIDI settings beside Bend scale, default ×1, with a channel picker and live received-CC1 readout. Scales the bank's CC1-driven pitch-LFO contribution, preserves incoming controller values and unrelated routes, and updates held notes.

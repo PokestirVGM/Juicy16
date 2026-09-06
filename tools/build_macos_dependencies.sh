@@ -186,7 +186,8 @@ build_and_install "$work_dir/sndfile" "$work_dir/build-sndfile" \
 # its exported target - so a from-scratch static build failed to link
 # src/fluidsynth on FLAC, vorbis and ogg symbols. Juicy16 itself was never
 # affected: it resolves the closure through `pkg-config --static`, which does
-# list them. Appended through CMAKE_C_STANDARD_LIBRARIES because that lands at
+# list them. Appended for both C and C++ linkers because FluidSynth 2.5.7 uses
+# the C++ linker for its CLI. STANDARD_LIBRARIES lands at
 # the END of the link line, which is where a static archive's dependencies have
 # to be.
 fluidsynth_exe_closure="\
@@ -200,6 +201,7 @@ $install_prefix/lib/libopus.a"
 build_and_install "$work_dir/fluidsynth" "$work_dir/build-fluidsynth" \
   -DCMAKE_PREFIX_PATH="$install_prefix" \
   -DCMAKE_C_STANDARD_LIBRARIES="$fluidsynth_exe_closure" \
+  -DCMAKE_CXX_STANDARD_LIBRARIES="$fluidsynth_exe_closure" \
   -DDEFAULT_SOUNDFONT= \
   -DBUILD_SHARED_LIBS=OFF \
   -Dosal=cpp11 \

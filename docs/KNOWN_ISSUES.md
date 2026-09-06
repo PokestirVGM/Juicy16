@@ -2,6 +2,7 @@
 
 ## Current development limitations — 2026-09-05
 
+- Release-preparation leak checks on macOS 26.6.2 (2026-09-06) report 2 allocations / 32 bytes in the engine harness's FluidSynth bank-unload thread path and 4 CFString allocations / 192 bytes across two AU instances in JUCE parameter setup. The font and VST3 harnesses report zero leaks. ASan/UBSan passes do not cover these leaks; the macOS leak gate remains open.
 - FluidSynth 2.5.7 still buffers synthesis in 64-sample units. Measured note onset can lag its dispatched timestamp by 0–63 additional engine samples. Existing MIDI-dispatch trace tests do not establish exact audio-onset accuracy. Above 96 kHz, the engine-rate resampling path adds its own timing conversion.
 - The new schema 9 reset policies, trims, chorus, vibrato strength and diagnostics require fresh FL Studio/Cubase replay and project save/reopen validation. Offline harness results do not close that host gate.
 - Channel audio metering includes reverb tails. Idle reverb groups can contain approximately -155 dBFS anti-denormal noise; this is below the visible meter range.

@@ -35,7 +35,7 @@ Beta 1 is macOS 11 or later on Apple Silicon (`arm64`), AU and VST3. Windows 10 
 
 Bank formats: **SF2** and **SF3** are supported on every advertised platform; **DLS** is supported and proven on macOS and unproven on Windows. Some DLS files written by third-party editors declare RIFF sizes FluidSynth rejects — Juicy16 loads those through a bounded, read-only repair of a temporary copy, never modifying the original. A bank with no playable preset is rejected rather than loaded empty, and a rejected bank never replaces the one already playing.
 
-Sample rates: the automated suite verifies pitch-correct rendering at 44.1, 48, 88.2 and 96 kHz. FluidSynth 2.5.5 accepts 8–96 kHz; above 96 kHz Juicy16 renders at the largest fraction it accepts and interpolates up, and below 8 kHz it fails safely to silence rather than playing at the wrong pitch. Standalone remains a development/QA build only. See the exact [MIDI controller support contract](docs/CONTROLLER_SUPPORT.md).
+Sample rates: the automated suite verifies pitch-correct rendering at 44.1, 48, 88.2 and 96 kHz. FluidSynth 2.5.7 accepts 8–96 kHz; above 96 kHz Juicy16 renders at the largest fraction it accepts and interpolates up, and below 8 kHz it fails safely to silence rather than playing at the wrong pitch. Standalone remains a development/QA build only. See the exact [MIDI controller support contract](docs/CONTROLLER_SUPPORT.md).
 
 ## Using it with multichannel MIDI
 
@@ -83,7 +83,7 @@ It currently covers DLS repair/load, sample-offset rendering, mono/stereo behavi
 ## Known limitations and open Beta gates
 
 - One stereo output; no per-channel audio outputs.
-- Common 44.1, 48, 88.2, and 96 kHz rates are covered by the engine suite. FluidSynth 2.5.5 cannot render above 96 kHz; Juicy16 intentionally outputs silence at those rates instead of playing at the wrong pitch.
+- Common 44.1, 48, 88.2, and 96 kHz rates are covered by the engine suite. Above 96 kHz, Juicy16 renders at a supported internal rate and resamples to the host rate. Exact audio-onset timing remains limited by FluidSynth’s 64-sample synthesis buffering.
 - A complete licensed SF2/SF3/DLS compatibility corpus is not yet present.
 - FL Studio, Cubase, Logic, another AU host, and another VST3 host still require candidate-specific manual validation.
 - Windows DLS support and clean-machine dependency behavior have not yet been proven.
