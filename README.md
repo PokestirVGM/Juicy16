@@ -1,12 +1,12 @@
 # Juicy16
 
-### Unreleased playback improvements
+### 0.6.1-beta.4 playback improvements
 
 Development now includes FluidSynth 2.5.7, selectable DAW recovery/Standard MIDI reset behavior, saved expression and bend ranges, independent channel audio trims, MIDI/audio activity and fallback diagnostics, master peak/overload indication, and an optional global chorus with MIDI CC93 routing. The plugin still has one stereo output. See [controller behavior](docs/CONTROLLER_SUPPORT.md) and [state compatibility](docs/COMPATIBILITY.md). These changes await fresh DAW validation; FluidSynth's internal 64-sample synthesis buffering remains a known timing limitation.
 
 Juicy16 is a 16-channel multitimbral DLS/SoundFont player inspired by the automatic patch-selection workflow of Fruity LSD. Load one `.dls`, `.sf2`, or `.sf3` bank, send a multichannel MIDI file to one plugin instance, and its Bank Select and Program Change events select instruments independently on MIDI channels 1–16. All channels mix to one stereo output.
 
-The current release is `0.6.0-beta.1` — Beta 1, the first release: macOS 11 or later on Apple Silicon, AU and VST3, ad-hoc signed. It is self-contained: FluidSynth and its codecs are statically linked, so there is nothing to install alongside it. Unpack the archive, double-click `install_macos.command`, and rescan your host. Windows VST3 is Beta 2. Read [docs/BETA_TESTER_GUIDE.md](docs/BETA_TESTER_GUIDE.md) before installing; macOS will refuse an ad-hoc signed plugin until you clear quarantine. Known limitations are in [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md), and what comes next is in [ROADMAP.md](ROADMAP.md).
+The latest prerelease is [0.6.1-beta.4](https://github.com/PokestirVGM/Juicy16/releases/tag/v0.6.1-beta.4): Apple Silicon macOS, AU and VST3, ad-hoc signed. It declares a macOS 11 deployment target; runtime validation was on macOS 26.6.2. This experimental beta ships with the documented leak, timing, CI and host-validation gaps accepted by the owner. It is self-contained: FluidSynth and its codecs are statically linked, so there is nothing to install alongside it. Unpack the archive, double-click `install_macos.command`, and rescan your host. Windows VST3 is Beta 2. Read [docs/BETA_TESTER_GUIDE.md](docs/BETA_TESTER_GUIDE.md) before installing; macOS will refuse an ad-hoc signed plugin until you clear quarantine. Known limitations are in [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md), and what comes next is in [ROADMAP.md](ROADMAP.md).
 
 ## What is implemented
 

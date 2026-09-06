@@ -1,13 +1,13 @@
 # Changelog
 
-## 0.6.1-beta.4 — unreleased, 2026-09-05
+## 0.6.1-beta.4 — released, 2026-09-06
 
 ### Release preparation — 2026-09-06
 
 - Include the FluidSynth patch documentation and source edits in the macOS archive so its documentation links resolve after extraction.
 - Use the patched static dependency in every macOS CI build mode, refresh cached FluidSynth discovery, and include dependency patches in macOS/Windows cache keys.
 - Supply the static codec closure to FluidSynth's C++ CLI linker; update the macOS source-build instructions for the required patched 2.5.7 engine.
-- Local Debug and sanitizer checks pass, but the leak gate reports outstanding FluidSynth thread and AU parameter-string allocations. Public release approval remains open along with current-candidate host validation; see `ROADMAP.md`.
+- Local Debug and sanitizer checks pass, but the leak gate reports outstanding FluidSynth thread and AU parameter-string allocations. The owner authorized prerelease publication with these documented gaps; current-candidate host validation remains open. See `ROADMAP.md`.
 
 ### Per-channel CC1 vibrato strength
 
@@ -41,7 +41,7 @@
 - State migration: writer schema 7 adds expression/range channel records and 17 appended parameters (resetPolicy and trimCh1–16), for 108 total. Existing 91 IDs/order/version hints remain unchanged; additions use AU version hint 2. Older saves open in DAW recovery with unity trims and no remembered controller overrides, including in a used instance. Older plugin builds reject schema 7; keep an older project copy for rollback.
 - Timing characterization exposes FluidSynth's existing 64-sample render quantum: dispatch preserves host timestamps, but synthesis response can lag by another 0–63 engine samples. This engine upgrade does not fix that limitation.
 
-Automated validation is recorded in the local MILESTONE_PLAN.md. This work has not yet been rechecked in FL Studio or Cubase or released as a package.
+Automated validation is recorded in the local MILESTONE_PLAN.md. The macOS AU/VST3 package is published as v0.6.1-beta.4; this work has not yet been rechecked in FL Studio or Cubase.
 
 ## 0.6.1-beta.3 — unreleased
 

@@ -1,8 +1,10 @@
 # Roadmap and release status
 
-## Current development — 0.6.1-beta.4, 2026-09-06
+## Latest prerelease — 0.6.1-beta.4, 2026-09-06
 
-Release preparation is in progress for a draft prerelease. The dependency recipe
+The [published prerelease](https://github.com/PokestirVGM/Juicy16/releases/tag/v0.6.1-beta.4)
+contains the validated BC1 macOS AU/VST3 ZIP and SHA-256 sidecar, built from
+`1cf55ba`. The extracted AU and VST3 both pass their host smoke tests. The dependency recipe
 now links the FluidSynth 2.5.7 CLI's codec closure through the C++ linker, all
 macOS CI build modes use the required patched dependency, and the package
 includes the linked FluidSynth patch documentation. Fresh local Debug passes
@@ -11,11 +13,13 @@ passes on an identical installed bundle. The leak gate is not green: the engine
 harness reports 2 allocations / 32 bytes in FluidSynth's bank-unload thread path,
 and the AU harness reports 4 CFString allocations / 192 bytes in JUCE parameter
 setup. A new hosted CI pass, leak resolution, and the FL Studio/Cubase checks
-remain open. These results do not approve public distribution.
+remain open. The owner explicitly authorized this experimental prerelease on
+2026-09-06 despite the documented leak, timing, CI and host-validation gaps;
+publication does not mark those checks as passed.
 
 Playback reliability work adds FluidSynth 2.5.7, explicit reset policies, immediate controller/project recall, independent channel audio trims, and MIDI/audio/fallback/overload diagnostics. Global chorus now shares the effects panel with reverb, with explicit controls and MIDI CC93 routing. The interface cleanup adds readable effect values, a master peak meter, aligned channel diagnostics and properly synchronized row layout. Per-channel CC1 vibrato strength adds a ×1–×24 multiplier without rewriting MIDI values. State advances to schema 9 with migration from older saves. The internal MIDI player, separate host outputs and per-channel reverb-send controls remain out of scope.
 
-The local beta.4 AU and VST3 were refreshed on 2026-09-06 after the CC1 controls moved beside pitch controls in MIDI settings, with an explicit channel picker and live received-CC1 readout. Strict Release passed 16/16 tests and both installed bundles passed their format smoke tests. A channel-1 render of the private Shitenno MIDI/SF2 confirms ×24 changes the audio after its first nonzero CC1 at 17.052606 seconds, with identical audio beforehand; this does not establish hardware parity or FL Studio controller delivery. This work is not a published release. FL Studio and Cubase replay/save/reopen validation remains open. Audio-onset tests expose an existing FluidSynth limit of up to 63 additional engine samples; sample-accurate synthesis is still an unresolved requirement.
+The local beta.4 AU and VST3 were refreshed on 2026-09-06 after the CC1 controls moved beside pitch controls in MIDI settings, with an explicit channel picker and live received-CC1 readout. Strict Release passed 16/16 tests and both installed bundles passed their format smoke tests. A channel-1 render of the private Shitenno MIDI/SF2 confirms ×24 changes the audio after its first nonzero CC1 at 17.052606 seconds, with identical audio beforehand; this does not establish hardware parity or FL Studio controller delivery. This work is included in the published beta.4 prerelease. FL Studio and Cubase replay/save/reopen validation remains open. Audio-onset tests expose an existing FluidSynth limit of up to 63 additional engine samples; sample-accurate synthesis is still an unresolved requirement.
 
 ## Where the project is
 
