@@ -6,15 +6,21 @@ benchmarks measured 36–45% lower processing time for dense automation at 512/1
 frames; ordinary playback gains were smaller. Audio and diagnostics are
 byte-identical to the original across an 80-case matrix; 82 buffer-equivalence
 cases, all 17 Release tests, all 15 Debug tests and 3/3 ASan/UBSan checks pass,
-including AU/VST3 smoke tests in both build modes. This is a local source/build update,
-not a new installed or published release. Existing timing, leak and DAW-validation
-gaps remain open.
+including AU/VST3 smoke tests in both build modes. This update is now published
+in the refreshed Beta 4 BC2 package. Fresh strict Release validation passes all
+17 tests; extracted AU/VST3 smoke tests and strict AU validation pass. Existing
+timing, leak and DAW-validation gaps remain open.
 
-## Latest prerelease — 0.6.1-beta.4, 2026-09-06
+## Latest prerelease — 0.6.1-beta.4, refreshed 2026-09-12
 
 The [published prerelease](https://github.com/PokestirVGM/Juicy16/releases/tag/v0.6.1-beta.4)
-contains the validated BC1 macOS AU/VST3 ZIP and SHA-256 sidecar, built from
-`1cf55ba`. The extracted AU and VST3 both pass their host smoke tests. The dependency recipe
+contains the validated BC2 macOS AU/VST3 ZIP and SHA-256 sidecar, built from
+`17b3c1e`. BC2 replaces BC1 on the same release page, and the tag now points to
+the updated source. The extracted AU and VST3 both pass their host smoke tests.
+The complete extracted AU matches the temporarily installed copy used for the
+strict AU validation pass; the prior installation was then restored. The
+September 12 hosted CI run (34679396901) has a failed macOS Debug job; it is not
+a green hosted gate. The original September 6 preparation evidence follows: The dependency recipe
 now links the FluidSynth 2.5.7 CLI's codec closure through the C++ linker, all
 macOS CI build modes use the required patched dependency, and the package
 includes the linked FluidSynth patch documentation. Fresh local Debug passes

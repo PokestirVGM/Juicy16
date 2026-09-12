@@ -1,9 +1,9 @@
 # Changelog
 
-## Unreleased — performance pass, 2026-09-12
+## 0.6.1-beta.4 BC2 — refreshed release, 2026-09-12
 
 - Remove redundant scratch clearing and mixer bookkeeping, skip empty-channel RPN scans, avoid CC1 parameter substring allocation, and restrict timed rack repaints to the signal column. Preserve synthesis settings, effects, gain arithmetic and MIDI ordering.
-- Three alternating offline Release runs measured 36–45% less processing time for dense automation at 512/1024 frames on Apple Silicon; ordinary playback gains were smaller. Before/after audio and diagnostics match byte for byte across 80 scenarios. Add 82 render/buffer regression cases and extend the automation benchmark to larger buffers. This source update has not been installed, packaged or revalidated in FL Studio/Cubase.
+- Three alternating offline Release runs measured 36–45% less processing time for dense automation at 512/1024 frames on Apple Silicon; ordinary playback gains were smaller. Before/after audio and diagnostics match byte for byte across 80 scenarios. Add 82 render/buffer regression cases and extend the automation benchmark to larger buffers. Published as the replacement BC2 package on the existing Beta 4 release, from source `17b3c1e`. Fresh strict Release passes 17/17 tests; the extracted AU/VST3 smoke tests and strict AU validation pass. FL Studio/Cubase revalidation remains open; hosted CI and the known leak/timing gates are not green.
 
 ## 0.6.1-beta.4 — released, 2026-09-06
 
