@@ -470,6 +470,9 @@ private:
     void renderWithEffects(float* const* outputs, int numSamples);
     // Preallocated stereo effects bus. Without it the reverb is discarded.
     AudioBuffer<float> effectsScratch;
+    // Rebound only when prepareToPlay resizes scratch; rendering never resizes it.
+    std::array<float*, 64> effectOutputs{};
+    std::array<float*, 32> dryOutputs{};
     // Message thread: (re)seed the engine and the smoothers from the parameters.
     void resetReverbToParameters();
 

@@ -982,6 +982,15 @@ if (BUILD_TESTING)
 endif ()
 
 if (BUILD_TESTING)
+  add_executable(JuicySFRenderEquivalenceTests tests/RenderEquivalenceTests.cpp)
+  juicysf_treat_warnings_as_errors(tests/RenderEquivalenceTests.cpp)
+  target_include_directories(JuicySFRenderEquivalenceTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Source")
+  target_link_libraries(JuicySFRenderEquivalenceTests PRIVATE
+    JuicySFPlugin juce::juce_audio_utils juce::juce_gui_extra ${FLUIDSYNTH_TARGET})
+  target_compile_features(JuicySFRenderEquivalenceTests PRIVATE cxx_std_17)
+  add_test(NAME render_equivalence COMMAND JuicySFRenderEquivalenceTests)
+  set_tests_properties(render_equivalence PROPERTIES LABELS "engine;playback;performance")
+
   add_executable(JuicySFPlaybackReliabilityTests tests/PlaybackReliabilityTests.cpp)
   juicysf_treat_warnings_as_errors(tests/PlaybackReliabilityTests.cpp)
   target_include_directories(JuicySFPlaybackReliabilityTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Source")

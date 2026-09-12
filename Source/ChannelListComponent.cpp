@@ -542,6 +542,8 @@ void ChannelListComponent::timerCallback() {
             }
             cell->getCombo().setTooltip(description);
         }
+        // Only this column animates on the timer. Selection, mute/solo, bank
+        // changes and parameter attachments already invalidate their own areas.
+        table.repaint(table.getCellPosition(activityColumn, ch, true));
     }
-    table.repaint();
 }

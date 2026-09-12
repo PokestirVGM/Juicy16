@@ -1,5 +1,15 @@
 # Roadmap and release status
 
+Local performance work on 2026-09-12 removes redundant mixer clearing, pointer
+setup, meter calculations, RPN scans and rack repaints. Three alternating Release
+benchmarks measured 36–45% lower processing time for dense automation at 512/1024
+frames; ordinary playback gains were smaller. Audio and diagnostics are
+byte-identical to the original across an 80-case matrix; 82 buffer-equivalence
+cases, all 17 Release tests, all 15 Debug tests and 3/3 ASan/UBSan checks pass,
+including AU/VST3 smoke tests in both build modes. This is a local source/build update,
+not a new installed or published release. Existing timing, leak and DAW-validation
+gaps remain open.
+
 ## Latest prerelease — 0.6.1-beta.4, 2026-09-06
 
 The [published prerelease](https://github.com/PokestirVGM/Juicy16/releases/tag/v0.6.1-beta.4)

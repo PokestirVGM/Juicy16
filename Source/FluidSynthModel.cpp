@@ -458,6 +458,13 @@ void FluidSynthModel::prepareToPlay(double sampleRate, int samplesPerBlock) {
     // overrun it or allocate on the audio thread.
     effectsScratch.setSize(32, jmax(64, samplesPerBlock), false, false, true);
     channelScratch.setSize(32, jmax(64, samplesPerBlock), false, false, true);
+    for (int i = 0; i < 32; ++i) {
+        dryOutputs[static_cast<size_t>(i)] = channelScratch.getWritePointer(i);
+        // Reverb and chorus for each group still add into the same stereo scratch.
+        const int group = i / 2, side = i % 2;
+        effectOutputs[static_cast<size_t>(4 * group + side)] = effectsScratch.getWritePointer(i);
+        effectOutputs[static_cast<size_t>(4 * group + 2 + side)] = effectsScratch.getWritePointer(i);
+    }
     for (int ch = 0; ch < 16; ++ch) {
         channelTrimSmoother[ch].reset(currentSampleRate, 0.02);
         channelTrimSmoother[ch].setCurrentAndTargetValue(channelTrimGain[ch].load());
@@ -589,7 +596,7 @@ void FluidSynthModel::parameterChanged(const String& parameterID, float /*newVal
         return;
     }
     if (parameterID.startsWith("vibratoScaleCh")) {
-        const int ch = parameterID.substring(14).getIntValue() - 1;
+        const int ch = channelSuffixOf(parameterID, "vibratoScaleCh", 14);
         if (ch >= 0 && ch < 16)
             vibratoScale[ch].store(juce::jlimit(1, 24, juce::roundToInt(
                 valueTreeState.getRawParameterValue(parameterID)->load())));
@@ -2093,6 +2100,7 @@ void FluidSynthModel::dispatchTimestampGroup(juce::MidiBufferIterator begin,
     }
     int count{0};
     bool plain{true};
+    unsigned int rpnChannels{0};
     for (auto it = begin; it != end; ++it) {
         if (count == kMaxGroupEvents) {
             // More than the scratch holds: the host's order, nothing dropped.
@@ -2119,11 +2127,15 @@ void FluidSynthModel::dispatchTimestampGroup(juce::MidiBufferIterator begin,
         e.value = static_cast<juce::uint8>(value);
         e.unit = e.round = e.subTier = e.ccRank = 0;
         plain = plain && e.kind == kindOther;
+        if (e.kind == kindRpnSelect || e.kind == kindRpnNull || e.kind == kindData)
+            rpnChannels |= 1u << ch;
         ++count;
     }
     if (count > 1 && !plain) {
         for (int ch = 0; ch < kNumChannels; ++ch)
-            orderChannelRpn(ch, count);
+            // An absent channel's scan cannot change any ordering keys.
+            if ((rpnChannels & (1u << ch)) != 0)
+                orderChannelRpn(ch, count);
         std::sort(groupScratch.begin(), groupScratch.begin() + count,
                   [](const GroupEvent& a, const GroupEvent& b) {
                       const int ta{groupTier(a.kind)}, tb{groupTier(b.kind)};
@@ -2402,35 +2414,43 @@ void FluidSynthModel::renderSamples(AudioBuffer<float>& buffer, int startSample,
 // top. `numSamples` must not exceed the preallocated effects scratch.
 void FluidSynthModel::renderWithEffects(float* const* outputs, int numSamples) {
     jassert(numSamples <= effectsScratch.getNumSamples());
-    effectsScratch.clear();
-    channelScratch.clear();
-    std::array<float*, 64> effects{};
-    std::array<float*, 32> dry{};
-    for (int i = 0; i < 32; ++i) {
-        dry[static_cast<size_t>(i)] = channelScratch.getWritePointer(i);
-        // Reverb and chorus for each group add into the same stereo scratch.
-        const int group = i / 2, side = i % 2;
-        effects[static_cast<size_t>(4 * group + side)] = effectsScratch.getWritePointer(i);
-        effects[static_cast<size_t>(4 * group + 2 + side)] = effectsScratch.getWritePointer(i);
-    }
-    fluid_synth_process(synth.get(), numSamples, 64, effects.data(), 32, dry.data());
+    // A dense MIDI block can render one sample at a time. Clear only the region
+    // FluidSynth will add into, not the entire prepared capacity for every event.
+    // Cached write pointers bypass AudioBuffer's cleared flag: mark both buffers
+    // dirty after the engine call so the next partial clear cannot be skipped.
+    effectsScratch.clear(0, numSamples);
+    channelScratch.clear(0, numSamples);
+    fluid_synth_process(synth.get(), numSamples, 64, effectOutputs.data(), 32, dryOutputs.data());
+    effectsScratch.setNotClear();
+    channelScratch.setNotClear();
+    const float decay = std::pow(0.1f, static_cast<float>(numSamples) / currentSampleRate);
     for (int ch = 0; ch < 16; ++ch) {
         auto& smooth = channelTrimSmoother[ch];
         smooth.setTargetValue(channelTrimGain[ch].load(std::memory_order_relaxed));
+        const float* const dryLeft = dryOutputs[static_cast<size_t>(2 * ch)];
+        const float* const dryRight = dryOutputs[static_cast<size_t>(2 * ch + 1)];
+        const float* const wetLeft = effectsScratch.getReadPointer(2 * ch);
+        const float* const wetRight = effectsScratch.getReadPointer(2 * ch + 1);
         float peak{0.0f};
-        for (int i = 0; i < numSamples; ++i) {
-            const float gain = smooth.getNextValue();
-            const float left = (dry[static_cast<size_t>(2 * ch)][i]
-                + effectsScratch.getSample(2 * ch, i)) * gain;
-            const float right = (dry[static_cast<size_t>(2 * ch + 1)][i]
-                + effectsScratch.getSample(2 * ch + 1, i)) * gain;
-            outputs[0][i] += left;
-            outputs[1][i] += right;
-            peak = juce::jmax(peak, std::abs(left), std::abs(right));
-        }
+        const auto mix = [&](auto nextGain) {
+            for (int i = 0; i < numSamples; ++i) {
+                const float gain = nextGain();
+                const float left = (dryLeft[i] + wetLeft[i]) * gain;
+                const float right = (dryRight[i] + wetRight[i]) * gain;
+                outputs[0][i] += left;
+                outputs[1][i] += right;
+                peak = juce::jmax(peak, std::abs(left), std::abs(right));
+            }
+        };
+        // getNextValue returns the target without changing state when settled.
+        // Hoist that branch out of the sample loop; keep every smoothing step and
+        // the exact (dry + wet) * gain, then channel-order summation in both paths.
+        if (smooth.isSmoothing())
+            mix([&smooth] { return smooth.getNextValue(); });
+        else
+            mix([gain = smooth.getTargetValue()] { return gain; });
         // Peak envelope advances with audio time, independent of whether the UI
         // is open. Release is 20 dB/s; the UI never locks or calls FluidSynth.
-        const float decay = std::pow(0.1f, static_cast<float>(numSamples) / currentSampleRate);
         channelPeak[ch].store(juce::jmax(peak, channelPeak[ch].load() * decay));
     }
 }

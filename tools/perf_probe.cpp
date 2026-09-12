@@ -319,8 +319,7 @@ int main(int argc, char** argv)
     }
 
     std::printf("\n-- program change and controller automation --\n");
-    {
-        constexpr int blockSize{64};
+    for (const int blockSize : {64, 512, 1024}) {
         JuicySFAudioProcessor processor;
         processor.prepareToPlay(sampleRate, blockSize);
         const auto state{stateFor(bank.getFullPathName())};
