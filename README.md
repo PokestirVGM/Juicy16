@@ -2,11 +2,13 @@
 
 ### 0.6.1-beta.4 playback and performance improvements
 
+A native **Windows x64 candidate** is now available locally as a portable ZIP, installer and corresponding-source ZIP. Its strict Release build passes all 17 automated gates, including the Windows VST3 host harness and SF2/SF3/DLS loading. See [Windows release evidence](docs/WINDOWS_RELEASE.md) and [Windows build instructions](building.win32.md). Windows DAW and clean minimum-OS testing remain manual.
+
 Development now includes FluidSynth 2.5.7, selectable DAW recovery/Standard MIDI reset behavior, saved expression and bend ranges, independent channel audio trims, MIDI/audio activity and fallback diagnostics, master peak/overload indication, and an optional global chorus with MIDI CC93 routing. The plugin still has one stereo output. See [controller behavior](docs/CONTROLLER_SUPPORT.md) and [state compatibility](docs/COMPATIBILITY.md). These changes await fresh DAW validation; FluidSynth's internal 64-sample synthesis buffering remains a known timing limitation.
 
 Juicy16 is a 16-channel multitimbral DLS/SoundFont player inspired by the automatic patch-selection workflow of Fruity LSD. Load one `.dls`, `.sf2`, or `.sf3` bank, send a multichannel MIDI file to one plugin instance, and its Bank Select and Program Change events select instruments independently on MIDI channels 1–16. All channels mix to one stereo output.
 
-The latest prerelease was refreshed on September 12 with the BC2 performance update (36–45% lower processing time in dense-automation benchmarks, with byte-identical audio across 80 comparison scenarios). Download BC2 to update an earlier Beta 4 installation. The release is [0.6.1-beta.4](https://github.com/PokestirVGM/Juicy16/releases/tag/v0.6.1-beta.4): Apple Silicon macOS, AU and VST3, ad-hoc signed. It declares a macOS 11 deployment target; runtime validation was on macOS 26.6.2. This experimental beta ships with the documented leak, timing, CI and host-validation gaps accepted by the owner. It is self-contained: FluidSynth and its codecs are statically linked, so there is nothing to install alongside it. Unpack the archive, double-click `install_macos.command`, and rescan your host. Windows VST3 is Beta 2. Read [docs/BETA_TESTER_GUIDE.md](docs/BETA_TESTER_GUIDE.md) before installing; macOS will refuse an ad-hoc signed plugin until you clear quarantine. Known limitations are in [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md), and what comes next is in [ROADMAP.md](ROADMAP.md).
+The latest prerelease was refreshed on September 12 with the BC2 performance update (36–45% lower processing time in dense-automation benchmarks, with byte-identical audio across 80 comparison scenarios). Download BC2 to update an earlier Beta 4 installation. The release is [0.6.1-beta.4](https://github.com/PokestirVGM/Juicy16/releases/tag/v0.6.1-beta.4): Apple Silicon macOS, AU and VST3, ad-hoc signed. It declares a macOS 11 deployment target; runtime validation was on macOS 26.6.2. This experimental beta ships with the documented leak, timing, CI and host-validation gaps accepted by the owner. It is self-contained: FluidSynth and its codecs are statically linked, so there is nothing to install alongside it. Unpack the archive, double-click `install_macos.command`, and rescan your host. Windows VST3 has a native candidate awaiting owner DAW testing. Read [docs/BETA_TESTER_GUIDE.md](docs/BETA_TESTER_GUIDE.md) before installing; macOS will refuse an ad-hoc signed plugin until you clear quarantine. Known limitations are in [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md), and what comes next is in [ROADMAP.md](ROADMAP.md).
 
 ## What is implemented
 
@@ -27,13 +29,13 @@ The latest prerelease was refreshed on September 12 with the BC2 performance upd
 | --- | --- | --- | --- |
 | macOS | AU | Release format | Builds and passes strict signature/dependency checks and `auval` locally; DAW and minimum-OS matrices remain required |
 | macOS | VST3 | Release format | Automated 16-channel VST3 unit/mapping smoke test passes; Cubase end-to-end retest remains required |
-| Windows | VST3 | **Beta 2** | Moved out of Beta 1 on 2026-08-24: the cross-build pipeline has never produced a host-validated artifact |
+| Windows | VST3 | Native candidate | MSVC strict Release and automated VST3 host tests pass; owner DAW/minimum-OS checks remain |
 | Desktop | Standalone | Development/QA only | Built for local testing; not a primary release format |
 | Desktop | VST2 | Out of scope | Not configurable or built by the Beta 1 CMake project |
 
 Beta 1 is macOS 11 or later on Apple Silicon (`arm64`), AU and VST3. Windows 10 1607+ on `x86_64` with VST3 is planned for Beta 2. Intel macOS, Windows ARM64, Windows 32-bit, Linux, VST2 and AUv3 are out of scope.
 
-Bank formats: **SF2** and **SF3** are supported on every advertised platform; **DLS** is supported and proven on macOS and unproven on Windows. Some DLS files written by third-party editors declare RIFF sizes FluidSynth rejects — Juicy16 loads those through a bounded, read-only repair of a temporary copy, never modifying the original. A bank with no playable preset is rejected rather than loaded empty, and a rejected bank never replaces the one already playing.
+Bank formats: **SF2** and **SF3** are supported on every advertised platform; **DLS** passes automated loading on macOS and Windows. Some DLS files written by third-party editors declare RIFF sizes FluidSynth rejects — Juicy16 loads those through a bounded, read-only repair of a temporary copy, never modifying the original. A bank with no playable preset is rejected rather than loaded empty, and a rejected bank never replaces the one already playing.
 
 Sample rates: the automated suite verifies pitch-correct rendering at 44.1, 48, 88.2 and 96 kHz. FluidSynth 2.5.7 accepts 8–96 kHz; above 96 kHz Juicy16 renders at the largest fraction it accepts and interpolates up, and below 8 kHz it fails safely to silence rather than playing at the wrong pitch. Standalone remains a development/QA build only. See the exact [MIDI controller support contract](docs/CONTROLLER_SUPPORT.md).
 
@@ -86,7 +88,7 @@ It currently covers DLS repair/load, sample-offset rendering, mono/stereo behavi
 - Common 44.1, 48, 88.2, and 96 kHz rates are covered by the engine suite. Above 96 kHz, Juicy16 renders at a supported internal rate and resamples to the host rate. Exact audio-onset timing remains limited by FluidSynth’s 64-sample synthesis buffering.
 - A complete licensed SF2/SF3/DLS compatibility corpus is not yet present.
 - FL Studio, Cubase, Logic, another AU host, and another VST3 host still require candidate-specific manual validation.
-- Windows DLS support and clean-machine dependency behavior have not yet been proven.
+- Windows DLS loading and system-only DLL imports pass automated checks; clean-machine and DAW behavior still require manual testing.
 - The source-built static dependency closure and Juicy16 artifact declare macOS 11 arm64 and pass local portability checks, but runtime testing on macOS 11 and the current release is still required.
 - Logic/additional-AU-host validation, Developer ID/notarization, and production packaging of the frozen candidate remain open; the local deterministic packaging workflow is implemented and self-validating.
 - AGPL/GPL source packaging and notices require final qualified review before distribution.

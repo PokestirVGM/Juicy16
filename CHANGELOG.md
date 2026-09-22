@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-09-22 — native Windows candidate
+
+- Complete MSVC x64 static build, including the Opus static CRT and codec CMake config fixes.
+- Portable ZIP, native installer, corresponding-source ZIP, checksums and extracted-artifact validation.
+- Windows VST3 smoke harness, PE dependency gate, installer lifecycle checks and strict CI.
+- Preserve hashed vendor files across Windows line-ending conversion; extract Unicode source archives.
+- Fix MSVC first-party warnings and offline harness stack, buffering, read-only and file-deletion behavior; add real Windows resident-memory measurements.
+- Repair the documentation gate under CMake 3.x so it checks real links and rejects an empty scan.
+- All 17 strict Release and all 17 Debug tests pass; owner DAW and clean minimum-OS checks remain separate.
+
 ## 0.6.1-beta.4 BC2 — refreshed release, 2026-09-12
 
 - Remove redundant scratch clearing and mixer bookkeeping, skip empty-channel RPN scans, avoid CC1 parameter substring allocation, and restrict timed rack repaints to the signal column. Preserve synthesis settings, effects, gain arithmetic and MIDI ordering.

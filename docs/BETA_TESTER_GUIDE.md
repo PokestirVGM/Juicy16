@@ -1,5 +1,10 @@
 # Beta 1 tester guide
 
+Windows testers: use the native Windows candidate instructions in
+[WINDOWS_RELEASE.md](WINDOWS_RELEASE.md) and INSTALL-WINDOWS.txt inside your
+package. The historical Beta 1 installation instructions below are macOS only.
+
+
 ## Chorus checks for the development build
 
 Select the Chorus tab, enable it and send CC93 above zero on a test track. Check both waveforms, automate level/rate/depth, and verify save/close/reopen and sample-rate changes. A zero-send channel should remain dry; channel Trim should scale its chorus along with its dry sound. Switching effects tabs must not change either enable state. Existing projects should reopen with chorus off. These checks still require real FL Studio/Cubase sessions.

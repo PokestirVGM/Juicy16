@@ -96,12 +96,12 @@ void ChannelListComponent::MuteSoloCell::lookAndFeelChanged() {
     // they get different hues: solo takes the accent, mute keeps its own warm
     // red in every accent. Both carry a dark label, which is legible on either
     // fill - a near-white fill with a dark letter read as a blank white box.
-    auto& lookAndFeel{getLookAndFeel()};
-        if (!lookAndFeel.isColourSpecified(Juicy16::textPrimaryColourId)) return;
+    auto& theme{getLookAndFeel()};
+        if (!theme.isColourSpecified(Juicy16::textPrimaryColourId)) return;
     solo.setColour(juce::TextButton::buttonOnColourId,
-                   lookAndFeel.findColour(Juicy16::accentColourId));
+                   theme.findColour(Juicy16::accentColourId));
     mute.setColour(juce::TextButton::buttonOnColourId,
-                   lookAndFeel.findColour(Juicy16::muteActiveColourId));
+                   theme.findColour(Juicy16::muteActiveColourId));
 }
 
 void ChannelListComponent::MuteSoloCell::setRow(int newRow) {
@@ -315,22 +315,22 @@ void ChannelListComponent::paintRowBackground(
     int height,
     bool /*rowIsSelected*/
 ) {
-    auto& lookAndFeel{getLookAndFeel()};
+    auto& theme{getLookAndFeel()};
     const bool selected{rowNumber == getSelectedChannelIndex()};
     if (selected)
-        g.fillAll(lookAndFeel.findColour(Juicy16::rowSelectedColourId));
+        g.fillAll(theme.findColour(Juicy16::rowSelectedColourId));
     else if (rowNumber % 2)
-        g.fillAll(lookAndFeel.findColour(Juicy16::rowAlternateColourId));
+        g.fillAll(theme.findColour(Juicy16::rowAlternateColourId));
     if (selected) {
         // A 2px accent marker rather than a wash of colour, so the row text keeps
         // its contrast and the selection reads at a glance.
-        g.setColour(lookAndFeel.findColour(Juicy16::accentColourId));
+        g.setColour(theme.findColour(Juicy16::accentColourId));
         g.fillRect(0, 0, 2, height);
     }
     if (isRowSilenced(rowNumber)) {
         // Whether this channel muted itself or another channel soloed, the row
         // reads as not sounding. Soloing one channel visibly quiets fifteen.
-        g.setColour(lookAndFeel.findColour(Juicy16::rowSilencedColourId));
+        g.setColour(theme.findColour(Juicy16::rowSilencedColourId));
         g.fillRect(0, 0, width, height);
     }
 }
@@ -379,8 +379,8 @@ void ChannelListComponent::paintCell(
     }
     if (columnId != channelColumn) return; // every other column is drawn by its own control
 
-    auto& lookAndFeel{getLookAndFeel()};
-    g.setColour(lookAndFeel.findColour(rowNumber == getSelectedChannelIndex()
+    auto& theme{getLookAndFeel()};
+    g.setColour(theme.findColour(rowNumber == getSelectedChannelIndex()
         ? Juicy16::textPrimaryColourId
         : Juicy16::textValueColourId)
         .withMultipliedAlpha(isRowSilenced(rowNumber) ? 0.45f : 1.0f));

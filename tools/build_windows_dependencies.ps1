@@ -12,10 +12,8 @@
     The plugin build must use the same runtime; CMakeLists.txt sets it whenever
     FLUIDSYNTH_LINK_STATIC is on under MSVC.
 
-    UNPROVEN: this recipe has not been executed. It is written from the macOS
-    recipe and FluidSynth's documented Windows options, and every claim about
-    the artifact it produces stays open in ROADMAP.md Phase 4.3 until a
-    real run and host validation.
+    Validated with MSVC x64 on Windows 11. See docs/WINDOWS_RELEASE.md for
+    automated evidence and the remaining manual DAW/minimum-OS checks.
 
 .PARAMETER InstallPrefix
     Where to install the closure. Defaults to C:\juicy16-deps — deliberately
@@ -29,11 +27,17 @@
 [CmdletBinding()]
 param(
     [string] $InstallPrefix = 'C:\juicy16-deps',
-    [int] $BuildJobs = [Environment]::ProcessorCount
+    [int] $BuildJobs = [Environment]::ProcessorCount,
+    [string] $WorkDir = '',
+    [switch] $KeepSources,
+    [ValidateSet('Release','Debug')][string] $Configuration = 'Release',
+    [string] $SourceArchiveDir = ''
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. "$PSScriptRoot/windows_common.ps1"
+Initialize-WindowsBuild
 
 # Written for PowerShell 7 (`pwsh`), which is what the CI job uses, but the
 # checks below avoid PowerShell 6+ only constructs so a Windows PowerShell 5.1
@@ -55,7 +59,12 @@ if ($normalisedPrefix -match '\s') {
     throw "Dependency install prefix must not contain whitespace: $InstallPrefix"
 }
 
-$workDir = Join-Path ([IO.Path]::GetTempPath()) ("juicy16-deps-" + [Guid]::NewGuid().ToString('N').Substring(0, 8))
+if (-not $WorkDir) {
+    $WorkDir = Join-Path ([IO.Path]::GetTempPath()) ("juicy16-deps-" + [Guid]::NewGuid().ToString('N').Substring(0, 8))
+}
+$workDir = [IO.Path]::GetFullPath($WorkDir)
+if ((Test-Path -LiteralPath $workDir) -and -not $KeepSources) { throw "Reusing a work directory requires -KeepSources: $workDir" }
+$ownedWorkDir = $workDir
 New-Item -ItemType Directory -Path $workDir -Force | Out-Null
 
 try {
@@ -72,7 +81,13 @@ try {
         Write-Host "-- fetching $Name"
         # Invoke-WebRequest honours redirects and TLS defaults; curl.exe is
         # present on Windows 10 1803+ but this avoids depending on it.
-        Invoke-WebRequest -Uri $Url -OutFile $archive -UseBasicParsing -MaximumRedirection 5
+        if (-not (Test-Path -LiteralPath $archive)) {
+            if ($SourceArchiveDir -and (Test-Path -LiteralPath (Join-Path $SourceArchiveDir "$Name.tar.gz"))) {
+                Copy-Item -LiteralPath (Join-Path $SourceArchiveDir "$Name.tar.gz") -Destination $archive
+            } else {
+                Invoke-WebRequest -Uri $Url -OutFile $archive -UseBasicParsing -MaximumRedirection 5
+            }
+        }
 
         $actual = (Get-FileHash -Algorithm SHA256 -Path $archive).Hash.ToLowerInvariant()
         if ($actual -ne $ExpectedSha256.ToLowerInvariant()) {
@@ -81,7 +96,9 @@ try {
 
         New-Item -ItemType Directory -Path $sourceDir -Force | Out-Null
         # bsdtar ships with Windows 10 1803+ and handles gzip and strip-components.
-        & tar.exe -xzf $archive -C $sourceDir --strip-components=1
+        # Windows bsdtar cannot decode FluidSynth's Unicode filename fixtures
+        # in some system locales. Python preserves the archive's UTF-8 names.
+        & python (Join-Path $PSScriptRoot 'extract_source.py') $archive $sourceDir
         if ($LASTEXITCODE -ne 0) { throw "Failed to extract $Name" }
     }
 
@@ -98,8 +115,9 @@ try {
             '-G', 'Visual Studio 17 2022',
             '-A', 'x64',
             "-DCMAKE_INSTALL_PREFIX=$normalisedPrefix",
-            '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded',
+            '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded$<$<CONFIG:Debug>:Debug>',
             '-DCMAKE_POLICY_DEFAULT_CMP0091=NEW',
+            '-DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON',
             # Windows 10 version 1607 is the approved API floor; see
             # ROADMAP.md Phase 4.1 and CMakeLists.txt. CMake's own MSVC
             # defaults are repeated because setting these variables replaces them.
@@ -109,7 +127,7 @@ try {
 
         & cmake @configure
         if ($LASTEXITCODE -ne 0) { throw "Configure failed for $SourceDir" }
-        & cmake --build $BuildDir --config Release --target install --parallel $BuildJobs
+        & cmake --build $BuildDir --config $Configuration --target install --parallel $BuildJobs
         if ($LASTEXITCODE -ne 0) { throw "Build failed for $SourceDir" }
     }
 
@@ -214,6 +232,7 @@ try {
     Build-AndInstall -SourceDir (Join-Path $workDir 'opus') `
         -BuildDir (Join-Path $workDir 'build-opus') -CMakeArguments @(
         '-DOPUS_BUILD_SHARED_LIBRARY=OFF',
+        '-DOPUS_STATIC_RUNTIME=ON',
         '-DOPUS_BUILD_TESTING=OFF',
         '-DOPUS_BUILD_PROGRAMS=OFF')
 
@@ -269,6 +288,8 @@ try {
     $fixtureDir = Join-Path $normalisedPrefix 'share\juicy16-test-fixtures'
     New-Item -ItemType Directory -Path $fixtureDir -Force | Out-Null
     Copy-Item (Join-Path $workDir 'fluidsynth\sf2\VintageDreamsWaves-v2.sf3') $fixtureDir -Force
+    Copy-Item (Join-Path $workDir 'fluidsynth\sf2\VintageDreamsWaves-v2.sf2') $fixtureDir -Force
+    Copy-Item (Join-Path $workDir 'fluidsynth\sf2\VintageDreamsWaves-v2.dls') $fixtureDir -Force
     Copy-Item (Join-Path $workDir 'fluidsynth\sf2\COPYRIGHT.txt') `
         (Join-Path $fixtureDir 'VintageDreamsWaves-COPYRIGHT.txt') -Force
 
@@ -278,5 +299,7 @@ try {
     Write-Host "Use -DJUICYSF_SF3_FIXTURE=`"$fixtureDir\VintageDreamsWaves-v2.sf3`" for strict validation."
 }
 finally {
-    Remove-Item -Recurse -Force $workDir -ErrorAction SilentlyContinue
+    if (-not $KeepSources -and [IO.Path]::GetFullPath($workDir) -eq $ownedWorkDir) {
+        Remove-Item -LiteralPath $ownedWorkDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }

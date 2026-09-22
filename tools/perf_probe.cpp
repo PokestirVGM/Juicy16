@@ -9,6 +9,11 @@
 // reported so a run can be compared against a recorded baseline, and are
 // machine-specific — see docs/PERFORMANCE.md.
 
+#if defined(_WIN32)
+ #define NOMINMAX
+ #include <windows.h>
+ #include <psapi.h>
+#endif
 #include "PluginProcessor.h"
 
 #include <algorithm>
@@ -41,6 +46,11 @@ double residentMegabytes()
                   reinterpret_cast<task_info_t>(&info), &count) != KERN_SUCCESS)
         return 0.0;
     return static_cast<double>(info.resident_size) / (1024.0 * 1024.0);
+#elif JUCE_WINDOWS
+    PROCESS_MEMORY_COUNTERS info{};
+    if (!GetProcessMemoryInfo(GetCurrentProcess(), &info, sizeof(info)))
+        return 0.0;
+    return static_cast<double>(info.WorkingSetSize) / (1024.0 * 1024.0);
 #else
     return 0.0;
 #endif
@@ -124,7 +134,7 @@ int main(int argc, char** argv)
 {
     // Line-buffered so FluidSynth's unbuffered stderr interleaves correctly with
     // the section headers when a CI job captures both streams.
-    std::setvbuf(stdout, nullptr, _IOLBF, 0);
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
 
     juce::ScopedJuceInitialiser_GUI juceInitialiser;
     if (argc != 2) {

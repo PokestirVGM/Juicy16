@@ -1405,7 +1405,7 @@ int main(int argc, char** argv)
         const double pitch96{pitchAt(atCeiling, 96000.0)};
         const double pitch192{pitchAt(at192, 192000.0)};
         const double pitch176{pitchAt(at176, 176400.0)};
-        const auto onPitch{[](double measured) {
+        const auto onPitch{[=](double measured) {
             return std::abs(measured - toneFrequency) < toneFrequency * 0.02;
         }};
         check(onPitch(pitch96) && onPitch(pitch192) && onPitch(pitch176),
@@ -4231,18 +4231,16 @@ int main(int argc, char** argv)
         // A read-only bank is legitimate: repair writes to a temporary copy, so
         // the source never needs to be writable and the load must succeed.
         bool readOnlyHandled{true};
-       #if ! JUCE_WINDOWS
         const auto readOnlyFile{makeTemp(".dls")};
         readOnlyFile.deleteFile();
         const bool readOnlyCopied{juce::File{argv[1]}.copyFileTo(readOnlyFile)};
         if (readOnlyCopied) {
-            ::chmod(readOnlyFile.getFullPathName().toRawUTF8(), 0444);
+            readOnlyHandled = readOnlyFile.setReadOnly(true);
             attempt(readOnlyFile.getFullPathName());
-            readOnlyHandled = model.getFontLoadStatus() == "loaded"
+            readOnlyHandled = readOnlyHandled && model.getFontLoadStatus() == "loaded"
                 && model.getLoadedFontPath() == readOnlyFile.getFullPathName();
-            ::chmod(readOnlyFile.getFullPathName().toRawUTF8(), 0600);
+            readOnlyFile.setReadOnly(false);
         }
-       #endif
 
         // Removed after a successful load: the next restore of that path must
         // fail visibly instead of leaving a phantom bank selected.
@@ -4253,7 +4251,10 @@ int main(int argc, char** argv)
             attempt(vanishingFile.getFullPathName());
             const bool loadedFirst{model.getFontLoadStatus() == "loaded"};
             const auto vanishedPath{vanishingFile.getFullPathName()};
-            vanishingFile.deleteFile();
+            // Windows keeps an open bank protected from deletion. Unload it
+            // first, as closing the project would, then test the missing path.
+            attempt(originalPath);
+            const bool removed{vanishingFile.deleteFile()};
             // A fresh instance, because reopening a project is how a user meets
             // this: restoring the same path into the same instance would not
             // even notify, the ValueTree property being unchanged.
@@ -4262,7 +4263,7 @@ int main(int argc, char** argv)
             const auto vanishedState{makeState(vanishedPath)};
             reopened.setStateInformation(
                 vanishedState.getData(), static_cast<int>(vanishedState.getSize()));
-            vanishHandled = loadedFirst
+            vanishHandled = loadedFirst && removed
                 && reopened.getFluidSynthModel().getFontLoadStatus() == "error";
         }
 

@@ -325,15 +325,15 @@ void MixerPanelComponent::valueTreePropertyChanged(ValueTree& tree,
 }
 
 void MixerPanelComponent::lookAndFeelChanged() {
-    auto& lookAndFeel{getLookAndFeel()};
-        if (!lookAndFeel.isColourSpecified(Juicy16::textPrimaryColourId)) return;
-    const Colour label{lookAndFeel.findColour(Juicy16::textLabelColourId)};
-    const Colour primary{lookAndFeel.findColour(Juicy16::textPrimaryColourId)};
+    auto& theme{getLookAndFeel()};
+        if (!theme.isColourSpecified(Juicy16::textPrimaryColourId)) return;
+    const Colour label{theme.findColour(Juicy16::textLabelColourId)};
+    const Colour primary{theme.findColour(Juicy16::textPrimaryColourId)};
     for (Label* heading : {&masterHeading, &bankHeading})
         heading->setColour(Label::textColourId, label);
     outputLevelValue.setColour(Label::textColourId, primary);
     channelInfo.setColour(Label::textColourId, label);
-    channelState.setColour(Label::textColourId, lookAndFeel.findColour(Juicy16::textErrorColourId));
+    channelState.setColour(Label::textColourId, theme.findColour(Juicy16::textErrorColourId));
     channelPatch.setColour(Label::textColourId, primary);
     channelPatchDetail.setColour(Label::textColourId, label);
     for (auto* text : diagnosticLabels) text->setColour(Label::textColourId, label);
@@ -350,11 +350,11 @@ void MixerPanelComponent::lookAndFeelChanged() {
 }
 
 void MixerPanelComponent::paint(Graphics& g) {
-    auto& lookAndFeel{getLookAndFeel()};
-    g.fillAll(lookAndFeel.findColour(Juicy16::panelBackgroundColourId));
-    g.setColour(lookAndFeel.findColour(Juicy16::borderColourId));
+    auto& theme{getLookAndFeel()};
+    g.fillAll(theme.findColour(Juicy16::panelBackgroundColourId));
+    g.setColour(theme.findColour(Juicy16::borderColourId));
     g.fillRect(0, 0, 1, getHeight()); // divider from the rack
-    g.setColour(lookAndFeel.findColour(Juicy16::subtleBorderColourId));
+    g.setColour(theme.findColour(Juicy16::subtleBorderColourId));
     g.fillRect(1, masterDividerY, getWidth() - 1, 1);
     g.fillRect(1, reverbDividerY, getWidth() - 1, 1);
     g.fillRect(1, bankDividerY, getWidth() - 1, 1);

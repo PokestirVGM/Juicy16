@@ -31,12 +31,12 @@ The local `testfiles/` corpus is private, ignored by Git, and excluded from sour
 
 ## Relinking and the source offer
 
-FluidSynth and libsndfile are LGPL-2.1 and are linked **statically** into the macOS artifact. LGPL-2.1 section 6 requires that a recipient be able to relink the work against a modified version of those libraries.
+FluidSynth and libsndfile are LGPL-2.1 and are linked **statically** into the macOS and Windows artifacts. LGPL-2.1 section 6 requires that a recipient be able to relink the work against a modified version of those libraries.
 
 Juicy16 satisfies that through complete corresponding source rather than by shipping object files, which is available to it because the whole work is already GPLv3/AGPLv3 and therefore distributed with its source. The materials that make relinking possible are:
 
 - the Juicy16 source for the exact candidate commit named in `BUILD_INFO.txt`;
-- `tools/build_macos_dependencies.sh`, which pins the version and SHA-256 of every statically linked dependency and builds the identical closure from upstream source;
+- `tools/build_macos_dependencies.sh` and `tools/build_windows_dependencies.ps1`, which pin the version and SHA-256 of every statically linked dependency and builds the identical closure from upstream source;
 - `vendor/juce_patched/`, containing the vendored JUCE wrapper sources, the reproducible patch, and the recorded input/output hashes;
 - `CMakeLists.txt` and `building.macos.md`, which give the exact configure, build, and validation commands.
 
@@ -51,3 +51,8 @@ Open-source software remains copyrighted. The license grants recipients permissi
 New Juicy16 work uses `Copyright (c) 2026 Pokestir`. This notice applies only to the new work and does not claim ownership of earlier Birchlabs or individual-contributor contributions. Historical notices remain in place.
 
 Before public distribution, a qualified reviewer should confirm that the source offer, dependency inventory, notices, and ownership statements match the exact candidate artifact.
+
+The Windows candidate also includes a corresponding-source ZIP with the exact
+working-tree snapshot, original dependency archives and pinned JUCE sources.
+Ship this matching archive with its portable ZIP and installer. See
+[building.win32.md](../building.win32.md) for offline rebuild instructions.

@@ -1,0 +1,42 @@
+Juicy16 for Windows x64
+
+INSTALLER
+Close your DAW and run the Setup executable. The default VST3 destination is:
+  C:\Program Files\Common Files\VST3\Juicy16.vst3
+The installer also offers the standalone application. Reopen your DAW and
+rescan its plugins. Juicy16 is an instrument with 16 MIDI channels and one
+stereo audio output.
+
+PORTABLE ZIP
+Extract the entire ZIP first. To use the plugin, copy the entire Juicy16.vst3
+folder from VST3 into your DAW's VST3 directory. Keep the Contents folder and
+all files together; the inner .vst3 file alone is not the complete plugin.
+Standalone\Juicy16.exe runs without installation for auditioning your banks.
+Its audio/MIDI device preferences may be saved in your Windows user profile.
+
+LOAD A BANK
+Use your own .dls, .sf2 or .sf3 bank. No bank or MIDI music is bundled.
+Route the MIDI file's original channels 1-16 into one Juicy16 instance.
+Bank Select and Program Change choose each channel's instrument. MIDI channel
+10 defaults to percussion. Save the project after selecting your bank.
+
+REQUIREMENTS AND VALIDATION
+Windows x64, Windows 10 version 1607 or later intended; this candidate's
+automated checks ran on Windows 11. No separate FluidSynth, codec DLLs, or
+Visual C++ redistributable is required. The candidate is unsigned; Windows
+may show an unknown-publisher warning. Install only copies you trust and
+compare the SHA-256 checksums supplied with the release.
+DAW playback and clean Windows 10 installation remain manual checks.
+See docs\WINDOWS_RELEASE.md for the exact automated evidence and limits.
+
+UPDATING AND REMOVING
+Close hosts before updating. Run the new installer over the previous version,
+or replace the complete portable VST3 folder. Avoid duplicate copies in
+different scan folders. Uninstall through Windows Installed apps; a manually
+copied portable plugin can be removed by deleting its Juicy16.vst3 folder.
+Your banks and DAW projects are never installed, replaced or removed.
+
+SOURCE AND LICENSES
+The matching Source ZIP accompanies the binary packages. It contains the
+candidate's exact project source, dependency sources and build instructions.
+Copyright and license notices are included in licenses_of_dependencies.

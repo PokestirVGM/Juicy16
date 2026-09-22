@@ -43,8 +43,8 @@ public:
 
         // Drawn at the trailing edge, where nothing else in the row lands: the
         // tick and the text both start from the left.
-        for (const auto accent : Juicy16::allAccents()) {
-            if (accentDisplayName(accent) != text)
+        for (const auto choice : Juicy16::allAccents()) {
+            if (accentDisplayName(choice) != text)
                 continue;
             const float size{static_cast<float>(
                 juce::jmin(10, juce::jmax(4, area.getHeight() - 10)))};
@@ -52,7 +52,7 @@ public:
                 static_cast<float>(area.getRight()) - size - GuiConstants::innerPadding,
                 static_cast<float>(area.getCentreY()) - size * 0.5f,
                 size, size};
-            g.setColour(Juicy16::accentColour(accent));
+            g.setColour(Juicy16::accentColour(choice));
             g.fillRoundedRectangle(swatch, 2.0f);
             break;
         }
@@ -276,23 +276,23 @@ public:
     }
 
     void lookAndFeelChanged() override {
-        auto& lookAndFeel{getLookAndFeel()};
-        if (!lookAndFeel.isColourSpecified(Juicy16::textPrimaryColourId)) return;
-        const Colour label{lookAndFeel.findColour(Juicy16::textLabelColourId)};
+        auto& theme{getLookAndFeel()};
+        if (!theme.isColourSpecified(Juicy16::textPrimaryColourId)) return;
+        const Colour label{theme.findColour(Juicy16::textLabelColourId)};
         for (Label* heading : {&accentHeading, &midiHeading, &buildHeading,
                                &bendRangeLabel, &bendScaleLabel, &resetPolicyLabel,
                                &vibratoChannelLabel, &vibratoScaleLabel, &cc1Label})
             heading->setColour(Label::textColourId, label);
-        cc1Value.setColour(Label::textColourId, lookAndFeel.findColour(Juicy16::textPrimaryColourId));
+        cc1Value.setColour(Label::textColourId, theme.findColour(Juicy16::textPrimaryColourId));
         // The closed dropdown draws its text in the accent it currently selects,
         // so the chosen hue is visible without opening the list.
         accentBox.setColour(juce::ComboBox::textColourId,
-                            lookAndFeel.findColour(Juicy16::accentColourId));
+                            theme.findColour(Juicy16::accentColourId));
         for (Label* key : factKeys)
             key->setColour(Label::textColourId, label);
         for (Label* value : factValues)
             value->setColour(Label::textColourId,
-                             lookAndFeel.findColour(Juicy16::textPrimaryColourId));
+                             theme.findColour(Juicy16::textPrimaryColourId));
     }
 
     void resized() override {

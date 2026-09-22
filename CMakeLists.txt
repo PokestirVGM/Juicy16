@@ -183,6 +183,9 @@ if (JUICYSF_RELEASE_VALIDATION AND APPLE AND JUICYSF_FLUIDSYNTH_CMAKE_CONFIG)
 endif ()
 
 if (JUICYSF_FLUIDSYNTH_CMAKE_CONFIG)
+  if (MSVC)
+    set(CMAKE_FIND_PACKAGE_PREFER_CONFIG ON)
+  endif ()
   if (FLUIDSYNTH_LINK_STATIC)
     find_package(FluidSynth CONFIG REQUIRED COMPONENTS static)
   else ()
@@ -734,6 +737,14 @@ if (MINGW AND NOT BUILD_SHARED_LIBS)
 endif ()
 
 if (BUILD_TESTING)
+  if (WIN32)
+    find_program(JUICYSF_POWERSHELL NAMES pwsh powershell REQUIRED)
+    add_test(NAME windows_artifact_portability
+      COMMAND "${JUICYSF_POWERSHELL}" -NoProfile -ExecutionPolicy Bypass
+        -File "${CMAKE_CURRENT_SOURCE_DIR}/tests/WindowsArtifactTests.ps1"
+        -ArtifactsDir "${CMAKE_CURRENT_BINARY_DIR}/JuicySFPlugin_artefacts/$<CONFIG>")
+    set_tests_properties(windows_artifact_portability PROPERTIES LABELS "artifact;release;windows")
+  endif ()
   add_test(NAME documentation_internal_links
     COMMAND ${CMAKE_COMMAND}
       -DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
@@ -794,24 +805,30 @@ if (BUILD_TESTING)
     set_tests_properties(font_load_release_dls PROPERTIES LABELS "font;dls;release")
   endif ()
 
-  if (APPLE)
+  if (APPLE OR WIN32)
     add_executable(JuicySFVST3Smoke tools/vst3_smoke.cpp)
     juicysf_treat_warnings_as_errors(tools/vst3_smoke.cpp)
     target_include_directories(JuicySFVST3Smoke SYSTEM PRIVATE "${JUCE_VST3_SDK_DIR}")
-    target_link_libraries(JuicySFVST3Smoke PRIVATE "-framework CoreFoundation")
+    if (APPLE)
+      target_link_libraries(JuicySFVST3Smoke PRIVATE "-framework CoreFoundation")
+    else ()
+      target_link_libraries(JuicySFVST3Smoke PRIVATE user32)
+    endif ()
     target_compile_features(JuicySFVST3Smoke PRIVATE cxx_std_17)
     add_dependencies(JuicySFVST3Smoke JuicySFPlugin_VST3)
     set(_juicysf_vst3_smoke_arguments
         "${CMAKE_CURRENT_BINARY_DIR}/JuicySFPlugin_artefacts/$<CONFIG>/VST3/Juicy16.vst3")
-    if (EXISTS "${JUICYSF_MACOS_SYSTEM_DLS}")
-      list(APPEND _juicysf_vst3_smoke_arguments "${JUICYSF_MACOS_SYSTEM_DLS}")
+    if (EXISTS "${JUICYSF_SYSTEM_DLS}")
+      list(APPEND _juicysf_vst3_smoke_arguments "${JUICYSF_SYSTEM_DLS}")
       list(APPEND _juicysf_vst3_smoke_arguments
            "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/vst3_multichannel_programs.csv")
     endif ()
     add_test(NAME vst3_multitimbral_smoke
       COMMAND JuicySFVST3Smoke ${_juicysf_vst3_smoke_arguments})
     set_tests_properties(vst3_multitimbral_smoke PROPERTIES LABELS "vst3;host")
+  endif ()
 
+  if (APPLE)
     # In-process AU host. Registers the built component from its own bundle with
     # AudioComponentRegister, so nothing is installed and an already-installed
     # copy can never be tested by mistake.
@@ -930,10 +947,8 @@ if (BUILD_TESTING)
     juce::juce_gui_extra
     ${FLUIDSYNTH_TARGET})
   target_compile_features(JuicySFPerfProbe PRIVATE cxx_std_17)
-  # Resident-memory measurement is macOS-only inside the probe, so on Windows this
-  # still exercises load, render throughput, and the voice ceiling while reporting
-  # 0 MB for the memory deltas. Registered anyway: the throughput and voice-ceiling
-  # assertions are the ones that would catch a bad Windows build.
+  # The probe measures resident memory on macOS and Windows, as well as load,
+  # render throughput, editor lifecycles, and the voice ceiling.
   if (EXISTS "${JUICYSF_SYSTEM_DLS}")
     add_test(NAME performance_baseline
              COMMAND JuicySFPerfProbe "${JUICYSF_SYSTEM_DLS}")
@@ -1000,4 +1015,13 @@ if (BUILD_TESTING)
   target_compile_definitions(JuicySFPlaybackReliabilityTests PRIVATE JUCE_LOG_ASSERTIONS=1)
   add_test(NAME playback_reliability COMMAND JuicySFPlaybackReliabilityTests)
   set_tests_properties(playback_reliability PROPERTIES LABELS "engine;playback")
+  if (MSVC)
+    # These offline harnesses hold several processor instances on the stack.
+    # Match the macOS main-thread stack instead of Windows' 1 MiB default.
+    # Real VST3 hosts allocate processor instances on the heap.
+    foreach (_harness JuicySFEngineMidiTests JuicySFRenderEquivalenceTests
+                      JuicySFPlaybackReliabilityTests JuicySFPerfProbe JuicySFDynamicsProbe)
+      target_link_options(${_harness} PRIVATE /STACK:8388608)
+    endforeach ()
+  endif ()
 endif ()

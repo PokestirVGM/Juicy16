@@ -28,8 +28,14 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <filesystem>
+#if defined(_WIN32)
+#define NOMINMAX
+#include <windows.h>
+#else
 #include <dlfcn.h>
 #include <CoreFoundation/CoreFoundation.h>
+#endif
 
 #include <pluginterfaces/base/ipluginbase.h>
 #include <pluginterfaces/base/ibstream.h>
@@ -691,8 +697,21 @@ int main (int argc, char** argv) {
     const std::string bundlePath = argv[1];
 
     // find the binary inside the bundle
-    std::string binName = bundlePath.substr (bundlePath.find_last_of ('/') + 1);
+    std::string binName = bundlePath.substr (bundlePath.find_last_of ("/\\") + 1);
     binName = binName.substr (0, binName.size() - 5); // strip ".vst3"
+#if defined(_WIN32)
+    const auto binaryPath = std::filesystem::u8path(bundlePath)
+        / "Contents" / "x86_64-win" / (binName + ".vst3");
+    auto handle = LoadLibraryW(binaryPath.c_str());
+    CHECK(handle != nullptr, "LoadLibraryW plugin binary");
+    if (!handle) { printf("  Windows loader error: %lu\n", GetLastError()); return 1; }
+    using InitDllFn = bool (*) ();
+    auto initDll = reinterpret_cast<InitDllFn>(GetProcAddress(handle, "InitDll"));
+    CHECK(initDll != nullptr, "InitDll symbol");
+    if (!initDll || !initDll()) return 1;
+    using GetFactoryFn = IPluginFactory* (PLUGIN_API*) ();
+    auto getFactory = reinterpret_cast<GetFactoryFn>(GetProcAddress(handle, "GetPluginFactory"));
+#else
     const std::string dylibPath = bundlePath + "/Contents/MacOS/" + binName;
 
     void* handle = dlopen (dylibPath.c_str(), RTLD_NOW);
@@ -711,6 +730,7 @@ int main (int argc, char** argv) {
 
     using GetFactoryFn = IPluginFactory* (*) ();
     auto* getFactory = (GetFactoryFn) dlsym (handle, "GetPluginFactory");
+#endif
     CHECK (getFactory != nullptr, "GetPluginFactory symbol");
     if (!getFactory) return 1;
     IPluginFactory* factory = getFactory();
@@ -1161,8 +1181,18 @@ int main (int argc, char** argv) {
 
         // Async program-state mirroring is deliberately message-thread-only.
         // Pump the native run loop, then flush wrapper-to-host parameter changes.
-        for (int iteration = 0; iteration < 8; ++iteration)
+        for (int iteration = 0; iteration < 8; ++iteration) {
+#if defined(_WIN32)
+            MSG message{};
+            while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+            Sleep(10);
+#else
             CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, true);
+#endif
+        }
 
         Vst::ProcessData flush{};
         flush.processMode = Vst::kOffline;
@@ -1448,7 +1478,12 @@ int main (int argc, char** argv) {
         IPlugView* view{controller->createView(Vst::ViewType::kEditor)};
         CHECK(view != nullptr, "controller offers an editor view");
         if (view != nullptr) {
-            CHECK(view->isPlatformTypeSupported(kPlatformTypeNSView) == kResultTrue,
+#if defined(_WIN32)
+            constexpr auto platformType = kPlatformTypeHWND;
+#else
+            constexpr auto platformType = kPlatformTypeNSView;
+#endif
+            CHECK(view->isPlatformTypeSupported(platformType) == kResultTrue,
                   "the editor view supports the host platform type");
 
             ViewRect defaultSize{};
@@ -1583,6 +1618,19 @@ int main (int argc, char** argv) {
     CHECK (repeatedLifecycleOk, "component/controller early-query lifecycle is repeatable");
 
     factory->release();
+
+#if defined(_WIN32)
+    using ExitDllFn = bool (*) ();
+    auto exitDll = reinterpret_cast<ExitDllFn>(GetProcAddress(handle, "ExitDll"));
+    CHECK(exitDll != nullptr && exitDll(), "ExitDll releases module resources");
+    CHECK(FreeLibrary(handle) != 0, "FreeLibrary unloads plugin binary");
+#else
+    using BundleExitFn = bool (*) ();
+    auto bundleExit = reinterpret_cast<BundleExitFn>(dlsym(handle, "bundleExit"));
+    CHECK(bundleExit != nullptr && bundleExit(), "bundleExit releases module resources");
+    CFRelease(bundle);
+    dlclose(handle);
+#endif
 
     printf ("== vst3_smoke: %d failures ==\n", failures);
     return failures == 0 ? 0 : 1;

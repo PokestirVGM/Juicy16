@@ -1,0 +1,7 @@
+# These reviewed files are byte-hashed by the build on every platform.
+vendor/**/*.cpp text eol=lf
+vendor/**/*.mm text eol=lf
+vendor/**/*.cmake text eol=lf
+vendor/**/*.patch text eol=lf
+*.sh text eol=lf
+*.py text eol=lf

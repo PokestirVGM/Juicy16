@@ -2,7 +2,7 @@
 
 ## Development update — 2026-09-05
 
-Both dependency recipes now apply the [CC1 vibrato extension](../vendor/fluidsynth_patched/README.md) to pinned FluidSynth 2.5.7, archive SHA-256 `ce27840221ab00dd59bf27e85ecbba480c6c2a7c9fbec4243658f68f59c07f4a`. The complete macOS arm64 static closure was rebuilt locally; the Windows recipe was updated but not built. This adopts the DLS/SF2 fixes in [2.5.6](https://github.com/FluidSynth/fluidsynth/releases/tag/v2.5.6) and further DLS fixes in [2.5.7](https://github.com/FluidSynth/fluidsynth/releases/tag/v2.5.7). The historical installed-artifact review below applies to the earlier 2.5.5 release and is not a validation of a new distributable.
+Both dependency recipes now apply the [CC1 vibrato extension](../vendor/fluidsynth_patched/README.md) to pinned FluidSynth 2.5.7, archive SHA-256 `ce27840221ab00dd59bf27e85ecbba480c6c2a7c9fbec4243658f68f59c07f4a`. The complete macOS arm64 static closure was rebuilt locally; the Windows x64 closure was subsequently built and validated on 2026-09-22. This adopts the DLS/SF2 fixes in [2.5.6](https://github.com/FluidSynth/fluidsynth/releases/tag/v2.5.6) and further DLS fixes in [2.5.7](https://github.com/FluidSynth/fluidsynth/releases/tag/v2.5.7). The historical installed-artifact review below applies to the earlier 2.5.5 release and is not a validation of a new distributable.
 
 Everything statically linked into or embedded in a Juicy16 macOS release artifact, with the version actually built. Licensing obligations are in [LICENSING.md](LICENSING.md) and [NOTICE.md](../NOTICE.md); this document tracks **what is present and whether it is current**.
 
@@ -23,7 +23,7 @@ The pinned versions and their checksums live in `tools/build_macos_dependencies.
 
 The Audio Unit and VST3 SDK interface sources ship with JUCE and are compiled as headers; no separate SDK binary is linked.
 
-Windows has no validated closure yet. It is deliberately absent from this table rather than assumed to match macOS — Windows VST3 is Beta 2 scope in [../ROADMAP.md](../ROADMAP.md).
+The Windows x64 candidate now builds these same pinned versions with MSVC and a static CRT. SF2/SF3/DLS runtime loading and system-only PE imports pass. Its native recipe prefers CMake config packages to preserve the static codec closure and enables Opus static runtime explicitly. See [Windows evidence](WINDOWS_RELEASE.md).
 
 ## Security and currency review
 

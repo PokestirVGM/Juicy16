@@ -192,7 +192,7 @@ information:
   development machine, which already has the dependencies a user will not have.
   The plugin links its dependencies statically and validation checks for exactly
   this, but "checked" is not "someone did it".
-- **Windows.** Not part of Beta 1 at all; see below.
+- **Windows.** A native candidate now passes automated checks; DAW and clean minimum-OS checks remain.
 - **Redistribution rights for the private bank corpus.** The compatibility corpus
   is local and is never packaged.
 
@@ -215,7 +215,7 @@ an oversight.
 
 - Beta 1 is **ad-hoc signed by decision**, not Developer ID signed and not notarized. Every macOS install therefore requires clearing the quarantine attribute; see [BETA_TESTER_GUIDE.md](BETA_TESTER_GUIDE.md). The `ADHOC` label in the package filename is expected for Beta 1 and is not a disqualifier. `LOCAL-DIRTY` still is.
 - Standalone is a development/QA target, not a primary Beta format.
-- **Windows is not part of Beta 1.** Windows VST3 moved to Beta 2 on 2026-08-24: the MSVC/CI pipeline, clean-machine dependency check, DLS capability and host matrix are all unproven, and the legacy LLVM-MinGW Docker path is unsupported. No Windows artifact is published, so there is nothing to test.
+- **Windows native candidate (2026-09-22).** MSVC build, DLS capability and the automated VST3 host matrix pass. Portable/installer/source packaging is available; clean minimum-OS and owner DAW checks remain. See [Windows release evidence](WINDOWS_RELEASE.md). The legacy LLVM-MinGW Docker path remains unsupported.
 - Intel macOS, Windows ARM64, VST2, AUv3, Linux, and 32-bit Windows are outside the current Beta scope.
 - VST3 `progChN` parameters expose program 0–127 only; arbitrary bank changes still require MIDI Bank Select CC0/32 before Program Change.
 - **B2** — Selecting a bank/program the loaded bank file does not define shows the requested patch while a different one sounds. FluidSynth 2.5.5 accepts the change, records the requested bank and program on the channel, and substitutes bank 0 program 0 for synthesis. Juicy16 keeps the requested value in the editor and saved state on purpose, so reopening the project with the intended bank plays what the MIDI asked for; the disagreement lasts only while the wrong bank is loaded. Verified by the offline cross-bank fixture.

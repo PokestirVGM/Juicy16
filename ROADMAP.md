@@ -1,5 +1,14 @@
 # Roadmap and release status
 
+## Windows native candidate — 2026-09-22
+
+The MSVC x64 strict Release build now passes all 17 automated gates. Native VST3
+host smoke coverage, SF2/SF3/DLS loading, static runtime/codec linkage, portable
+and installer packaging, corresponding-source packaging and Windows CI gates
+are implemented. See [candidate evidence](docs/WINDOWS_RELEASE.md). The historical
+Beta 1 decisions below remain history; Windows DAW testing and a clean minimum-OS
+machine remain open and are not implied by the automated results.
+
 Local performance work on 2026-09-12 removes redundant mixer clearing, pointer
 setup, meter calculations, RPN scans and rack repaints. Three alternating Release
 benchmarks measured 36–45% lower processing time for dense automation at 512/1024

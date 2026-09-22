@@ -1,3 +1,5 @@
+cmake_minimum_required(VERSION 3.15)
+
 if (NOT DEFINED SOURCE_ROOT OR NOT IS_DIRECTORY "${SOURCE_ROOT}")
   message(FATAL_ERROR "SOURCE_ROOT must name the Juicy16 source directory")
 endif ()
@@ -58,6 +60,10 @@ foreach (_document IN LISTS _markdown_files)
     endif ()
   endwhile ()
 endforeach ()
+
+if (_checked_documents LESS 1 OR _checked_links LESS 1)
+  message(FATAL_ERROR "Documentation validation must inspect at least one document and internal link")
+endif ()
 
 if (_broken_links)
   list(JOIN _broken_links "\n  " _broken_text)
