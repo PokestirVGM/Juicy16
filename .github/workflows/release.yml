@@ -31,14 +31,14 @@ jobs:
     needs: gates
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
       - name: Install build tools
         run: brew install cmake pkg-config
 
       - name: Cache JUCE ${{ env.JUCE_VERSION }}
         id: juce-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6.1.0
         with:
           path: ~/juicydeps
           key: juce-${{ env.JUCE_VERSION }}-macos-14-${{ runner.arch }}
@@ -54,7 +54,7 @@ jobs:
           cmake --build "$RUNNER_TEMP/JUCE/build" --target install --parallel 3
 
       - name: Cache pinned dependency closure
-        uses: actions/cache@v4
+        uses: actions/cache@v6.1.0
         with:
           path: build/macos11-deps
           key: macos11-deps-${{ hashFiles('tools/build_macos_dependencies.sh', 'vendor/fluidsynth_patched/**', 'vendor/libsndfile_patched/**') }}-${{ runner.arch }}
@@ -79,7 +79,7 @@ jobs:
       # Unsigned beyond an ad-hoc signature: Developer ID and notarization are
       # still open Phase 4.2 gates, so this is a candidate, not a public release.
       - name: Publish candidate artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: Juicy16-macos-arm64-candidate
           path: |
