@@ -104,10 +104,9 @@ reviewed patches. An installed compiler, Windows SDK, CMake, Python and
 PowerShell are still required. Replacing a library with a modified version for
 relinking requires intentionally updating its source/hash checks.
 
-Before publishing 1.0.0-beta.1, rerun the Windows build and extracted-artifact
-checks, then verify FL Studio/Cubase playback and save/reopen, GBA-style DLS
-interpolation/pan/channel-10 behavior, and clean minimum-OS installation.
-The September 22 evidence predates these changes.
+The [September 27 evidence](docs/WINDOWS_RELEASE.md) covers fresh 1.0.0-beta.1
+builds and package checks. Owner DAW testing and clean minimum-OS installation
+remain pending before publication.
 
 ## Legacy cross-build
 

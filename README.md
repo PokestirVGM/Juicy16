@@ -12,12 +12,11 @@ The latest release is [1.0.0-beta.1](https://github.com/PokestirVGM/Juicy16/rele
 
 - **macOS 11+ on Apple Silicon:** AU and VST3. Unzip, double-click
   `install_macos.command`, then rescan plug-ins in your DAW.
-- **Windows 10+ x64:** VST3. It's being tested now and will be added to the same
-  release page when it's ready. The [native Windows pipeline](building.win32.md)
-  includes portable, installer and source packages; [recorded Windows tests](docs/WINDOWS_RELEASE.md)
-  cover the earlier 0.6.1-beta.4 candidate, with a fresh 1.0 build and DAW tests pending.
+- **Windows 10+ x64:** VST3 candidate built; publication awaits owner DAW testing.
+  Release and Debug pass all 17 automated gates with rebuilt dependencies.
+  See [Windows evidence](docs/WINDOWS_RELEASE.md) and [build/install details](building.win32.md).
 
-Nothing else needs installing. The builds are ad-hoc signed, so macOS will block
+Nothing else needs installing. The macOS builds are ad-hoc signed, so macOS will block
 them until you clear quarantine; the [beta tester guide](docs/BETA_TESTER_GUIDE.md)
 shows how.
 
