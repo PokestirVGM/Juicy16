@@ -105,8 +105,8 @@ PowerShell are still required. Replacing a library with a modified version for
 relinking requires intentionally updating its source/hash checks.
 
 The [September 27 evidence](docs/WINDOWS_RELEASE.md) covers fresh 1.0.0-beta.1
-builds and package checks. Owner DAW testing and clean minimum-OS installation
-remain pending before publication.
+builds, package checks and owner approval. Clean minimum-OS installation
+remains unverified. Debug timing is diagnostic; Release enforces speed limits.
 
 ## Legacy cross-build
 

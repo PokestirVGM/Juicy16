@@ -2851,7 +2851,7 @@ int main(int argc, char** argv)
         // deliberate departure: the stream's last CC11 is re-asserted (next block).
         constexpr int channel{4};
         juce::MidiBuffer setup;
-        for (const auto [cc, value] : std::array<std::pair<int, int>, 14>{
+        for (const auto& [cc, value] : std::array<std::pair<int, int>, 14>{
                  std::pair{1, 99}, std::pair{7, 77}, std::pair{10, 33},
                  std::pair{11, 55},
                  std::pair{64, 127}, std::pair{71, 9}, std::pair{74, 111},
@@ -3441,7 +3441,7 @@ int main(int argc, char** argv)
         juce::MidiBuffer midi;
         for (std::size_t i = 0; i < channels.size(); ++i) {
             const int midiChannel{channels[i] + 1};
-            for (const auto [cc, value] : std::array<std::pair<int, int>, 4>{
+            for (const auto& [cc, value] : std::array<std::pair<int, int>, 4>{
                      std::pair{101, 0}, std::pair{100, 0}, std::pair{6, ranges[i]}, std::pair{38, 0}})
                 midi.addEvent(juce::MidiMessage::controllerEvent(midiChannel, cc, value), 64);
         }
@@ -3457,7 +3457,7 @@ int main(int argc, char** argv)
               "RPN pitch-bend ranges remain independent on channels 1, 2, 10, and 16");
 
         juce::MidiBuffer nullRpn;
-        for (const auto [cc, value] : std::array<std::pair<int, int>, 3>{
+        for (const auto& [cc, value] : std::array<std::pair<int, int>, 3>{
                  std::pair{101, 127}, std::pair{100, 127}, std::pair{6, 36}})
             nullRpn.addEvent(juce::MidiMessage::controllerEvent(16, cc, value), 64);
         render(processor, audio, nullRpn);
@@ -3474,7 +3474,7 @@ int main(int argc, char** argv)
         constexpr int misorderedChannel{4};
         constexpr int misorderedRange{9};
         juce::MidiBuffer misordered;
-        for (const auto [cc, value] : std::array<std::pair<int, int>, 4>{
+        for (const auto& [cc, value] : std::array<std::pair<int, int>, 4>{
                  std::pair{38, 0}, std::pair{6, misorderedRange},
                  std::pair{100, 0}, std::pair{101, 0}})
             misordered.addEvent(
@@ -3494,7 +3494,7 @@ int main(int argc, char** argv)
         const auto rpnBurst = [&](int channel, std::initializer_list<std::pair<int, int>> ccs,
                                   int sample) {
             juce::MidiBuffer burst;
-            for (const auto [cc, value] : ccs)
+            for (const auto& [cc, value] : ccs)
                 burst.addEvent(juce::MidiMessage::controllerEvent(channel + 1, cc, value), sample);
             return burst;
         };
