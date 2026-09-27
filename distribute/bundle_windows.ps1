@@ -3,7 +3,8 @@ param([string] $BuildDir = "$PSScriptRoot/../build-win",
       [string] $DependencySources = "$PSScriptRoot/../build-win-dependency-sources",
       [string] $JuceSource = "$PSScriptRoot/../build-win-juce-source",
       [string] $Iscc = "$PSScriptRoot/../build-win-inno/ISCC.exe",
-      [ValidatePattern('^BC[1-9][0-9]*$')][string] $Candidate = 'BC1')
+      [ValidatePattern('^BC[1-9][0-9]*$')][string] $Candidate = 'BC1',
+      [switch] $AllowDirty)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 . "$PSScriptRoot/../tools/windows_common.ps1"
@@ -18,6 +19,12 @@ $label = [regex]::Match($cmakeText, 'set\(JUICYSF_PRERELEASE_LABEL_DEFAULT "([^"
 if (-not $version) { throw 'Cannot determine product version.' }
 if ($label) { $version += "-$label" }
 $name = "Juicy16-$version-$Candidate-windows-x64"
+$dirty = [bool](git -C $repo status --porcelain --untracked-files=normal)
+Assert-NativeSuccess 'Source status'
+if ($dirty) {
+    if (-not $AllowDirty) { throw 'Commit the candidate first, or use -AllowDirty for local validation only.' }
+    $name += '-LOCAL-DIRTY'
+}
 $cache = Get-Content -LiteralPath "$BuildDir/CMakeCache.txt" -Raw
 if ($cache -notmatch 'JUICYSF_RELEASE_VALIDATION:BOOL=ON') { throw 'Packaging requires a strict release build.' }
 $pinnedLabel = [regex]::Match($cache, '(?m)^JUICYSF_PRERELEASE_LABEL:[^=]+=([^\r\n]*)')

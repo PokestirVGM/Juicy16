@@ -1,14 +1,6 @@
-//
-// The 16-channel rack. Each row is a MIDI channel and owns everything that
-// belongs to that channel: mute and solo, its instrument dropdown, and its
-// volume and pan knobs. Nothing here requires selecting a row first - that was
-// the defect Phase 9 exists to fix.
-//
-// Every control is bound to a real plugin parameter (muteChN, soloChN, progChN
-// via the dropdown, volChN, panChN), so host automation, incoming MIDI, and the
-// user's mouse all move the same thing, and a host's right-click automation menu
-// works on the knobs.
-//
+// The 16-channel rack. Each row owns its channel's mute, solo, instrument,
+// volume and pan. Every control is bound to a real parameter, so automation,
+// MIDI and the mouse move the same value.
 
 #pragma once
 
@@ -61,7 +53,6 @@ public:
         bool rowIsSelected
     ) override;
 
-    // the instrument, mute/solo, volume and pan columns each host live controls
     Component* refreshComponentForCell(
         int rowNumber,
         int columnId,
@@ -71,17 +62,14 @@ public:
 
     void cellClicked(int rowNumber, int columnId, const juce::MouseEvent&) override;
 
-    // Keyboard channel selection. TableListBox reports arrow-key movement here,
-    // so this is what makes the channel list reachable without a mouse.
+    // Arrow-key channel selection.
     void selectedRowsChanged(int lastRowSelected) override;
 
-    // Keyboard patch selection: Return on the focused table opens the selected
-    // row's instrument dropdown, which is then a normal keyboard-driven menu.
+    // Return opens the selected row's instrument dropdown.
     void returnKeyPressed(int lastRowSelected) override;
 
-    // The row's instrument dropdown, scrolled into view and created if the row
-    // was offscreen; nullptr for an out-of-range row. Split out of
-    // returnKeyPressed so the routing can be tested without opening a popup.
+    // The row's dropdown, scrolled into view; nullptr if out of range. Testable
+    // without opening a popup.
     juce::ComboBox* patchComboForRow(int row);
 
     void resized() override;
@@ -98,18 +86,14 @@ private:
     void timerCallback() override;
     std::array<unsigned int, 16> lastMidiEvents{};
     std::array<int, 16> midiLampTicks{};
-    // TableListBox creates a cell component before handing it to the table, so a
-    // control built in a cell's constructor resolves the DEFAULT LookAndFeel and
-    // caches its colours from it - the theme is only reachable once the cell is
-    // parented. Re-sending the change on reparent is what makes a cell inherit
-    // the palette, and it is inherited by every cell type below rather than
-    // remembered per control.
+    // A cell's controls are built before it is parented and cache the default
+    // LookAndFeel's colours; resending on reparent applies the theme.
     class ThemedCell : public Component {
     public:
         void parentHierarchyChanged() override { sendLookAndFeelChange(); }
     };
 
-    // one cell's patch dropdown, bound to a MIDI channel (row)
+    // Patch dropdown for one channel.
     class PatchCell : public ThemedCell {
     public:
         explicit PatchCell(ChannelListComponent& owner);
@@ -123,16 +107,13 @@ private:
         int cellListVersion{-1};
     };
 
-    // Mute and solo for one channel, each attached to its own bool parameter.
     class MuteSoloCell : public ThemedCell {
     public:
         explicit MuteSoloCell(ChannelListComponent& owner);
         void setRow(int newRow);
         void resized() override;
-        // Colours must be resolved HERE, not in the constructor: a cell is built
-        // before it is parented, so a constructor findColour asks the default
-        // LookAndFeel, which has never heard of Juicy16's ColourIds - it asserts
-        // and hands back black. That is what made a lit mute a blank box.
+        // Resolve colours here, not in the constructor: an unparented cell sees the
+        // default LookAndFeel, which lacks Juicy16's ColourIds.
         void lookAndFeelChanged() override;
     private:
         ChannelListComponent& owner;
@@ -143,7 +124,7 @@ private:
         int row{-1};
     };
 
-    // A volume or pan knob for one channel, attached to volChN / panChN.
+    // Volume or pan knob (volChN / panChN).
     class MixerCell : public ThemedCell {
     public:
         MixerCell(ChannelListComponent& owner, int columnId);
@@ -159,33 +140,28 @@ private:
 
     static constexpr int numChannels{16};
 
-    // uiState.selectedChannel remains the single source of truth for which
-    // channel is being edited; the table's own selection mirrors it. Pushing a
-    // change in either direction notifies the other, so this breaks the loop.
+    // uiState.selectedChannel is the source of truth; the table mirrors it. Guards
+    // the two-way sync loop.
     bool syncingSelection{false};
     void syncTableSelectionFromState();
 
-    int getSelectedChannelIndex() const; // 0-indexed
-    // Width the instrument column should take: everything the fixed columns
-    // leave behind. No visible region belongs to no control.
+    int getSelectedChannelIndex() const; // 0-based
+    // Instrument column takes whatever the fixed columns leave.
     int instrumentColumnWidth() const;
 
-    // A channel is silenced by its own mute, or by another channel's solo. The
-    // row shows it either way: the controls recede and a scrim goes over the
-    // background, so "this is not sounding" is visible without reading buttons.
+    // Muted, or not soloed while another channel is. Silenced rows are dimmed.
     bool isRowSilenced(int row) const;
     void refreshSilencedRows();
     unsigned int lastSilencedMask{0};
 
     void rebuildPatchList();
-    int patchIndexFor(int bank, int preset) const; // -1 if absent from font
+    int patchIndexFor(int bank, int preset) const; // -1 if absent
     void applyComboSelection(int row, int selectedId);
 
     AudioProcessorValueTreeState& valueTreeState;
     FluidSynthModel& fluidSynthModel;
 
-    // flat, sorted patch list shared by every row's dropdown; version bumps on
-    // each rebuild so cells know to repopulate their items.
+    // Shared by every dropdown; the version tells cells to repopulate.
     std::vector<Patch> patches;
     int patchListVersion{0};
 

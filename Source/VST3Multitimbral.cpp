@@ -1,14 +1,10 @@
-//
-// See VST3Multitimbral.h for the design. This TU is the only application source
-// that includes the VST3 SDK. It links against no SDK implementation symbols, so
-// it remains safe in the shared code used by AU and Standalone targets.
-//
+// The only application TU that includes the VST3 SDK. It links no SDK symbols,
+// so it is safe in the shared AU/Standalone code.
 
 #include "VST3Multitimbral.h"
 #include "Vst3Units.h"
 
-// Shared program-name store (see Vst3Units.h) read by the vendored wrapper's
-// component-side and controller-side IUnitInfo implementations.
+// Program names read by the wrapper's IUnitInfo on both VST3 objects.
 namespace juicysf::vst3units {
     namespace {
         juce::CriticalSection namesLock;

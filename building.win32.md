@@ -49,7 +49,8 @@ codec dependencies and their required definitions, including `FLAC__NO_DLL`.
 
 JUCE 8.0.14, FluidSynth 2.5.7, libsndfile 1.2.2 with the reviewed IRCAM patch,
 FLAC 1.5.0, Ogg 1.3.6, Vorbis 1.3.7, Opus 1.6.1, and the pinned GCEM commit.
-The FluidSynth CC1 patch and JUCE multitimbral wrapper are shared with macOS.
+The FluidSynth CC1 and full-range DLS pan patches and JUCE multitimbral wrapper
+are shared with macOS. Rebuild the dependency prefix for 1.0.0-beta.1.
 All dependency tarballs are SHA-256 checked. `.gitattributes` preserves the
 reviewed vendored bytes on Windows checkouts. Python extracts Unicode archive
 names without depending on the Windows system locale.
@@ -66,7 +67,8 @@ pwsh -File distribute/bundle_windows.ps1 -Candidate BC1 `
   -Iscc 'C:/Program Files (x86)/Inno Setup 6/ISCC.exe'
 ```
 
-Pass the actual Inno compiler path on your machine. The packager requires the
+Use a clean, committed tree. `-AllowDirty` produces a labelled local validation
+package only. Pass the actual Inno compiler path on your machine. The packager requires the
 strict Release build and passing tests, checks x64/system-only imports, stages
 notices and documentation, verifies documentation links, builds the installer,
 extracts the portable archive, checks every file hash, and runs the host smoke
@@ -102,8 +104,12 @@ reviewed patches. An installed compiler, Windows SDK, CMake, Python and
 PowerShell are still required. Replacing a library with a modified version for
 relinking requires intentionally updating its source/hash checks.
 
+Before publishing 1.0.0-beta.1, rerun the Windows build and extracted-artifact
+checks, then verify FL Studio/Cubase playback and save/reopen, GBA-style DLS
+interpolation/pan/channel-10 behavior, and clean minimum-OS installation.
+The September 22 evidence predates these changes.
+
 ## Legacy cross-build
 
-`win32.Dockerfile`, `win32_cross_compile/`, and `distribute/bundle_win32.sh` are
-historical unsupported experiments. The native PowerShell workflow supersedes
-them for Windows releases.
+The old LLVM-MinGW Docker build and cross-compilation scripts have been
+removed. Use the native PowerShell workflow for Windows builds.

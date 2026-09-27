@@ -1,7 +1,4 @@
-//
-// Flat, sorted list of every preset in the loaded DLS/SoundFont bank.
-// Shared by the per-channel patch dropdowns.
-//
+// Sorted list of every preset in the loaded bank, for the patch dropdowns.
 
 #pragma once
 
@@ -15,8 +12,7 @@ struct Patch {
     juce::String name;
 };
 
-// Build a flat list of all presets in the given `banks` ValueTree, sorted by
-// bank then preset. (Mirrors the iteration+sort TableComponent used to do.)
+// All presets in `banks`, sorted by bank then preset.
 inline std::vector<Patch> buildPatchList(const juce::ValueTree& banks) {
     std::vector<Patch> patches;
     for (int b = 0; b < banks.getNumChildren(); ++b) {

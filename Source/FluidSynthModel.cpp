@@ -1,7 +1,3 @@
-//
-// Created by Alex Birch on 10/09/2017.
-//
-
 #include <iostream>
 #include <iterator>
 #include <cstring>
@@ -12,6 +8,9 @@
 
 #ifndef FLUIDSYNTH_JUICY16_VIBRATO_SCALE
 #error "Rebuild the FluidSynth dependency with tools/build_macos_dependencies.sh or tools/build_windows_dependencies.ps1 (Juicy16 vibrato extension required)."
+#endif
+#ifndef FLUIDSYNTH_JUICY16_DLS_FULL_PAN
+#error "Rebuild the FluidSynth dependency with tools/build_macos_dependencies.sh or tools/build_windows_dependencies.ps1 (Juicy16 DLS pan extension required)."
 #endif
 #include "MidiConstants.h"
 #include "Util.h"
@@ -30,15 +29,16 @@ using namespace std;
 
 #include "DlsRepair.h"
 
-// Per-channel mixer controls. These are ordinary MIDI controllers that
-// FluidSynth's own default modulators already implement, so Juicy16 forwards
-// them and mirrors them into the UI rather than adding a modulator of its own.
-// Incoming MIDI stays authoritative exactly as it is for Bank Select and Program
-// Change: a value set in the editor is only a starting point, and the next
-// CC7/CC10 on that channel replaces it at that event's timestamp.
-// CC -> the property name it occupies in a channelPrograms/ch node. The
-// host-facing parameters are per channel ("volCh1".."panCh16"); these two names
-// are the tree's, and the two are bridged by mixerParamId below.
+// Balance (CC8/CC40) is traced but never reaches the engine, as in Fruity LSD.
+// FluidSynth's balance cuts up to 96 dB, survives CC121, and overwhelms pan on
+// stereo-pair banks.
+static bool reachesEngine(int controller) {
+    return controller != BALANCE_MSB && controller != BALANCE_LSB;
+}
+
+// Mixer CCs use FluidSynth's default modulators. MIDI stays authoritative: the
+// next CC7/CC10 replaces an editor value at its timestamp. Maps each CC to its
+// channelPrograms property; mixerParamId bridges to volChN/panChN.
 const map<fluid_midi_control_change, String> FluidSynthModel::ccToChannelProperty{
     {VOLUME_MSB, "volume"}, // MIDI CC 7 Channel Volume
     {PAN_MSB, "pan"}};      // MIDI CC 10 Pan
@@ -55,7 +55,7 @@ const map<String, fluid_midi_control_change> FluidSynthModel::channelPropertyToC
     return map;
 }()};
 
-// fixed index order for the audio-thread CC capture arrays
+// Fixed index order for the audio-thread capture arrays.
 const fluid_midi_control_change FluidSynthModel::ccIndexOrder[FluidSynthModel::kNumMixerCcs]{
     VOLUME_MSB, PAN_MSB};
 thread_local bool FluidSynthModel::mirroringParameters{false};
@@ -69,8 +69,7 @@ int FluidSynthModel::ccToIndex(int cc) {
 }
 
 void FluidSynthModel::setOutputLevelDb(float decibels) {
-    // -inf at the bottom of the range rather than a very small gain, so a host
-    // automating the parameter to minimum actually silences the plugin.
+    // The bottom of the range is -inf, so automation can reach silence.
     const float gain{decibels <= GuiConstants::outputLevelMinDb
         ? 0.0f
         : juce::Decibels::decibelsToGain(decibels)};
@@ -78,8 +77,7 @@ void FluidSynthModel::setOutputLevelDb(float decibels) {
 }
 
 int FluidSynthModel::defaultParamValue(const String& parameterID) {
-    // GM channel defaults, which are also FluidSynth's own channel initialisation
-    // values: volume 100, pan 64 (centre). bank/preset and mute/solo default to 0.
+    // GM defaults: volume 100, pan 64; everything else 0.
     if (parameterID == "volume")
         return MidiConstants::defaultChannelVolume;
     if (parameterID == "pan")
@@ -87,23 +85,14 @@ int FluidSynthModel::defaultParamValue(const String& parameterID) {
     return programChangeParams.contains(parameterID) ? 0 : 64;
 }
 
-// Beta 1's profiles. Naming rule, binding on every future profile: a profile may
-// not be named after hardware it does not emulate. Neither of these emulates
-// anything - they are designed settings over FluidSynth's own FDN reverb - so
-// neither carries a console or hardware name. "Custom" is not a preset; it is
-// what the selection reads as once the user has moved a control.
-// Chosen by measurement against real game-rip material rather than taken from
-// FluidSynth's defaults, which are roughly twice as wet as Universal. Soft is a
-// much smaller room at full width: width without a long tail. Figures in
-// docs/CONTROLLER_SUPPORT.md.
+// Profiles are designed settings over FluidSynth's FDN reverb, never named after
+// hardware they do not emulate. Tuned on game rips (FluidSynth's defaults are
+// about twice as wet); see docs/CONTROLLER_SUPPORT.md.
 const FluidSynthModel::ReverbProfile FluidSynthModel::reverbProfiles[]{
     // size  damp  width level
     {"Universal", {0.45f, 0.35f, 0.85f, 0.55f}},
-    // OPEN: the owner proposed "SNS" for this profile. It ships as "Soft"
-    // because the naming rule is binding — a profile may not be named after
-    // hardware it does not emulate, and this one is designed rather than
-    // modelled. If "SNS" means SNES the name belongs to the S-DSP echo profile
-    // in 10.3, which would be a real emulation. Owner decision still required.
+    // "Soft", not the proposed "SNS": the name is reserved for a real SNES echo
+    // emulation. Owner decision pending.
     {"Soft",      {0.20f, 0.60f, 1.00f, 0.55f}},
     {"Custom",    {0.45f, 0.35f, 0.85f, 0.55f}},
 };
@@ -149,8 +138,7 @@ String FluidSynthModel::soloParamId(int chZeroBased) {
     return "soloCh" + String(chZeroBased + 1);
 }
 
-// Matches "<prefix><1..16>" without substring()/numeric conversion, because
-// parameterChanged may run on the audio thread and neither allocates there.
+// Allocation-free, because parameterChanged may run on the audio thread.
 int FluidSynthModel::channelSuffixOf(const String& parameterID,
                                      const char* prefix,
                                      int prefixLength) {
@@ -173,7 +161,7 @@ int FluidSynthModel::channelSuffixOf(const String& parameterID,
 
 FluidSynthModel::ChannelParamKind FluidSynthModel::parseChannelParam(
     const String& parameterID, int& chZeroBased) {
-    // Ordered by first character so a non-match costs one comparison.
+    // Ordered by first character so a mismatch costs one comparison.
     if ((chZeroBased = channelSuffixOf(parameterID, "volCh", 5)) >= 0)
         return ChannelParamKind::volume;
     if ((chZeroBased = channelSuffixOf(parameterID, "panCh", 5)) >= 0)
@@ -234,9 +222,7 @@ FluidSynthModel::FluidSynthModel(
         resetRpnTracking(i);
         for (int c = 0; c < kNumMixerCcs; c++) {
             midiCcValue[i][c].store(-1, std::memory_order_relaxed);
-            // Seed from the same GM defaults the ValueTree and the parameters use,
-            // not a single shared constant: volume is 100 and pan is 64, and a
-            // reset SysEx re-asserts whatever is stored here.
+            // Seeded from the per-property GM defaults; a reset SysEx re-asserts these.
             engineCc[i][c].store(
                 defaultParamValue(ccToChannelProperty.at(ccIndexOrder[c])),
                 std::memory_order_relaxed);
@@ -245,11 +231,8 @@ FluidSynthModel::FluidSynthModel(
     valueTreeState.addParameterListener("bank", this);
     valueTreeState.addParameterListener("preset", this);
     valueTreeState.addParameterListener("outputLevel", this);
-    // ...and seed the gain from that parameter. parameterChanged only fires on a
-    // *change*, so on a fresh instance nothing ever applied the +1.5 dB default:
-    // the knob read +1.5 dB while the audio ran at unity, and the trim only began
-    // working once the user moved it. Measured on SEQ_ROAD_D_D: -10.40 dBFS peak
-    // with the parameter at its default, the same as an explicit 0 dB.
+    // Seed from the parameter: parameterChanged fires only on a change, so the
+    // +1.5 dB default was never applied.
     if (auto* p{dynamic_cast<juce::AudioParameterFloat*>(
             valueTreeState.getParameter("outputLevel"))})
         setOutputLevelDb(p->get());
@@ -260,6 +243,10 @@ FluidSynthModel::FluidSynthModel(
         valueTreeState.addParameterListener("trimCh" + String(ch + 1), this);
     valueTreeState.addParameterListener("bendRange", this);
     valueTreeState.addParameterListener("bendScale", this);
+    // Seeded explicitly: parameterChanged only fires on a change.
+    valueTreeState.addParameterListener("interpolation", this);
+    if (auto* p{valueTreeState.getRawParameterValue("interpolation")})
+        interpolationMethod.store(interpolationForChoice(juce::roundToInt(p->load())));
     for (int ch = 1; ch <= 16; ++ch)
         valueTreeState.addParameterListener("vibratoScaleCh" + String(ch), this);
     valueTreeState.addParameterListener("reverbOn", this);
@@ -300,6 +287,7 @@ FluidSynthModel::~FluidSynthModel() {
     valueTreeState.removeParameterListener("outputLevel", this);
     valueTreeState.removeParameterListener("bendRange", this);
     valueTreeState.removeParameterListener("bendScale", this);
+    valueTreeState.removeParameterListener("interpolation", this);
     for (int ch = 1; ch <= 16; ++ch)
         valueTreeState.removeParameterListener("vibratoScaleCh" + String(ch), this);
     valueTreeState.removeParameterListener("reverbOn", this);
@@ -310,38 +298,25 @@ FluidSynthModel::~FluidSynthModel() {
 }
 
 void FluidSynthModel::initialise() {
-    // deactivate all audio drivers in fluidsynth to avoid FL Studio deadlock when initialising CoreAudio
-    // after all: we only use fluidsynth to render blocks of audio. it doesn't output to audio driver.
+    // No audio drivers: Juicy16 only renders blocks, and FL Studio deadlocked when
+    // FluidSynth initialised CoreAudio.
     const char *DRV[] {nullptr};
     fluid_audio_driver_register(DRV);
     
     settings = { new_fluid_settings(), delete_fluid_settings };
     
-    // https://sourceforge.net/p/fluidsynth/wiki/FluidSettings/
     fluid_settings_setnum(settings.get(), "synth.sample-rate", currentSampleRate);
-    // Freeze Beta 1 Bank Select semantics instead of inheriting a FluidSynth
-    // default that could change between engine versions. In GS mode CC0 selects
-    // the bank for the next Program Change; CC32 is delivered/stored but does
-    // not alter the bank number.
+    // Pinned GS Bank Select: CC0 selects the bank for the next Program Change; CC32
+    // is stored but ignored.
     fluid_settings_setstr(settings.get(), "synth.midi-bank-select", "gs");
-    // Explicitly retain FluidSynth's API serialization. UI-driven bank/program
-    // changes are rare but may overlap host rendering; this prevents concurrent
-    // FluidSynth API calls from corrupting its internal state.
+    // UI program changes can overlap rendering; keep FluidSynth's API lock.
     fluid_settings_setint(settings.get(), "synth.threadsafe-api", 1);
-    // Generous polyphony so dense 16-channel multitimbral material never steals
-    // voices (voice stealing cuts note tails / harmonics).
-    //
-    // This MUST be a setting rather than a post-construction
-    // fluid_synth_set_polyphony call. new_fluid_synth sizes the rvoice event
-    // queue once, as polyphony * 64, and fluid_synth_set_polyphony grows only the
-    // voice array. Raising polyphony afterwards therefore left the queue sized for
-    // FluidSynth's default 256 while 512 voices fed it: above ~256 sounding voices
-    // it overflowed continuously, dropping rvoice events and emitting thousands of
-    // "Ringbuffer full" warnings per second. Measured with tools/perf_probe.cpp.
+    // Must be a setting, not fluid_synth_set_polyphony: the rvoice event queue is
+    // sized once from it (polyphony * 64). Raising it later overflowed the queue
+    // above ~256 voices.
     fluid_settings_setint(settings.get(), "synth.polyphony", maximumPolyphony);
-    // Internal stems allow independent audio trims and honest per-channel meters.
-    // The plugin still exposes ONE stereo output. Identical effects settings are
-    // applied to every internal group; no per-channel effects control is exposed.
+    // 16 internal stems for per-channel trims and meters; still one stereo output
+    // with identical effects on every group.
     fluid_settings_setint(settings.get(), "synth.audio-channels", 16);
     fluid_settings_setint(settings.get(), "synth.audio-groups", 16);
     fluid_settings_setint(settings.get(), "synth.effects-groups", 16);
@@ -353,65 +328,31 @@ void FluidSynthModel::createSynth() {
     std::fill(std::begin(appliedVibratoScale), std::end(appliedVibratoScale), 0);
     applyVibratoScaleFromAudioThread();
 
-    // Gold-standard playback fidelity:
-    // - 7th-order ("highest") sample interpolation. FluidSynth defaults to 4th-order,
-    //   which audibly rolls off the top octave; 7th-order preserves the high end for
-    //   both SF2 and DLS. Setting it here is not enough on its own - see
-    //   applyInterpolationMethod, which a reset SysEx calls again.
+    // Interpolation comes from the setting; a reset SysEx re-applies it.
     applyInterpolationMethod();
-    // Polyphony comes from the settings above, before this synth existed.
 
-    // Output gain. FluidSynth's own default, and deliberately back to it.
-    //
-    // This was 1.0 - five times the default - and that was the whole of the
-    // "dynamics sound wrong" report: measured on a real 52 s game rip, gain 1.0
-    // peaks at +7.3 dBFS with 0.39% of samples past full scale, and a four-note
-    // chord on all 16 channels reaches +20 dBFS. Once anything downstream clips,
-    // quiet notes rise relative to loud ones, CC7 automation stops doing anything
-    // above the ceiling, and hard clipping collapses the L/R difference that
-    // carries pan. At 0.2 the same rip peaks at -6.7 dBFS, which is the ordinary
-    // gain-staging target, and matches the loudness of every other FluidSynth
-    // based player. FluidSynth documents 0.2 as being low "to avoid the
-    // saturation of the output when many notes are played", and their own attempt
-    // to raise the default to 0.6 in 2.4.0 drew clipping reports.
-    //
-    // Users who want it louder use the outputLevel parameter, which is applied
-    // after rendering with smoothing, rather than by moving this.
+    // FluidSynth's default gain. At 1.0 real rips clipped (+7.3 dBFS), which flattened
+    // dynamics and pan. Users raise level with outputLevel instead.
     fluid_synth_set_gain(synth.get(), 0.2f);
 
-    // Chorus is opt-in. Rebuild from plugin parameters, retaining native bank
-    // routing and MIDI CC93 (zero by default) rather than injecting new sends.
+    // Chorus is opt-in; CC93 (default 0) and bank routing stay native.
     resetChorusToParameters();
     for (auto& send : diagnosticChorusSend) send.store(0);
     for (auto& value : diagnosticModulation) value.store(0);
 
-    // The reverb belongs to the synth, so a (re)created synth starts from the
-    // parameters rather than from FluidSynth's own defaults.
+    // A new synth starts from the parameters, not FluidSynth's defaults.
     resetReverbToParameters();
 
-    // ...and every channel starts at the GM default reverb send, which
-    // FluidSynth does not apply. See MidiConstants::defaultReverbSend.
+    // GM default reverb send, which FluidSynth does not apply.
     for (int ch = 0; ch < kNumChannels; ++ch)
         fluid_synth_cc(synth.get(), ch, static_cast<int>(EFFECTS_DEPTH1),
                        MidiConstants::defaultReverbSend);
 
-    // A fresh synth is at the default two semitones everywhere; processBlock
-    // re-applies the override, and refreshBanks the remembered per-channel ranges.
+    // A new synth is at +-2 semitones; processBlock re-applies the override.
     bendRangeOverrideDirty.store(true, std::memory_order_release);
 
-    // No modulators are installed here any more.
-    //
-    // Juicy16 used to add its own CC71-79 -> filter/volume-envelope modulators,
-    // which no other SoundFont player applies: stock FluidSynth ignores CC71-79
-    // entirely. Measured against a real SF2, the amounts were wildly out of
-    // scale - CC73=127 stretched attack from 50 ms to 868 ms, CC75=127 raised the
-    // note tail by 43 dB, CC72=127 left a note ringing 48 dB above neutral a
-    // second after note-off, and CC71=127 attenuated the signal by 46 dB - while
-    // on DLS banks they did nothing at all, because FluidSynth's native DLS
-    // loader does not apply the default modulator list. Game rips commonly send
-    // those controllers, so the result was material that sounded flat and
-    // compressed only in this plugin. Every CC still reaches the synth; there is
-    // simply no Juicy16-specific modulator listening for it.
+    // No custom modulators. Juicy16's former CC71-79 modulators were far out of scale
+    // on SF2 and inert on DLS; every CC still reaches the synth.
 }
 
 
@@ -440,27 +381,23 @@ bool FluidSynthModel::getVoiceStateCounts(int requestedChannel,
 
 void FluidSynthModel::prepareToPlay(double sampleRate, int samplesPerBlock) {
     setSampleRate(static_cast<float>(sampleRate));
-    // 20 ms is long enough that an automation jump is inaudible as a step and
-    // short enough that a deliberate move still feels immediate.
+    // 20 ms: long enough to hide steps, short enough to feel immediate.
     outputLevelSmoother.reset(sampleRate, 0.02);
     outputLevelSmoother.setCurrentAndTargetValue(
         outputLevelGain.load(std::memory_order_relaxed));
-    // The reverb settings glide over the same 20 ms, but per block rather than
-    // per sample: FluidSynth takes a setting, not a signal.
+    // Reverb glides per block: FluidSynth takes settings, not signals.
     for (int i = 0; i < numReverbParams; ++i)
         reverbSmoother[i].reset(sampleRate, 0.02);
     resetReverbToParameters();
-    // pre-allocate the mono-downmix scratch off the audio thread
+    // Preallocate scratch off the audio thread.
     stereoScratch.setSize(2, jmax(64, samplesPerBlock), false, false, true);
-    // ...and the effects bus the reverb is mixed from. Sized for a whole block
-    // so the common path renders in one call; renderSamples chunks against this
-    // capacity, so a host that ignores its own maximum block size still cannot
-    // overrun it or allocate on the audio thread.
+    // renderSamples chunks against this capacity, so oversized host blocks never
+    // overrun or allocate.
     effectsScratch.setSize(32, jmax(64, samplesPerBlock), false, false, true);
     channelScratch.setSize(32, jmax(64, samplesPerBlock), false, false, true);
     for (int i = 0; i < 32; ++i) {
         dryOutputs[static_cast<size_t>(i)] = channelScratch.getWritePointer(i);
-        // Reverb and chorus for each group still add into the same stereo scratch.
+        // Each group's effects add into the same stereo scratch.
         const int group = i / 2, side = i % 2;
         effectOutputs[static_cast<size_t>(4 * group + side)] = effectsScratch.getWritePointer(i);
         effectOutputs[static_cast<size_t>(4 * group + 2 + side)] = effectsScratch.getWritePointer(i);
@@ -472,9 +409,7 @@ void FluidSynthModel::prepareToPlay(double sampleRate, int samplesPerBlock) {
     }
     masterPeak.store(0.0f);
     outputOverload.store(false);
-    // ...and the oversampling FIFO, which holds one block's worth of internal
-    // samples plus the interpolator's read-ahead and whatever the previous block
-    // left behind.
+    // One block of internal samples, the interpolator's read-ahead and leftovers.
     oversampleFifo.setSize(
         2, jmax(64, samplesPerBlock / jmax(1, oversampleFactor) + 8), false, true, true);
     oversampleFifoFill = 0;
@@ -517,9 +452,16 @@ bool FluidSynthModel::applyProgramToEngine(int midiCh,
         return false;
     }
 
-    const int result{retainCurrentBank
+    int result{retainCurrentBank
         ? fluid_synth_program_change(synth.get(), midiCh, preset)
         : fluid_synth_program_select(synth.get(), midiCh, fontId, rawBank, preset)};
+    // A drum channel searches only the percussion bank; if it finds nothing (e.g. a
+    // kit at 0:0 without the drum flag), fall back to the melodic bank.
+    if (retainCurrentBank && fluid_synth_get_channel_preset(synth.get(), midiCh) == nullptr) {
+        result = fluid_synth_program_select(synth.get(), midiCh, fontId, 0, preset);
+        if (result != FLUID_OK)
+            result = fluid_synth_program_select(synth.get(), midiCh, fontId, 0, 0);
+    }
     if (result != FLUID_OK) {
         recordProgramApplyFailure(midiCh);
         return false;
@@ -585,11 +527,8 @@ void FluidSynthModel::syncAppliedProgramOnMessageThread(
 }
 
 void FluidSynthModel::parameterChanged(const String& parameterID, float /*newValue*/) {
-    // While loadingChannel is set, the params are being written to MIRROR state the
-    // engine already has (channel switch, MIDI program-change sync, dropdown pick):
-    // re-sending it to the synth is at best redundant and at worst applies an
-    // invalid intermediate program (bank set before preset), and saving it back
-    // would clobber the tree we just read. Skip entirely.
+    // Parameter writes that only mirror engine state (mirroringParameters) are not
+    // re-sent to the synth or saved back.
     if (const int index = chorusParamIds.indexOf(parameterID); index >= 0) {
         chorusTarget[index].store(valueTreeState.getRawParameterValue(parameterID)->load(),
                                   std::memory_order_relaxed);
@@ -606,6 +545,13 @@ void FluidSynthModel::parameterChanged(const String& parameterID, float /*newVal
         standardMidiResets.store(valueTreeState.getRawParameterValue(parameterID)->load() > 0.5f);
         return;
     }
+    if (parameterID == "interpolation") {
+        // May arrive on the audio thread; processBlock applies it.
+        interpolationMethod.store(interpolationForChoice(juce::roundToInt(
+            valueTreeState.getRawParameterValue(parameterID)->load())));
+        interpolationDirty.store(true, std::memory_order_release);
+        return;
+    }
     if (parameterID.startsWith("trimCh")) {
         const int ch = channelSuffixOf(parameterID, "trimCh", 6);
         if (ch >= 0 && ch < 16)
@@ -614,15 +560,14 @@ void FluidSynthModel::parameterChanged(const String& parameterID, float /*newVal
         return;
     }
     if (parameterID == "outputLevel") {
-        // May arrive on the audio thread from host automation. Only stores an
-        // atomic; the smoothing happens in processBlock.
+        // May arrive on the audio thread; store only, processBlock smooths.
         if (auto* p{dynamic_cast<juce::AudioParameterFloat*>(
                 valueTreeState.getParameter(parameterID))})
             setOutputLevelDb(p->get());
         return;
     }
     if (parameterID == "bendRange" || parameterID == "bendScale") {
-        // Host bend compensation. May arrive on the audio thread; store only.
+        // May arrive on the audio thread; store only.
         int value{0};
         if (auto* p{dynamic_cast<AudioParameterInt*>(
                 valueTreeState.getParameter(parameterID))})
@@ -635,8 +580,7 @@ void FluidSynthModel::parameterChanged(const String& parameterID, float /*newVal
         }
         return;
     }
-    // Reverb. Like outputLevel, these may arrive on the audio thread from host
-    // automation, so they only store an atomic; processBlock does the work.
+    // May arrive on the audio thread; store only, processBlock applies.
     if (parameterID == "reverbOn") {
         if (auto* p{dynamic_cast<juce::AudioParameterBool*>(
                 valueTreeState.getParameter(parameterID))})
@@ -650,9 +594,7 @@ void FluidSynthModel::parameterChanged(const String& parameterID, float /*newVal
         if (auto* p{dynamic_cast<juce::AudioParameterChoice*>(
                 valueTreeState.getParameter(parameterID))})
             profile = p->getIndex();
-        // Selecting a profile MOVES the visible controls. Writing four
-        // parameters is a message-thread job, so hand it over rather than doing
-        // it wherever the host happened to call us.
+        // Writing the four parameters is message-thread work.
         if (profile != customReverbProfileIndex()) {
             pendingReverbProfile.store(profile, std::memory_order_release);
             triggerAsyncUpdate();
@@ -665,8 +607,7 @@ void FluidSynthModel::parameterChanged(const String& parameterID, float /*newVal
         if (auto* p{dynamic_cast<juce::AudioParameterFloat*>(
                 valueTreeState.getParameter(parameterID))})
             reverbTarget[i].store(p->get(), std::memory_order_relaxed);
-        // A control moved by hand means the selection is no longer any named
-        // profile - unless we are the ones moving it to apply one.
+        // A manual edit switches the selection to Custom, unless applying a profile.
         if (!applyingReverbProfile) {
             pendingReverbCustom.store(true, std::memory_order_release);
             triggerAsyncUpdate();
@@ -676,10 +617,8 @@ void FluidSynthModel::parameterChanged(const String& parameterID, float /*newVal
     if (mirroringParameters)
         return;
     if (int progCh{progParamChannel(parameterID)}; progCh >= 0) {
-        // Per-channel program parameter (host automation / VST3 unit program).
-        // Can arrive on the audio thread, so treat it exactly like an incoming
-        // MIDI program change: apply to the synth, then capture the resulting
-        // program for the message thread to mirror into channelPrograms/UI.
+        // progChN may arrive on the audio thread: treat it like a MIDI Program Change
+        // and let the message thread mirror the result.
         int program{0};
         if (auto* p{dynamic_cast<AudioParameterInt*>(valueTreeState.getParameter(parameterID))})
             program = p->get();
@@ -719,11 +658,8 @@ void FluidSynthModel::parameterChanged(const String& parameterID, float /*newVal
     switch (parseChannelParam(parameterID, paramChannel)) {
         case ChannelParamKind::volume:
         case ChannelParamKind::pan: {
-            // volChN / panChN: this row's knob, host automation, and an incoming
-            // CC7/CC10 on channel N all arrive here or in dispatchMidiEvent, and
-            // all end at the same place - the engine, the channelPrograms node,
-            // and the parameter. MIDI stays authoritative because its write
-            // happens last, at the event's own timestamp.
+            // Knob, automation and incoming CC7/CC10 all end at the engine, channelPrograms
+            // and the parameter. MIDI wins because it writes last, at its timestamp.
             const int controllerNumber{static_cast<int>(
                 parameterID.startsWith("volCh") ? VOLUME_MSB : PAN_MSB)};
             int value{0};
@@ -741,7 +677,7 @@ void FluidSynthModel::parameterChanged(const String& parameterID, float /*newVal
                     chNode.setProperty(
                         ccToChannelProperty.at(ccIndexOrder[idx]), value, nullptr);
             } else {
-                // audio-thread automation: defer the tree write to handleAsyncUpdate
+                // Audio thread: defer the tree write.
                 midiCcValue[paramChannel][idx].store(value, std::memory_order_relaxed);
                 midiCcDirtyMask.fetch_or(1u << paramChannel, std::memory_order_release);
                 triggerAsyncUpdate();
@@ -769,10 +705,7 @@ void FluidSynthModel::parameterChanged(const String& parameterID, float /*newVal
                     chNode.setProperty(isMute ? "mute" : "solo",
                                        engaged ? 1 : 0, nullptr);
             } else {
-                // Host automation on the audio thread: defer the tree write, or
-                // the editor never learns that fifteen other rows just went
-                // quiet. Solo is the case that matters - it changes how every
-                // OTHER row should look.
+                // Audio thread: defer the tree write so the rows' silenced look updates.
                 pendingMuteSoloSync.store(true, std::memory_order_release);
                 triggerAsyncUpdate();
             }
@@ -791,8 +724,7 @@ void FluidSynthModel::syncMixerParamsFromState() {
         ValueTree chNode{chPrograms.getChildWithProperty("num", ch)};
         if (!chNode.isValid())
             continue;
-        // Mirroring: the values are already in the tree, and the engine receives
-        // them when the font loads. Writing them back would be a no-op at best.
+        // Values are already in the tree; the engine gets them on font load.
         juce::ScopedValueSetter<bool> guard{mirroringParameters, true};
         for (int idx = 0; idx < kNumMixerCcs; idx++) {
             const String& property{ccToChannelProperty.at(ccIndexOrder[idx])};
@@ -861,10 +793,8 @@ bool FluidSynthModel::setChannelProgram(int chan, int bank, int preset) {
 }
 
 void FluidSynthModel::handleAsyncUpdate() {
-    // Reverb profile reconciliation. Selecting a profile writes the four
-    // parameters; editing one of them writes the selection back to Custom. Both
-    // directions run here so neither happens on whichever thread the host chose,
-    // and applyingReverbProfile keeps them from chasing each other.
+    // Profile/Custom reconciliation, on the message thread; applyingReverbProfile
+    // stops the two directions chasing each other.
     if (const int profile{pendingReverbProfile.exchange(-1, std::memory_order_acquire)};
         profile >= 0 && profile < customReverbProfileIndex()) {
         const juce::ScopedValueSetter<bool> guard{applyingReverbProfile, true};
@@ -898,8 +828,7 @@ void FluidSynthModel::handleAsyncUpdate() {
         }
     }
 
-    // consume per-channel program changes and sound-CC changes captured on the
-    // audio thread; all ValueTree/parameter writes happen here, on the message thread.
+    // Apply audio-thread captures to state and parameters on the message thread.
     const unsigned int pcMask{midiProgramDirtyMask.exchange(0, std::memory_order_acquire)};
     const unsigned int ccMask{midiCcDirtyMask.exchange(0, std::memory_order_acquire)};
     if (pcMask == 0 && ccMask == 0)
@@ -928,10 +857,8 @@ void FluidSynthModel::handleAsyncUpdate() {
             if (chNode.isValid())
                 chNode.setProperty(
                     ccToChannelProperty.at(ccIndexOrder[idx]), value, nullptr);
-            // Every channel has its own knob and its own parameter now, so an
-            // incoming CC moves that row whether or not it is the selected one.
-            // The guard stops the parameter write from being sent back to the
-            // engine, which already has this value from the MIDI event itself.
+            // Every row has its own parameter. The guard stops the engine being re-sent a
+            // value it already has.
             juce::ScopedValueSetter<bool> guard{mirroringParameters, true};
             if (auto* p{dynamic_cast<AudioParameterInt*>(
                     valueTreeState.getParameter(mixerParamId(idx, ch)))})
@@ -947,11 +874,8 @@ void FluidSynthModel::loadSelectedChannel(int newChannel) {
         .getChildWithProperty("num", newChannel)};
     if (!chNode.isValid())
         return;
-    // Push the saved program into the shared bank/preset params so they describe
-    // the newly-selected channel. Volume, pan, mute, and solo no longer follow
-    // the selection: each channel owns its own parameter, and each row its own
-    // control. The guard makes parameterChanged skip both the engine re-send and
-    // the save-back - the engine already holds these values for this channel.
+    // Point the shared bank/preset params at the newly selected channel without
+    // re-sending or saving back.
     juce::ScopedValueSetter<bool> guard{mirroringParameters, true};
     for (const String& p : programChangeParams) {
         AudioParameterInt* param{dynamic_cast<AudioParameterInt*>(valueTreeState.getParameter(p))};
@@ -973,9 +897,8 @@ void FluidSynthModel::valueTreePropertyChanged(ValueTree& treeWhosePropertyHasCh
             return;
 #if JUCE_MAC || JUCE_IOS
         if (property == StringRef("path")) {
-            // A path-only state is valid when no security bookmark was available
-            // (including tests and older sessions). If a bookmark exists, wait for
-            // its property update so sandbox access is established before loading.
+            // Path-only state is valid without a bookmark; if one exists, wait for it so
+            // sandbox access is in place first.
             MemoryBlock emptyBookmark;
             const var bookmark{treeWhosePropertyHasChanged.getProperty("bookmark", emptyBookmark)};
             if (bookmark.isBinaryData() && bookmark.getBinaryData()->isEmpty()) {
@@ -996,21 +919,16 @@ void FluidSynthModel::valueTreePropertyChanged(ValueTree& treeWhosePropertyHasCh
                     nullptr,
                     static_cast<const UInt8 *>(bookmark.getBinaryData()->getData()),
                     static_cast<CFIndex>(bookmark.getBinaryData()->getSize()))};
-                // isStale reports a bookmark that still resolves but whose target
-                // has moved or been replaced. Recorded for diagnostics; the
-                // resolved URL is authoritative either way.
+                // Stale = still resolves but the target moved; the resolved URL is used anyway.
                 Boolean isStale = false;
                 CFUniquePtr<CFURLRef> cfURL{CFURLCreateByResolvingBookmarkData(nullptr, data.get(), kCFURLBookmarkResolutionWithSecurityScope, nullptr, nullptr, &isStale, &cfError)};
                 if (cfURL) {
                     CFUniquePtr<CFStringRef> cfPath {CFURLCopyFileSystemPath(cfURL.get(), CFURLPathStyle::kCFURLPOSIXPathStyle)};
-                    // Must own the string: StringRef would only borrow a pointer
-                    // into the temporary returned by fromCFString.
+                    // Own the string; fromCFString returns a temporary.
                     bookmarkPath = String::fromCFString(cfPath.get());
                     if (bookmarkPath.isNotEmpty()) {
                         CFURLStartAccessingSecurityScopedResource(cfURL.get());
-                        // A bookmark can resolve to a file that no longer loads
-                        // (replaced, truncated, permissions). Keep the result so
-                        // the stored path is still tried below.
+                        // The bookmark target may no longer load; the stored path is tried next.
                         loadedViaBookmark = unloadAndLoadFont(bookmarkPath);
                         CFURLStopAccessingSecurityScopedResource(cfURL.get());
                     }
@@ -1045,7 +963,8 @@ void FluidSynthModel::setControllerValue(int controller, int value) {
         || !juce::isPositiveAndBelow(controller, 128)
         || !juce::isPositiveAndBelow(value, 128))
         return;
-    fluid_synth_cc(synth.get(), static_cast<int>(ch), controller, value);
+    if (reachesEngine(controller))
+        fluid_synth_cc(synth.get(), static_cast<int>(ch), controller, value);
     if (controller == 1 || controller == 121) diagnosticModulation[ch].store(controller == 1 ? value : 0);
     if (const int idx{ccToIndex(controller)}; idx >= 0)
         engineCc[ch][idx].store(value, std::memory_order_relaxed);
@@ -1056,19 +975,15 @@ void FluidSynthModel::setChannelControllerValue(int channelToWrite, int controll
         || !juce::isPositiveAndBelow(controller, 128)
         || !juce::isPositiveAndBelow(value, 128))
         return;
-    fluid_synth_cc(synth.get(), channelToWrite, controller, value);
+    if (reachesEngine(controller))
+        fluid_synth_cc(synth.get(), channelToWrite, controller, value);
     if (controller == 1 || controller == 121) diagnosticModulation[channelToWrite].store(controller == 1 ? value : 0);
     if (const int idx{ccToIndex(controller)}; idx >= 0)
         engineCc[channelToWrite][idx].store(value, std::memory_order_relaxed);
 }
 
 unsigned int FluidSynthModel::deriveSilencedMask(unsigned int mutes, unsigned int solos) {
-    // A channel sounds if it is NOT muted AND (nothing is soloed OR it is one of
-    // the soloed ones). Mute always wins; solo only restricts the candidates, so
-    // every press of M does something. Consequences, all intended: muting the
-    // only soloed channel is silent, soloing a muted channel is silent, soloing
-    // everything equals soloing nothing, and clearing the last solo restores the
-    // mute picture untouched.
+    // Sounds if not muted and (nothing soloed or soloed). Mute always wins.
     constexpr unsigned int all{(1u << kNumChannels) - 1u};
     return (mutes | (solos != 0 ? ~solos : 0u)) & all;
 }
@@ -1078,9 +993,7 @@ void FluidSynthModel::refreshSilencedMask() {
         muteMask.load(std::memory_order_relaxed),
         soloMask.load(std::memory_order_relaxed))};
     const unsigned int previous{silencedMask.exchange(updated, std::memory_order_release)};
-    // All-notes-off, not all-sound-off: the envelopes release naturally, so
-    // muting a sustained pad does not click. Note-offs are never dropped, so a
-    // channel unmuted later is not left with stuck state either.
+    // All-notes-off, so envelopes release without clicks.
     for (int ch = 0; ch < kNumChannels; ++ch)
         if ((updated & ~previous & (1u << ch)) != 0)
             fluid_synth_all_notes_off(synth.get(), ch);
@@ -1154,9 +1067,7 @@ void FluidSynthModel::applyReverbFromAudioThread(int numSamples) {
     if (synthesizer == nullptr)
         return;
 
-    // Bypass is the reverb unit switched off, not its level taken to zero: an
-    // inactive unit is not processed at all, so nothing keeps computing a tail
-    // that nobody can hear.
+    // Bypass disables the unit, so no inaudible tail is computed.
     const bool enabled{reverbEnabledTarget.load(std::memory_order_relaxed)};
     if (!reverbEverApplied || enabled != reverbEnabledApplied) {
         fluid_synth_reverb_on(synthesizer, -1, enabled ? 1 : 0);
@@ -1165,14 +1076,10 @@ void FluidSynthModel::applyReverbFromAudioThread(int numSamples) {
 
     for (int i = 0; i < numReverbParams; ++i) {
         reverbSmoother[i].setTargetValue(reverbTarget[i].load(std::memory_order_relaxed));
-        // One value per block rather than per sample: FluidSynth's reverb takes a
-        // setting, not a signal, and recomputing its coefficients per sample
-        // would be both impossible through this API and pointless. The smoother
-        // is what stops a host's automation jump becoming one audible step.
+        // One value per block; the smoother hides automation steps.
         reverbSmoother[i].skip(numSamples);
         const float value{reverbSmoother[i].getCurrentValue()};
-        // Only write a setting that actually moved. A game rip that never
-        // automates reverb must not pay four coefficient recomputations a block.
+        // Write only settings that moved.
         if (reverbEverApplied && std::abs(value - reverbApplied[i]) < 1.0e-4f)
             continue;
         switch (i) {
@@ -1201,8 +1108,7 @@ void FluidSynthModel::resetReverbToParameters() {
                 valueTreeState.getParameter(reverbParamId(i)))})
             value = p->get();
         reverbTarget[i].store(value, std::memory_order_relaxed);
-        // Jump rather than glide: this runs when the synth is (re)created or the
-        // sample rate changes, where there is no previous value to glide from.
+        // Jump: a new synth or rate change has nothing to glide from.
         reverbSmoother[i].setCurrentAndTargetValue(value);
     }
     reverbEverApplied = false;
@@ -1255,8 +1161,7 @@ int FluidSynthModel::loadedFontBankOffset() const {
 
 bool FluidSynthModel::getAppliedChannelProgram(int ch, int& bank, int& preset) const {
     if (ch < 0 || ch >= kNumChannels || sfont_id.load() < 0) return false;
-    // Only completed program selections belong in project state. Bank Select
-    // alone changes FluidSynth's pending bank, not the sounding instrument.
+    // Only completed selections are state; Bank Select alone is pending.
     bank = engineBank[ch].load() - loadedFontBankOffset();
     preset = enginePreset[ch].load();
     return true;
@@ -1270,8 +1175,7 @@ bool FluidSynthModel::getChannelProgram(int channelToRead, int& bank, int& prese
     if (fluid_synth_get_program(
             synth.get(), channelToRead, &soundFontId, &rawBank, &preset) != FLUID_OK)
         return false;
-    // Reported in the font's own bank numbering, matching channelPrograms and the
-    // bank parameter. Raw engine banks stay inside applyProgramToEngine.
+    // In the font's own bank numbering, like channelPrograms.
     bank = rawBank - loadedFontBankOffset();
     return true;
 }
@@ -1294,8 +1198,7 @@ bool FluidSynthModel::getLastDispatchedNoteOnProgram(
     int channelToRead, int& bank, int& preset, int& sample) const {
     if (channelToRead < 0 || channelToRead >= kNumChannels)
         return false;
-    // The audio thread stores the raw engine bank; the offset conversion belongs
-    // here, where the FluidSynth API lock is safe to take.
+    // Offset conversion here, where taking the API lock is safe.
     const int rawBank{lastNoteOnBank[channelToRead].load(std::memory_order_relaxed)};
     preset = lastNoteOnPreset[channelToRead].load(std::memory_order_relaxed);
     sample = lastNoteOnSample[channelToRead].load(std::memory_order_relaxed);
@@ -1329,8 +1232,7 @@ String FluidSynthModel::getFontLoadStatus() const {
         .getProperty("loadStatus", "idle").toString();
 }
 
-// Runtime-only; never serialised. True after a security-scoped bookmark resolved
-// but reported its target as moved or replaced.
+// Runtime only: the bookmark resolved but its target moved.
 bool FluidSynthModel::isBookmarkStale() const {
     return static_cast<bool>(valueTreeState.state.getChildWithName("soundFont")
         .getProperty("bookmarkStale", false));
@@ -1351,8 +1253,7 @@ String FluidSynthModel::getLoadedFontPath() const {
         .getProperty("loadedPath", "").toString();
 }
 
-// Reads the voice limit back out of the settings the synth was constructed from,
-// which is the property that actually sizes FluidSynth's rvoice event queue.
+// Read from the settings, which size the rvoice event queue.
 bool FluidSynthModel::getConfiguredPolyphony(int& configured, int& active) const {
     if (settings == nullptr || synth == nullptr)
         return false;
@@ -1362,22 +1263,10 @@ bool FluidSynthModel::getConfiguredPolyphony(int& configured, int& active) const
     return active > 0;
 }
 
-// CC124-127 are MIDI 1.0 channel-mode messages. FluidSynth implements them
-// faithfully, which means Omni Off and Mono On assign a group of consecutive
-// channels to a basic channel and DISABLE the rest: a single CC124 on channel 1
-// leaves only channel 1 responding, silent and unreadable everywhere else, until
-// the next reset.
-//
-// That is correct for a MIDI 1.0 sound module and wrong for Juicy16, whose
-// product contract is exactly 16 independent channels per instance. The
-// controller is still delivered to the engine above, so the "every CC0-127
-// reaches FluidSynth" contract holds; only the channel layout it would have
-// destroyed is put back.
-//
-// The restored layout is FluidSynth's own default: one basic channel at 0 in
-// OMNION_POLY whose group covers every MIDI channel. `val` 0 means "to MIDI
-// channel count minus 1". Audio thread; both calls take the FluidSynth API lock,
-// exactly like the fluid_synth_cc above, and channel-mode messages are rare.
+// CC124-127 make FluidSynth disable all but a group of channels (a single CC124
+// on channel 1 silences the rest). The CC still reaches the engine; this
+// restores FluidSynth's default layout: one OMNION_POLY basic channel at 0
+// covering all channels. Audio thread.
 void FluidSynthModel::restoreSixteenChannelLayout(int controller) {
     if (controller < MidiConstants::firstChannelModeCc || synth == nullptr)
         return;
@@ -1421,18 +1310,13 @@ bool FluidSynthModel::unloadAndLoadFont(const String& absPath) {
     }
 
     String pathToLoad{absPath};
-    // Build a repaired candidate without disturbing the active bank. The candidate
-    // temp file becomes owned by the model only after FluidSynth accepts it.
+    // Repair into a temp candidate; the model owns it only once FluidSynth accepts it.
     juce::File repaired{writeRepairedTempCopy(requested)};
     if (repaired.existsAsFile())
         pathToLoad = repaired.getFullPathName();
 
-    // A RIFF container that claims to be larger than the file cannot be valid.
-    // Repair fixes exactly that for banks it can rewrite; anything left over is
-    // rejected here rather than handed to FluidSynth, whose parser can spend
-    // minutes scanning a large malformed image and block the message thread.
-    // A well-formed bank passes at any size, so legitimate large SoundFonts are
-    // unaffected.
+    // Reject RIFF containers larger than the file that repair could not fix;
+    // FluidSynth can spend minutes parsing them on the message thread.
     if (!repaired.existsAsFile() && riffContainerOverrunsFile(requested)) {
         publishFontLoadResult(
             false, absPath,
@@ -1442,8 +1326,7 @@ bool FluidSynthModel::unloadAndLoadFont(const String& absPath) {
         return false;
     }
 
-    // reset_presets=0 is deliberate: the old bank and its live channel programs
-    // stay usable until the replacement is proven loadable and non-empty.
+    // reset_presets=0 keeps the old bank playable until the new one is proven.
     const int candidateId{fluid_synth_sfload(
         synth.get(), pathToLoad.toRawUTF8(), 0)};
     fluid_sfont_t* candidate{candidateId == FLUID_FAILED
@@ -1504,11 +1387,8 @@ void FluidSynthModel::publishFontLoadResult(bool success,
         return;
     }
 
-    // The candidate failed after the old bank had already proved usable. Restore
-    // the serialised selection to that active bank as part of the transaction, so
-    // saving the project (or recreating the synth at a new sample rate) cannot turn
-    // a harmless rejected file choice into a broken future session. Keep the error
-    // fields above so the UI can still explain what was rejected.
+    // The candidate failed: restore the saved selection to the active bank so saving
+    // or a rate change cannot break the session. Error fields stay for the UI.
     const String loadedPath{fontState.getProperty("loadedPath", "").toString()};
     if (loadedPath.isNotEmpty()) {
         juce::ScopedValueSetter<bool> suppress{ suppressFontStateReload, true };
@@ -1519,9 +1399,7 @@ void FluidSynthModel::publishFontLoadResult(bool success,
     }
 }
 
-// True when the file starts with a RIFF header whose declared payload extends
-// past the end of the file. Non-RIFF and unreadable inputs return false, so this
-// only ever adds a rejection for a container that is provably inconsistent.
+// True if a RIFF header claims more payload than the file holds.
 bool FluidSynthModel::riffContainerOverrunsFile(const juce::File& src) {
     juce::uint8 header[8] = {};
     {
@@ -1540,17 +1418,13 @@ bool FluidSynthModel::riffContainerOverrunsFile(const juce::File& src) {
 }
 
 juce::File FluidSynthModel::writeRepairedTempCopy(const juce::File& src) {
-    // Repair rewrites an in-memory image of the whole file, and the file is
-    // user-selected, so the size must be bounded before any of it is read.
-    // Anything larger is handed to FluidSynth unrepaired: it streams the file
-    // instead of buffering it, so an oversized or hostile input costs a normal
-    // parse failure rather than an allocation of that size.
+    // Bound the in-memory repair size; larger files go to FluidSynth unrepaired,
+    // which streams them.
     static constexpr juce::int64 maxRepairableBytes{512ll * 1024 * 1024};
     if (src.getSize() > maxRepairableBytes)
         return {};
 
-    // header sniff: only DLS files are candidates for repair (avoid reading large
-    // SF2 files into memory needlessly)
+    // Only DLS files are repair candidates.
     char hdr[12] = {};
     {
         juce::FileInputStream in{src};
@@ -1608,14 +1482,9 @@ void FluidSynthModel::refreshBanks() {
     }
     valueTreeState.state.getChildWithName("banks").copyPropertiesAndChildrenFrom(banks, nullptr);
 
-    // After a font (re)load every channel must end up on a program that exists in
-    // the new font. Each channel's saved program lives in channelPrograms (set by the
-    // dropdowns, restored from plugin state, or left at the default). Apply THAT to the
-    // synth so the saved/default instrument actually sounds — falling back to the first
-    // available preset only when the saved one is absent from the font. (Previously this
-    // read the synth's LIVE program, which right after a load is just the default, so it
-    // clobbered every channel back to the first patch and lost restored assignments.)
-    // Incoming MIDI program changes remain authoritative and override this at play time.
+    // After a font load, apply each channel's saved program from channelPrograms,
+    // falling back to the first preset if the font lacks it. Incoming MIDI still
+    // overrides at play time.
     if (fontId != -1) {
         int bankOffset{fluid_synth_get_bank_offset(synth.get(), fontId)};
         ValueTree firstBank{banks.getChild(0)};
@@ -1630,28 +1499,20 @@ void FluidSynthModel::refreshBanks() {
             if (chNum < 0 || chNum >= kNumChannels)
                 continue;
 
-            // the channel's saved/intended program
             int rawBank{static_cast<int>(ch.getProperty("bank", 0))};
             int rawPreset{static_cast<int>(ch.getProperty("preset", 0))};
             bool exists{banks.getChildWithProperty("num", rawBank)
                 .getChildWithProperty("num", rawPreset).isValid()};
-            // A bank above the percussion bank is not a font bank at all: it is
-            // FluidSynth's drum offset plus the Bank Select MSB, so no font
-            // defines it and only FluidSynth can resolve it to a kit. Restore it
-            // the way live MIDI produced it - select the bank, then change
-            // program - which keeps the channel on the bank it was saved with and
-            // lets FluidSynth substitute the sound. The generic fallback below
-            // would instead move a drum channel onto the font's first melodic
-            // preset, which is audible.
+            // Banks above 128 are the drum offset plus Bank Select, not font banks. Restore
+            // them through Bank Select + Program Change so FluidSynth substitutes the kit;
+            // the generic fallback would pick a melodic preset.
             const bool substituteThroughBankSelect{
                 !exists && rawBank > MidiConstants::percussionBank};
             if (!exists && !substituteThroughBankSelect) {
                 rawBank = fallbackBank;
                 rawPreset = fallbackPreset;
             }
-            // Apply through the same engine/result path used by MIDI, host
-            // automation, and manual selection. State follows the program that
-            // FluidSynth actually accepted.
+            // Same engine path as MIDI and automation; state follows what FluidSynth accepted.
             AppliedProgram applied;
             if (substituteThroughBankSelect) {
                 if (fluid_synth_bank_select(
@@ -1662,7 +1523,7 @@ void FluidSynthModel::refreshBanks() {
                     chNum, bankOffset + rawBank, rawPreset, false, false, &applied))
                 continue;
             syncAppliedProgramOnMessageThread(chNum, applied);
-            // re-apply this channel's saved envelope/filter sliders (64 = neutral)
+            // Re-apply saved volume and pan.
             for (const auto& [paramID, cc] : channelPropertyToCc) {
                 fluid_synth_cc(
                     synth.get(),
@@ -1674,8 +1535,7 @@ void FluidSynthModel::refreshBanks() {
                         static_cast<int>(ch.getProperty(paramID, defaultParamValue(paramID))),
                         std::memory_order_relaxed);
             }
-            // ...and the bend range the MIDI stream last set, which a rebuilt
-            // synth (sample-rate change) would otherwise have forgotten.
+            // ...and the MIDI-set bend range, which a rebuilt synth forgot.
             reassertBendRange(chNum);
             reassertExpression(chNum);
         }
@@ -1683,16 +1543,13 @@ void FluidSynthModel::refreshBanks() {
 
     valueTreeState.state.getChildWithName("banks").sendPropertyChangeMessage("synthetic");
 
-    // refresh the selected channel's params so the preset list highlight + sliders
-    // reflect the (possibly adjusted) current program.
+    // Refresh the selected channel's params for the possibly adjusted program.
     syncToSelectedChannel();
 
     if (onBanksRefreshed)
         onBanksRefreshed();
 
 #if JUCE_DEBUG
-//    unique_ptr<XmlElement> xml{valueTreeState.state.createXml()};
-//    Logger::outputDebugString(xml->createDocument("",false,false));
 #endif
 }
 
@@ -1710,12 +1567,8 @@ void FluidSynthModel::setSampleRate(float sampleRate) {
         return;
     }
 
-    // Above FluidSynth's ceiling, render at the largest integer fraction of the
-    // host rate the engine accepts and interpolate each block back up: a 192 kHz
-    // project renders at 96 kHz rather than falling silent. An integer factor
-    // keeps the ratio an exact 1/N. Below the floor there is no such trick -
-    // that direction needs decimation with an anti-alias filter, and an 8 kHz
-    // floor is not a rate any host in scope runs at - so it still mutes.
+    // Above FluidSynth's ceiling, render at host/N and interpolate up. Below the
+    // floor there is no equivalent, so it mutes.
     int factor{1};
     double engineRate{sampleRate};
     if (sampleRate > maximumRate) {
@@ -1754,9 +1607,7 @@ void FluidSynthModel::setSampleRate(float sampleRate) {
     oversampleFactor = factor;
     currentSampleRate = static_cast<float>(engineRate);
 
-    // FluidSynth 2.4+ deliberately rejects fluid_synth_set_sample_rate(). Recreate
-    // the synth at the host rate before playback, then restore the bank and all
-    // per-channel state through the normal font-load path.
+    // FluidSynth 2.4+ rejects set_sample_rate: recreate the synth and reload.
     synth.reset();
     sfont_id.store(-1, std::memory_order_release);
     clearRepairedTemp();
@@ -1777,18 +1628,15 @@ void FluidSynthModel::reloadFontFromState() {
 }
 
 void FluidSynthModel::applyProgramChangeFromAudioThread(int midiCh, int program) {
-    // MIDI from the DAW is authoritative: apply the program change to this
-    // channel, then capture the resulting program so the message thread can
-    // update the channel list / params (see handleAsyncUpdate).
+    // MIDI is authoritative; the message thread mirrors the result.
     applyProgramToEngine(midiCh, 0, program, true, true);
 }
 
 bool FluidSynthModel::isSystemResetSysex(const uint8_t* d, int size) {
-    // data excludes the F0/F7 framing (JUCE getSysExData).
+    // Data excludes F0/F7.
     if (d == nullptr)
         return false;
-    // Universal Non-Realtime, General MIDI subfamily: 7E <dev> 09 <01|02|03>
-    // (GM1 On / GM Off / GM2 On) — FluidSynth resets channels for these.
+    // GM1 On / GM Off / GM2 On: 7E <dev> 09 <01|02|03>.
     if (size >= 4 && d[0] == 0x7E && d[2] == 0x09)
         return true;
     // Roland GS Reset: 41 <dev> 42 12 40 00 7F 00 41
@@ -1802,8 +1650,7 @@ bool FluidSynthModel::isSystemResetSysex(const uint8_t* d, int size) {
     return false;
 }
 
-// `payload`/`payloadBytes` follow MidiMessage::getSysExData(): the bytes between
-// the leading 0xF0 and the trailing 0xF7.
+// Payload excludes the F0/F7 framing.
 void FluidSynthModel::dispatchSysEx(const uint8_t* payload, int payloadBytes) {
     fluid_synth_sysex(
         synth.get(),
@@ -1819,9 +1666,7 @@ void FluidSynthModel::dispatchSysEx(const uint8_t* payload, int payloadBytes) {
     for (auto& send : diagnosticChorusSend) send.store(0);
     for (auto& value : diagnosticModulation) value.store(0);
 
-    // The reset returned every channel to FluidSynth's 4th-order interpolation.
-    // Put the plugin's own method back first: unlike everything below it, it does
-    // not depend on a font being loaded.
+    // The reset restored 4th-order interpolation; re-apply ours first (no font needed).
     applyInterpolationMethod();
 
     const int fontId{sfont_id.load(std::memory_order_acquire)};
@@ -1838,8 +1683,7 @@ void FluidSynthModel::dispatchSysEx(const uint8_t* payload, int payloadBytes) {
             fluid_synth_get_cc(synth.get(), ch, 10, &pan);
             engineCc[ch][0].store(volume); midiCcValue[ch][0].store(volume);
             engineCc[ch][1].store(pan); midiCcValue[ch][1].store(pan);
-            // Capture and publish the engine's reset assignment, without restoring
-            // the previous song's program or controller values.
+            // Publish the reset assignment without restoring the previous song's values.
             int id{-1}, bank{0}, program{0};
             if (fluid_synth_get_program(synth.get(), ch, &id, &bank, &program) == FLUID_OK)
                 applyProgramToEngine(ch, bank, program, false, true);
@@ -1867,16 +1711,10 @@ void FluidSynthModel::dispatchSysEx(const uint8_t* payload, int payloadBytes) {
             fluid_synth_cc(
                 synth.get(), ch, static_cast<int>(ccIndexOrder[idx]),
                 engineCc[ch][idx].load(std::memory_order_relaxed));
-        // A GM/GS/XG reset returns the reverb send to its specified default,
-        // which is 40 rather than FluidSynth's 0. Unlike volume and pan, there
-        // is no plugin-owned value to restore here: the spec's default IS the
-        // right answer after a reset.
+        // Reset returns the reverb send to the spec default 40 (FluidSynth uses 0).
         fluid_synth_cc(synth.get(), ch, static_cast<int>(EFFECTS_DEPTH1),
                        MidiConstants::defaultReverbSend);
-        // The reset nulled the RPN and returned the bend range to two
-        // semitones. Re-assert the range the file established, for the same
-        // reason programs are re-asserted: on a replay the host's parameter
-        // cache still holds the RPN and it is never sent again.
+        // Re-assert the file's bend range: on replay the host never resends the RPN.
         resetRpnTracking(ch);
         reassertBendRange(ch);
         reassertExpression(ch);
@@ -1891,9 +1729,8 @@ void FluidSynthModel::resetRpnTracking(int ch) {
     dataLsb[ch] = 0;
 }
 
-// Follows the RPN selection the way FluidSynth does, so a Data Entry can be
-// recognised as a bend-range write and remembered. Reset All Controllers nulls
-// the selection and zeroes Data Entry, as FluidSynth's channel init does.
+// Tracks RPN selection like FluidSynth to recognise bend-range writes. CC121
+// nulls the selection and zeroes Data Entry.
 void FluidSynthModel::noteControllerForBendRange(int ch, int cc, int value) {
     switch (cc) {
         case RPN_MSB:  rpnMsb[ch] = value; nrpnActive[ch] = false; return;
@@ -1919,8 +1756,7 @@ void FluidSynthModel::applyBendRangeOverride(int ch) {
         fluid_synth_pitch_wheel_sens(synth.get(), ch, forced);
 }
 
-// Through the RPN rather than fluid_synth_pitch_wheel_sens, so the cents in the
-// Data Entry LSB survive. Leaves the RPN null, which is where a reset put it.
+// Via RPN so the cents survive; leaves the RPN null, as a reset does.
 void FluidSynthModel::reassertBendRange(int ch) {
     const int range{engineBendRange[ch].load(std::memory_order_relaxed)};
     if (range >= 0 && synth != nullptr) {
@@ -1938,9 +1774,7 @@ void FluidSynthModel::reassertBendRange(int ch) {
     diagnosticSustain[ch].store(0);
 }
 
-// Remembers the expression the stream sets, and puts it back after a Reset
-// All Controllers. The engine has already applied the reset by the time this
-// runs, so the re-assert lands on the reset channel.
+// Remembers CC11 and re-asserts it after CC121 (already applied by the engine).
 void FluidSynthModel::noteControllerForExpression(int ch, int cc, int value) {
     if (cc == EXPRESSION_MSB) {
         engineExpression[ch].store(value, std::memory_order_relaxed);
@@ -1964,10 +1798,24 @@ void FluidSynthModel::reassertExpression(int ch) {
     diagnosticExpression[ch].store(value >= 0 ? value : 127);
 }
 
-// One call sets all 16 channels, so this is not per channel like the others.
+// Sets all 16 channels at once.
 void FluidSynthModel::applyInterpolationMethod() {
     if (synth != nullptr)
-        fluid_synth_set_interp_method(synth.get(), -1, interpolationMethod);
+        fluid_synth_set_interp_method(synth.get(), -1, interpolationMethod.load());
+}
+
+void FluidSynthModel::applyInterpolationChangeFromAudioThread() {
+    if (interpolationDirty.exchange(false, std::memory_order_acq_rel))
+        applyInterpolationMethod();
+}
+
+// Choice order is frozen: hosts store the index.
+int FluidSynthModel::interpolationForChoice(int choice) {
+    switch (choice) {
+        case 0: return FLUID_INTERP_HIGHEST;
+        case 2: return FLUID_INTERP_NONE;
+        default: return FLUID_INTERP_LINEAR;
+    }
 }
 
 void FluidSynthModel::applyVibratoScaleFromAudioThread() {
@@ -1992,8 +1840,8 @@ void FluidSynthModel::applyBendRangeChangeFromAudioThread() {
             fluid_synth_pitch_wheel_sens(synth.get(), ch, forced);
             continue;
         }
-        // Back to what the file established. Whole semitones: this must not
-        // disturb the live RPN selection, and the file's next RPN restores cents.
+        // Back to the file's range, whole semitones only, without touching the live RPN
+        // selection.
         const int range{engineBendRange[ch].load(std::memory_order_relaxed)};
         fluid_synth_pitch_wheel_sens(synth.get(), ch, range >= 0 ? range >> 7 : 2);
     }
@@ -2004,9 +1852,8 @@ enum GroupKind : juce::uint8 {
     kindSysEx, kindBank, kindProgram, kindRpnSelect, kindRpnNull, kindData, kindOther
 };
 
-// Dispatch tier per kind: resets first, then what a Program Change needs, the
-// Program Change itself, everything ordinary, and the RPN machinery last - a
-// Reset All Controllers written ahead of it in the file still lands ahead.
+// Tier per kind: resets, Program Change prerequisites, Program Change, ordinary
+// events, then RPN machinery.
 int groupTier(juce::uint8 kind) {
     switch (kind) {
         case kindSysEx:   return 0;
@@ -2054,8 +1901,7 @@ juce::uint8 classifyGroupEvent(const juce::uint8* d, int n, int& channel, int& c
     }
 }
 
-// Slot 0-7 for the eight RPN-machinery controllers. Selector pairs are adjacent
-// so a partner is slot ^ 1.
+// Slots 0-7 for RPN-machinery CCs; selector pairs are adjacent (partner = slot ^ 1).
 int rpnSlot(int cc) {
     switch (cc) {
         case RPN_MSB:         return 0;
@@ -2072,8 +1918,7 @@ int rpnSlot(int cc) {
 
 void FluidSynthModel::dispatchGroupEvent(const GroupEvent& e, int eventPosition) {
     if (e.kind == kindSysEx) {
-        // Straight from the buffer: MidiMessage copies any SysEx longer than
-        // four bytes to the heap, and game rips carry a reset at tick 0.
+        // Straight from the buffer: MidiMessage heap-copies SysEx over four bytes.
         if (e.numBytes >= 2)
             dispatchSysEx(e.data + 1, e.numBytes - 2);
         return;
@@ -2103,7 +1948,7 @@ void FluidSynthModel::dispatchTimestampGroup(juce::MidiBufferIterator begin,
     unsigned int rpnChannels{0};
     for (auto it = begin; it != end; ++it) {
         if (count == kMaxGroupEvents) {
-            // More than the scratch holds: the host's order, nothing dropped.
+            // Over capacity: host order, nothing dropped.
             for (auto rest = begin; rest != end; ++rest) {
                 const auto m = *rest;
                 GroupEvent raw{};
@@ -2133,7 +1978,7 @@ void FluidSynthModel::dispatchTimestampGroup(juce::MidiBufferIterator begin,
     }
     if (count > 1 && !plain) {
         for (int ch = 0; ch < kNumChannels; ++ch)
-            // An absent channel's scan cannot change any ordering keys.
+            // Channels without RPN events keep their order.
             if ((rpnChannels & (1u << ch)) != 0)
                 orderChannelRpn(ch, count);
         std::sort(groupScratch.begin(), groupScratch.begin() + count,
@@ -2155,20 +2000,11 @@ void FluidSynthModel::dispatchTimestampGroup(juce::MidiBufferIterator begin,
         dispatchGroupEvent(groupScratch[static_cast<std::size_t>(i)], eventPosition);
 }
 
-// Puts one channel's RPN machinery - selectors, nulls, Data Entries - into
-// select -> write -> deselect order without disturbing a file that already
-// has it.
-//
-// The events split into runs of selectors and runs of Data Entries. A data run
-// and the selector run before it form a unit, which is how a sequenced file
-// reads: select, write, usually deselect. Within a unit the k-th write of each
-// controller goes after the k-th selection and before the k-th null, which is
-// exactly what survives a host that delivers each controller's queue back to
-// back. A trailing selector run with no data of its own joins the unit before
-// it when it completes that unit - the unit selected nothing yet, or the run
-// supplies the other half of a pair whose first half is already there - and
-// otherwise stays in buffer order. Nulls ahead of everything else in a unit
-// stay ahead, so a defensive null before a selection is left alone.
+// Orders one channel's RPN machinery as select -> write -> deselect, leaving
+// already-ordered input alone. Each data run and its preceding selector run form
+// a unit; the k-th write of a controller goes after the k-th selection and
+// before the k-th null. A trailing selector run joins the previous unit only if
+// it completes it. Leading nulls stay ahead.
 void FluidSynthModel::orderChannelRpn(int midiCh, int count) {
     int n{0};
     for (int i = 0; i < count; ++i) {
@@ -2246,7 +2082,7 @@ void FluidSynthModel::orderChannelRpn(int midiCh, int count) {
             else if (e.kind == kindData) { seenSelectOrData = true; sub = 2; }
             else sub = seenSelectOrData ? 3 : 0;
             if (sub == 0)
-                continue; // leading null: buffer order, ahead of the unit
+                continue; // leading null stays ahead
             const int slot{rpnSlot(e.cc)};
             if (rank[sub][slot] < 0)
                 rank[sub][slot] = nextRank[sub]++;
@@ -2273,15 +2109,11 @@ void FluidSynthModel::dispatchMidiEvent(const MidiMessage& m, int samplePosition
         const int midiCh{channelIndex};
         channelMidiEvents[midiCh].fetch_add(1, std::memory_order_relaxed);
         if (m.isNoteOn()) {
-            // Muted, or not soloed while something else is. Drop the note-on and
-            // do not record it in the trace: no note sounded. Note-offs, CCs,
-            // program changes, and bend still pass through below, so the channel
-            // stays in step and unmuting mid-song needs no resync.
+            // Silenced: drop the note-on and skip the trace. Everything else passes, so
+            // unmuting mid-song needs no resync.
             if ((silencedMask.load(std::memory_order_acquire) & (1u << midiCh)) != 0)
                 return;
-            // Fixed-size diagnostic trace: capture the already-maintained engine
-            // snapshot immediately before dispatch. This lets the conformance
-            // suite prove reset/Program Change ordering at the sounding note.
+            // Trace the engine program at the note, for the conformance suite.
             lastNoteOnBank[midiCh].store(
                 engineBank[midiCh].load(std::memory_order_relaxed),
                 std::memory_order_relaxed);
@@ -2304,11 +2136,12 @@ void FluidSynthModel::dispatchMidiEvent(const MidiMessage& m, int samplePosition
                 m.getControllerValue(), std::memory_order_relaxed);
             lastCcSample[midiCh][m.getControllerNumber()].store(
                 samplePosition, std::memory_order_relaxed);
-            fluid_synth_cc(
-                synth.get(),
-                midiCh,
-                m.getControllerNumber(),
-                m.getControllerValue());
+            if (reachesEngine(m.getControllerNumber()))
+                fluid_synth_cc(
+                    synth.get(),
+                    midiCh,
+                    m.getControllerNumber(),
+                    m.getControllerValue());
             if (m.getControllerNumber() == 1)
                 diagnosticModulation[midiCh].store(m.getControllerValue());
             if (m.getControllerNumber() == 121)
@@ -2323,11 +2156,8 @@ void FluidSynthModel::dispatchMidiEvent(const MidiMessage& m, int samplePosition
                 midiCh, m.getControllerNumber(), m.getControllerValue());
             restoreSixteenChannelLayout(m.getControllerNumber());
 
-            // Mirror mapped sound controllers (CC71-79) into the channel's saved
-            // state + sliders. We are on the audio thread: parameter and ValueTree
-            // writes are NOT safe here (they'd fire UI listeners synchronously), so
-            // capture into atomics and let handleAsyncUpdate apply them on the
-            // message thread — same pattern as program changes below.
+            // Mirror CC7/CC10 into state via atomics; handleAsyncUpdate writes the tree on
+            // the message thread.
             if (int idx{ccToIndex(m.getControllerNumber())};
                 idx >= 0) {
                 engineCc[midiCh][idx].store(m.getControllerValue(), std::memory_order_relaxed);
@@ -2364,14 +2194,9 @@ void FluidSynthModel::dispatchMidiEvent(const MidiMessage& m, int samplePosition
         }
 }
 
-// The one place FluidSynth is asked for audio.
-//
-// It must be called with an EFFECTS bus: `fluid_synth_process(synth, n, 0,
-// nullptr, 2, out)` renders the dry voices and DISCARDS the reverb and chorus
-// buses, which is why Juicy16's reverb was inaudible before 0.6.0-alpha.1.
-// Each MIDI channel now has an internal dry/effect group so its audio trim
-// scales the complete contribution. The host still receives one stereo mix.
-// All reverb and chorus groups use the same global settings.
+// The one place FluidSynth renders. It must get effects buses: without them
+// fluid_synth_process discards reverb and chorus. Each MIDI channel has its own
+// dry/effects group so its trim scales everything; the host gets one stereo mix.
 void FluidSynthModel::renderSamples(AudioBuffer<float>& buffer, int startSample, int numSamples) {
     if (numSamples <= 0)
         return;
@@ -2410,14 +2235,11 @@ void FluidSynthModel::renderSamples(AudioBuffer<float>& buffer, int startSample,
     }
 }
 
-// Renders `numSamples` of dry audio into `outputs` and adds the effects bus on
-// top. `numSamples` must not exceed the preallocated effects scratch.
+// Dry audio plus effects. numSamples must fit the preallocated scratch.
 void FluidSynthModel::renderWithEffects(float* const* outputs, int numSamples) {
     jassert(numSamples <= effectsScratch.getNumSamples());
-    // A dense MIDI block can render one sample at a time. Clear only the region
-    // FluidSynth will add into, not the entire prepared capacity for every event.
-    // Cached write pointers bypass AudioBuffer's cleared flag: mark both buffers
-    // dirty after the engine call so the next partial clear cannot be skipped.
+    // Clear only the region FluidSynth adds into, then mark both buffers dirty since
+    // cached pointers bypass AudioBuffer's cleared flag.
     effectsScratch.clear(0, numSamples);
     channelScratch.clear(0, numSamples);
     fluid_synth_process(synth.get(), numSamples, 64, effectOutputs.data(), 32, dryOutputs.data());
@@ -2442,15 +2264,12 @@ void FluidSynthModel::renderWithEffects(float* const* outputs, int numSamples) {
                 peak = juce::jmax(peak, std::abs(left), std::abs(right));
             }
         };
-        // getNextValue returns the target without changing state when settled.
-        // Hoist that branch out of the sample loop; keep every smoothing step and
-        // the exact (dry + wet) * gain, then channel-order summation in both paths.
+        // Hoist the settled case out of the loop; arithmetic and order are unchanged.
         if (smooth.isSmoothing())
             mix([&smooth] { return smooth.getNextValue(); });
         else
             mix([gain = smooth.getTargetValue()] { return gain; });
-        // Peak envelope advances with audio time, independent of whether the UI
-        // is open. Release is 20 dB/s; the UI never locks or calls FluidSynth.
+        // Peak decays with audio time at 20 dB/s, independent of the UI.
         channelPeak[ch].store(juce::jmax(peak, channelPeak[ch].load() * decay));
     }
 }
@@ -2458,8 +2277,7 @@ void FluidSynthModel::renderWithEffects(float* const* outputs, int numSamples) {
 void FluidSynthModel::renderIntoFifo(int startSample, int numSamples) {
     if (numSamples <= 0)
         return;
-    // fluid_synth_process mixes into its output rather than overwriting it, so
-    // the region has to start clean; it still holds the previous block's audio.
+    // fluid_synth_process mixes in, so clear the region first.
     oversampleFifo.clear(0, startSample, numSamples);
     oversampleFifo.clear(1, startSample, numSamples);
     const int capacity{effectsScratch.getNumSamples()};
@@ -2480,16 +2298,14 @@ void FluidSynthModel::renderThroughOversampler(
     if (outputChannels < 1 || numSamples <= 0)
         return;
 
-    // What the interpolator can consume producing numSamples outputs at ratio
-    // 1/N, plus the one sample it reads ahead of its fractional position.
+    // Input needed for numSamples outputs at 1/N, plus one sample of read-ahead.
     const int required{juce::jmin(oversampleFifo.getNumSamples(),
                                   numSamples / oversampleFactor + 2)};
     const int toRender{juce::jmax(0, required - oversampleFifoFill)};
     const int fifoBase{oversampleFifoFill};
 
-    // Event positions divide by the same factor, so ordering is preserved and
-    // timing quantises to one internal sample - 10 microseconds at 96 kHz, which
-    // is the price of playing at all at a rate the engine cannot render.
+    // Positions divide by N too, so order holds; timing quantises to one internal
+    // sample.
     dispatchTimestampedEvents(
         midiMessages, numSamples, toRender,
         [this, fifoBase](int from, int count) { renderIntoFifo(fifoBase + from, count); },
@@ -2506,11 +2322,8 @@ void FluidSynthModel::renderThroughOversampler(
         outputs[1] = buffer.getWritePointer(1);
     }
 
-    // The interpolator reads ahead of its fractional position, so it can consume
-    // one input past the arithmetic. Produce only what the FIFO actually holds:
-    // a host block larger than the prepared maximum would otherwise read past the
-    // end of the buffer. Such a block ends in silence rather than a bad read, and
-    // the scratch bound applies the same way to the mono downmix.
+    // Produce only what the FIFO holds; an oversized host block ends in silence
+    // rather than a bad read.
     int produce{juce::jmin(numSamples,
                            juce::jmax(0, (oversampleFifoFill - 2) * oversampleFactor))};
     if (downmix)
@@ -2532,8 +2345,7 @@ void FluidSynthModel::renderThroughOversampler(
         buffer.applyGain(0, 0, produce, 0.5f);
     }
 
-    // Keep whatever the interpolator did not consume: it is the head of the next
-    // block, so nothing is rendered twice and no sample is silently dropped.
+    // Carry unconsumed samples to the next block.
     consumed = juce::jlimit(0, oversampleFifoFill, consumed);
     const int remaining{oversampleFifoFill - consumed};
     if (remaining > 0 && consumed > 0)
@@ -2552,17 +2364,15 @@ void FluidSynthModel::processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiM
 
     const int numSamples{buffer.getNumSamples()};
 
-    // Reverb settings first, so a note rendered in this block is heard through
-    // the reverb this block was asked for rather than the previous one's.
+    // Reverb first, so this block's notes hear this block's settings.
     applyReverbFromAudioThread(numSamples);
     applyChorusFromAudioThread(numSamples);
     applyBendRangeChangeFromAudioThread();
     applyVibratoScaleFromAudioThread();
+    applyInterpolationChangeFromAudioThread();
 
-    // MidiBuffer is timestamp ordered. Render the audio before each event, apply all
-    // events at that timestamp in buffer order, then continue. This preserves Bank
-    // Select -> Program Change -> Note ordering and avoids quantising every event to
-    // the start of the host block.
+    // Render up to each event, then apply that timestamp's events. Keeps Bank Select
+    // -> Program Change -> Note order without quantising to the block start.
     if (oversampleFactor <= 1)
         dispatchTimestampedEvents(
             midiMessages, numSamples, numSamples,
@@ -2571,15 +2381,13 @@ void FluidSynthModel::processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiM
     else
         renderThroughOversampler(buffer, midiMessages, numSamples);
 
-    // Master trim, applied once over the whole block after every segment has been
-    // rendered. Smoothed so host automation cannot step the gain mid-block.
+    // Master trim over the whole block, smoothed.
     outputLevelSmoother.setTargetValue(outputLevelGain.load(std::memory_order_relaxed));
     outputLevelSmoother.applyGain(buffer, numSamples);
     float peak{0.0f};
     for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
         peak = juce::jmax(peak, buffer.getMagnitude(ch, 0, numSamples));
-    // Single audio producer and UI exchange consumer: compare/exchange preserves
-    // peaks if the UI reads between the initial load and publication.
+    // Compare/exchange keeps peaks if the UI reads mid-update.
     float old = masterPeak.load();
     while (old < peak && !masterPeak.compare_exchange_weak(old, peak)) {}
     if (peak > 1.0f)

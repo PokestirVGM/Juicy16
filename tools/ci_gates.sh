@@ -28,6 +28,8 @@ cd "$repo_dir"
 prepare_dependencies() {
   if [[ ! -f "$deps_prefix/lib/pkgconfig/fluidsynth.pc" ]] || \
      ! grep -q '^#define FLUIDSYNTH_JUICY16_VIBRATO_SCALE 1$' \
+       "$deps_prefix/include/fluidsynth/synth.h" || \
+     ! grep -q '^#define FLUIDSYNTH_JUICY16_DLS_FULL_PAN 1$' \
        "$deps_prefix/include/fluidsynth/synth.h"; then
     JUICY16_BUILD_JOBS="$build_jobs" tools/build_macos_dependencies.sh "$deps_prefix"
   fi

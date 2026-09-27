@@ -1,104 +1,88 @@
 # Juicy16
 
-### 0.6.1-beta.4 playback and performance improvements
+Juicy16 is a 16-channel DLS and SoundFont player. I made it to play game-rip and
+GBA-style MIDI the way Fruity LSD does: load one `.dls`, `.sf2` or `.sf3` bank,
+send a multichannel MIDI file to one instance, and every channel picks its own
+instrument from the file's Bank Select and Program Change messages. Everything
+mixes to one stereo output.
 
-A native **Windows x64 candidate** is now available locally as a portable ZIP, installer and corresponding-source ZIP. Its strict Release build passes all 17 automated gates, including the Windows VST3 host harness and SF2/SF3/DLS loading. See [Windows release evidence](docs/WINDOWS_RELEASE.md) and [Windows build instructions](building.win32.md). Windows DAW and clean minimum-OS testing remain manual.
+## Download
 
-Development now includes FluidSynth 2.5.7, selectable DAW recovery/Standard MIDI reset behavior, saved expression and bend ranges, independent channel audio trims, MIDI/audio activity and fallback diagnostics, master peak/overload indication, and an optional global chorus with MIDI CC93 routing. The plugin still has one stereo output. See [controller behavior](docs/CONTROLLER_SUPPORT.md) and [state compatibility](docs/COMPATIBILITY.md). These changes await fresh DAW validation; FluidSynth's internal 64-sample synthesis buffering remains a known timing limitation.
+The latest release is [1.0.0-beta.1](https://github.com/PokestirVGM/Juicy16/releases/tag/v1.0.0-beta.1).
 
-Juicy16 is a 16-channel multitimbral DLS/SoundFont player inspired by the automatic patch-selection workflow of Fruity LSD. Load one `.dls`, `.sf2`, or `.sf3` bank, send a multichannel MIDI file to one plugin instance, and its Bank Select and Program Change events select instruments independently on MIDI channels 1–16. All channels mix to one stereo output.
+- **macOS 11+ on Apple Silicon:** AU and VST3. Unzip, double-click
+  `install_macos.command`, then rescan plug-ins in your DAW.
+- **Windows 10+ x64:** VST3. It's being tested now and will be added to the same
+  release page when it's ready. The [native Windows pipeline](building.win32.md)
+  includes portable, installer and source packages; [recorded Windows tests](docs/WINDOWS_RELEASE.md)
+  cover the earlier 0.6.1-beta.4 candidate, with a fresh 1.0 build and DAW tests pending.
 
-The latest prerelease was refreshed on September 12 with the BC2 performance update (36–45% lower processing time in dense-automation benchmarks, with byte-identical audio across 80 comparison scenarios). Download BC2 to update an earlier Beta 4 installation. The release is [0.6.1-beta.4](https://github.com/PokestirVGM/Juicy16/releases/tag/v0.6.1-beta.4): Apple Silicon macOS, AU and VST3, ad-hoc signed. It declares a macOS 11 deployment target; runtime validation was on macOS 26.6.2. This experimental beta ships with the documented leak, timing, CI and host-validation gaps accepted by the owner. It is self-contained: FluidSynth and its codecs are statically linked, so there is nothing to install alongside it. Unpack the archive, double-click `install_macos.command`, and rescan your host. Windows VST3 has a native candidate awaiting owner DAW testing. Read [docs/BETA_TESTER_GUIDE.md](docs/BETA_TESTER_GUIDE.md) before installing; macOS will refuse an ad-hoc signed plugin until you clear quarantine. Known limitations are in [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md), and what comes next is in [ROADMAP.md](ROADMAP.md).
+Nothing else needs installing. The builds are ad-hoc signed, so macOS will block
+them until you clear quarantine; the [beta tester guide](docs/BETA_TESTER_GUIDE.md)
+shows how.
 
-## What is implemented
+## What's new in 1.0.0-beta.1
 
-- Sixteen independent MIDI channels, each with its own bank, preset, volume, pan, mute and solo, all visible and editable at once.
-- Timestamped notes, controllers, Program Changes, pitch bends, pressure, and supported SysEx; events are applied at their sample offsets rather than at the beginning of every audio block.
-- General MIDI percussion default on channel 10 (FluidSynth bank 128), with melodic bank 0 on the other channels.
-- Automatic Program Change handling for game-rip MIDI playback, including later changes during a song.
-- GM, GS, and XG reset detection followed by immediate restoration of the plugin's current per-channel program and exposed controller state.
-- Full CC forwarding to FluidSynth. CC7 (volume) and CC10 (pan) are also mirrored into the selected-channel controls and saved per-channel state.
-- Full unnormalized 14-bit pitch bend and MIDI RPN pitch-bend range handling through FluidSynth.
-- Transactional bank replacement: a failed replacement reports an error and leaves the previous working bank active.
-- Safe temporary repair of a narrow class of malformed DLS RIFF-size fields. The original file is never modified; the exact limits are documented in [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
-- 7th-order FluidSynth interpolation, 512-voice polyphony, and correct host-rate rendering through FluidSynth's 96 kHz ceiling.
+- **Interpolation setting** (Settings → Sound): Linear by default, which is what
+  Fruity LSD uses, plus 7th-order and None. Linear keeps the bright grit of
+  low-rate GBA samples.
+- **Balance (CC8) is ignored**, like LSD. It used to mute one side and fight pan.
+- **Pan works fully on stereo DLS banks.** Banks built from left/right sample
+  pairs used to barely move.
+- **Channel 10 no longer goes silent** after Bank Select on banks whose drum kit
+  isn't flagged as drums.
 
-## Formats and current validation status
+The full list is in the [changelog](CHANGELOG.md).
 
-| Platform | Format | Intended Beta 1 status | Current evidence |
-| --- | --- | --- | --- |
-| macOS | AU | Release format | Builds and passes strict signature/dependency checks and `auval` locally; DAW and minimum-OS matrices remain required |
-| macOS | VST3 | Release format | Automated 16-channel VST3 unit/mapping smoke test passes; Cubase end-to-end retest remains required |
-| Windows | VST3 | Native candidate | MSVC strict Release and automated VST3 host tests pass; owner DAW/minimum-OS checks remain |
-| Desktop | Standalone | Development/QA only | Built for local testing; not a primary release format |
-| Desktop | VST2 | Out of scope | Not configurable or built by the Beta 1 CMake project |
+## Using it
 
-Beta 1 is macOS 11 or later on Apple Silicon (`arm64`), AU and VST3. Windows 10 1607+ on `x86_64` with VST3 is planned for Beta 2. Intel macOS, Windows ARM64, Windows 32-bit, Linux, VST2 and AUv3 are out of scope.
+1. Add one Juicy16 instance.
+2. Load the bank that goes with your MIDI file.
+3. Route MIDI channels 1–16 to it without merging them onto one channel.
+4. Play from the start so the file's setup messages arrive.
 
-Bank formats: **SF2** and **SF3** are supported on every advertised platform; **DLS** passes automated loading on macOS and Windows. Some DLS files written by third-party editors declare RIFF sizes FluidSynth rejects — Juicy16 loads those through a bounded, read-only repair of a temporary copy, never modifying the original. A bank with no playable preset is rejected rather than loaded empty, and a rejected bank never replaces the one already playing.
+Incoming MIDI always wins: a Program Change, CC7 or CC10 replaces whatever you
+picked by hand, at the moment it happens. If a channel sounds wrong in a DAW,
+[troubleshooting](docs/TROUBLESHOOTING.md) covers the usual routing problems.
 
-Sample rates: the automated suite verifies pitch-correct rendering at 44.1, 48, 88.2 and 96 kHz. FluidSynth 2.5.7 accepts 8–96 kHz; above 96 kHz Juicy16 renders at the largest fraction it accepts and interpolates up, and below 8 kHz it fails safely to silence rather than playing at the wrong pitch. Standalone remains a development/QA build only. See the exact [MIDI controller support contract](docs/CONTROLLER_SUPPORT.md).
+## The interface
 
-## Using it with multichannel MIDI
+- **Rack:** one row per MIDI channel with mute, solo, instrument, volume, pan and
+  trim. Every control is a real parameter, so all 16 channels can be automated.
+- **Right panel:** master trim, reverb and chorus, the loaded bank and details
+  for the selected channel.
+- **Keyboard:** plays the selected channel and lights up for incoming notes.
+- **Settings** (click the Juicy16 logo): interpolation, pitch-bend fixes for
+  hosts that mangle bends, CC1 vibrato strength, reset behaviour and accent colour.
 
-1. Insert one Juicy16 instrument instance.
-2. Load the DLS, SF2, or SF3 bank associated with the MIDI file.
-3. Route the original MIDI channels 1–16 to that instance without flattening them to channel 1.
-4. Start playback from the beginning so any reset, Bank Select, and Program Change setup events are delivered.
+Mute and solo belong to the plugin, so nothing in a MIDI file changes them.
 
-Incoming MIDI patch events are authoritative. Manual row selections provide a starting assignment, but a later Program Change on that MIDI channel replaces it at the event's timestamp.
+## Good to know
 
-Host routing is not hard-coded to FL Studio or Cubase. AU hosts can deliver normal channelized MIDI. VST3 hosts may use MIDI mapping or VST3 units/program parameters; Juicy16 implements both. Whether a particular DAW imports and routes a multichannel MIDI file correctly is host configuration and must be verified. See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+- One stereo output; no separate per-channel outputs.
+- Sample rates from 8 to 192 kHz. Above 96 kHz it renders at a lower rate and
+  upsamples.
+- Some DLS files have broken size headers. Juicy16 repairs a temporary copy and
+  never touches your file.
+- I test in FL Studio and Cubase. Other hosts should work but I haven't checked
+  them.
 
-## Interface
+The rest is in [known issues](docs/KNOWN_ISSUES.md) and the [roadmap](ROADMAP.md).
 
-- A 16-row rack, one row per MIDI channel. Each row owns that channel's mute, solo, instrument, volume and pan — all 16 visible and editable at once, with no row to select first.
-- Volume and pan are that row's CC7 and CC10. Incoming MIDI on that channel overrides what you set, exactly as a Program Change overrides a manually picked instrument.
-- Mute and solo are the plugin's own: nothing in a MIDI file changes them, and no reset clears them. A silenced channel drops new notes but still receives everything else, so unmuting mid-song needs no resync. Mute wins over solo — a channel sounds if it is not muted and either nothing is soloed or it is one of the soloed ones — and every silenced row visibly recedes, so you can always see why a channel is quiet.
-- Every row control is a real host parameter, so a host's automation and controller-link menus reach all 16 channels.
-- The right-hand panel holds what is global: the master output trim in decibels, the reverb, and the loaded bank.
-- Reverb: enable, a profile (Universal or Soft), and size, damping, width and level. Bypass removes the reverb rather than turning it down. The MIDI file decides how much of each channel goes in, through CC91, and cannot change your settings — so a rip that never sends CC91 gets no reverb. Before 0.6.0-alpha.1 the reverb was computed and discarded, so old projects will sound different; see [docs/CONTROLLER_SUPPORT.md](docs/CONTROLLER_SUPPORT.md). The trim is not a MIDI controller, so nothing in a MIDI file moves it.
-- The keyboard auditions the selected channel and displays incoming note activity. Selecting a row is only about which channel it plays.
-- The status bar reports the running version and the latest bank-load result. A gear in the header opens settings: accent colour, and the build details worth quoting in a bug report.
-- Everything works without a mouse where the host passes Tab through: arrows on the rack select a channel, Return opens that row's instrument list, arrows on a focused knob change its value, and Space toggles a focused mute or solo. Screen-reader announcements are untested — see [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).
+## More docs
 
-## Building and testing
+- [MIDI and controller behaviour](docs/CONTROLLER_SUPPORT.md)
+- [Project and automation compatibility](docs/COMPATIBILITY.md)
+- [How it works](docs/ARCHITECTURE.md)
+- Building: [macOS](building.macos.md) · [Windows](building.win32.md)
 
-- macOS: [building.macos.md](building.macos.md)
-- VST3/Cubase architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-- Beta state compatibility: [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)
+To run the full test gate on macOS: `tools/ci_gates.sh all`.
 
-The local automated gate is:
+## Privacy and licences
 
-```bash
-cmake --build build --config Debug
-ctest --test-dir build -C Debug --output-on-failure
-```
+Juicy16 doesn't connect to the internet or collect anything ([PRIVACY.txt](PRIVACY.txt)).
+It's GPLv3, built on JUCE 8 (AGPLv3) and FluidSynth (LGPL). See
+[LICENSE.txt](LICENSE.txt), [NOTICE.md](NOTICE.md) and [licensing](docs/LICENSING.md).
 
-`tools/ci_gates.sh all` runs the full gate set — documentation links, a Debug
-build with first-party warnings as errors, sanitized offline harnesses, and the
-strict portable Release build. The GitHub Actions workflows call the same
-script, so a local failure is a CI failure.
-
-It currently covers DLS repair/load, sample-offset rendering, mono/stereo behavior, 16-channel Program Change, reset chase, common CCs, exact pitch-bend values, RPN bend ranges, corrupt selected-channel state, transactional failed bank replacement, and the VST3 multitimbral contract.
-
-## Known limitations and open Beta gates
-
-- One stereo output; no per-channel audio outputs.
-- Common 44.1, 48, 88.2, and 96 kHz rates are covered by the engine suite. Above 96 kHz, Juicy16 renders at a supported internal rate and resamples to the host rate. Exact audio-onset timing remains limited by FluidSynth’s 64-sample synthesis buffering.
-- A complete licensed SF2/SF3/DLS compatibility corpus is not yet present.
-- FL Studio, Cubase, Logic, another AU host, and another VST3 host still require candidate-specific manual validation.
-- Windows DLS loading and system-only DLL imports pass automated checks; clean-machine and DAW behavior still require manual testing.
-- The source-built static dependency closure and Juicy16 artifact declare macOS 11 arm64 and pass local portability checks, but runtime testing on macOS 11 and the current release is still required.
-- Logic/additional-AU-host validation, Developer ID/notarization, and production packaging of the frozen candidate remain open; the local deterministic packaging workflow is implemented and self-validating.
-- AGPL/GPL source packaging and notices require final qualified review before distribution.
-
-## Privacy and licenses
-
-The plugin has no intentional runtime networking or telemetry. See [PRIVACY.txt](PRIVACY.txt).
-
-The inherited application code is GPLv3, while JUCE 8 is used under AGPLv3. Open-source distribution still preserves copyright and requires corresponding source and notices. See [LICENSE.txt](LICENSE.txt), [NOTICE.md](NOTICE.md), [docs/LICENSING.md](docs/LICENSING.md), and [licenses_of_dependencies](licenses_of_dependencies/).
-
-## Project lineage
-
-Juicy16 began from the original Birchlabs JuicySF plugin codebase, which provided the starting SoundFont-engine work. The current multichannel product, MIDI behavior, host integration, state model, testing, and release engineering have developed substantially beyond that base. “Inspired by Fruity LSD” describes the automatic multichannel patch-selection workflow; it is not a claim of exact emulation or affiliation.
+Juicy16 started from Birchlabs' JuicySF plugin. It's inspired by Fruity LSD but
+isn't affiliated with it or an exact emulation.

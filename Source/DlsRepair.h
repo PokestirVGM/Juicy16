@@ -1,15 +1,10 @@
+// Repairs malformed DLS RIFF chunk sizes.
 //
-// Lenient DLS loading: repair of malformed RIFF chunk sizes.
-//
-// FluidSynth's DLS parser is strict about RIFF chunk sizes. Some exporters
-// (notably Awave Studio) write incorrect sizes that make it read a phantom chunk
-// past the real data and bail out with "early EOF" — even though lenient players
-// (Fruity LSD, etc.) load the same file fine. FluidSynth's DLS loader reads the
-// file directly (it does NOT go through the sfloader file callbacks), so we can't
-// fix it in memory; instead FluidSynthModel repairs a copy to a temp file and
-// loads that. This header holds the pure repair routine so the standalone test
-// harness (tools/font_qa.cpp) exercises the exact code the plugin ships.
-//
+// Some exporters (notably Awave Studio) write sizes that make FluidSynth's strict
+// parser read a phantom chunk and fail with "early EOF"; lenient players load the
+// file. The DLS loader bypasses sfloader file callbacks, so FluidSynthModel
+// repairs a temp copy instead. Kept header-only so tools/font_qa.cpp tests the
+// shipped routine.
 
 #pragma once
 
@@ -19,8 +14,7 @@
 
 namespace juicysf {
 
-// Repair a "DLS " RIFF image in place. Returns true if anything was changed
-// (i.e. the buffer was a malformed DLS). No-op for non-DLS or well-formed data.
+// Repairs a "DLS " RIFF image in place. Returns true if anything changed.
 inline bool repairDlsImage(uint8_t* d, size_t n) {
     if (n < 12) return false;
     if (std::memcmp(d, "RIFF", 4) != 0 || std::memcmp(d + 8, "DLS ", 4) != 0) return false;
@@ -36,9 +30,8 @@ inline bool repairDlsImage(uint8_t* d, size_t n) {
 
     bool changed = false;
 
-    // Walk top-level chunks. The first one that runs past EOF is a phantom chunk
-    // created by an undersized preceding chunk (the Awave bug): grow the previous
-    // real chunk so it absorbs the remainder up to EOF.
+    // The first top-level chunk that runs past EOF is a phantom created by an
+    // undersized predecessor: grow that predecessor to EOF.
     size_t pos = 12;
     long long prevSizeOff = -1;
     size_t prevBody = 0;

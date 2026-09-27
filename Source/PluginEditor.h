@@ -1,11 +1,4 @@
-/*
-  ==============================================================================
-
-    The Juicy16 editor: a header strip, the 16-channel rack, the global panel,
-    the audition keyboard, and a status bar.
-
-  ==============================================================================
-*/
+// The editor: header, 16-channel rack, global panel, keyboard and status bar.
 
 #pragma once
 
@@ -20,10 +13,7 @@
 
 using juce::SurjectiveMidiKeyboardComponent;
 
-// The wordmark is the settings button. A separate cog beside the bank field gave
-// the header two icons competing for the same corner, and the logo was inert
-// decoration taking the best position in the window. Making it the control
-// removes an icon and gives the wordmark a job.
+// The wordmark doubles as the settings button.
 class LogoButton final : public juce::Button {
 public:
     LogoButton() : juce::Button{"Settings"} {
@@ -39,8 +29,7 @@ public:
         repaint();
     }
 
-    // The wordmark's natural width at the header's logo height, so the header can
-    // lay out around it without knowing the asset's proportions.
+    // Wordmark width at the header's logo height.
     int logoWidth() const {
         if (!logo.isValid() || logo.getHeight() <= 0)
             return 0;
@@ -57,9 +46,7 @@ private:
                 (getWidth() - width) / 2,
                 (getHeight() - GuiConstants::logoHeight) / 2,
                 width, GuiConstants::logoHeight}.toFloat()};
-            // The wordmark is a fixed asset, so hover and press are carried by
-            // its opacity rather than by a background plate that would box in
-            // the one element in the header that is not in a box.
+            // Hover and press dim the wordmark rather than drawing a plate.
             g.setOpacity(isDown ? 0.6f : (isMouseOver ? 0.85f : 1.0f));
             g.drawImage(logo, area, juce::RectanglePlacement::centred);
             g.setOpacity(1.0f);
@@ -76,8 +63,6 @@ private:
 };
 
 //==============================================================================
-/**
-*/
 class JuicySFAudioProcessorEditor
 : public AudioProcessorEditor
 , private Value::Listener
@@ -100,17 +85,15 @@ public:
 private:
     void valueChanged (Value&) override;
 
-    // keyboard follows the selected channel so you can audition the row you clicked
+    // Keyboard follows the selected channel.
     void valueTreePropertyChanged (ValueTree&, const Identifier&) override;
     inline void valueTreeChildAdded (ValueTree&, ValueTree&) override {}
     inline void valueTreeChildRemoved (ValueTree&, ValueTree&, int) override {}
     inline void valueTreeChildOrderChanged (ValueTree&, int, int) override {}
     inline void valueTreeParentChanged (ValueTree&) override {}
     inline void valueTreeRedirected (ValueTree&) override {}
-    // Focus rings follow keyboard use, not focus alone. A mouse press anywhere in
-    // the editor hides them; any key press brings them back. Registered on every
-    // child, so a click on a knob counts as mouse use rather than only a click on
-    // bare background.
+    // Focus rings show during keyboard use only: any mouse press hides them,
+    // any key press restores them. Registered on every child.
     void mouseDown(const juce::MouseEvent&) override;
     void setFocusRingsVisible(bool visible);
 
@@ -122,17 +105,13 @@ private:
     JuicySFAudioProcessor& audioProcessor;
     AudioProcessorValueTreeState& valueTreeState;
 
-    // Owned by the editor and installed as the default LookAndFeel for its whole
-    // component tree, so a control added later inherits the theme by default.
+    // Default LookAndFeel for the whole editor tree, so new controls inherit it.
     Juicy16::PluginLookAndFeel lookAndFeel;
 
-    // these are used to persist the UI's size - the values are stored along with the
-    // filter's other parameters, and the UI component will update them when it gets
-    // resized.
+    // Persisted UI size.
     Value lastUIWidth, lastUIHeight;
 
-    // The owner's wordmark, decoded from the compiled-in binary resource. It is
-    // handed to logoButton, which both draws it and opens settings.
+    // Decoded wordmark, drawn by logoButton.
     juce::Image logo;
 
     SurjectiveMidiKeyboardComponent midiKeyboard;
@@ -141,11 +120,10 @@ private:
     MixerPanelComponent mixerPanel;
     LogoButton logoButton;
 
-    // status bar: build version plus the latest bank-load result
+    // Build version plus the latest bank-load result.
     juce::Label statusLabel;
 
-    // The editor owns modal content so asynchronous dismissal cannot outlive
-    // the processor, its parameter state, or the editor theme.
+    // Owned here so async dismissal cannot outlive the processor or theme.
     std::unique_ptr<juce::Component> settingsContent;
     std::unique_ptr<juce::CallOutBox> settingsCallout;
 

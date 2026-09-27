@@ -1,0 +1,30 @@
+--- a/include/fluidsynth/synth.h
++++ b/include/fluidsynth/synth.h
+@@ -104,6 +104,8 @@
+ /* Juicy16 extension: CC1-driven pitch LFO depth only, without rewriting MIDI. */
+ #define FLUIDSYNTH_JUICY16_VIBRATO_SCALE 1
+ FLUIDSYNTH_API int fluid_synth_set_cc1_vibrato_scale(fluid_synth_t *synth, int chan, float scale);
++/* Juicy16 extension: CC10 reaches both edges on every DLS region. */
++#define FLUIDSYNTH_JUICY16_DLS_FULL_PAN 1
+ /** @} MIDI Channel Messages */
+ 
+ 
+--- a/src/sfloader/fluid_dls.cpp
++++ b/src/sfloader/fluid_dls.cpp
+@@ -3324,6 +3324,16 @@
+                 fluid_voice_add_mod_local(voice, &mod, FLUID_VOICE_OVERWRITE, existing_mod_count);
+             }
+ 
++            /* Juicy16: CC10 can move every region to either edge. Depth is the
++             * standard 500 plus the region's own static pan, so hard-panned stereo
++             * pairs follow pan fully instead of the bank's own narrower range. */
++            {
++                fluid_mod_t full_pan;
++                fluid_mod_clone(&full_pan, &default_pan_mod);
++                fluid_mod_set_amount(&full_pan, 500.0 + std::abs(art.gens[GEN_PAN].value_or(0)));
++                fluid_voice_add_mod_local(voice, &full_pan, FLUID_VOICE_OVERWRITE, voice->mod_count);
++            }
++
+             // See also https://github.com/FluidSynth/fluidsynth/pull/1626 conversation for "Key Number to Pitch" articulation implementation
+             fluid_voice_gen_set(voice,
+                                 GEN_SCALETUNE,

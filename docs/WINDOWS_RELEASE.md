@@ -5,6 +5,10 @@ candidate prepared with MSVC and the complete static dependency closure.
 It is ready for owner DAW testing; no FL Studio, Cubase, or computer-control
 session was used to validate it.
 
+The evidence below predates the 1.0.0-beta.1 interpolation, balance, DLS pan and
+channel-10 changes. It does not validate the merged 1.0 version: rebuild the
+Windows dependency closure and rerun build, packaging and artifact checks.
+
 ## Automated evidence
 
 The strict Release and Debug builds each pass all 17 CTest gates with first-party warnings

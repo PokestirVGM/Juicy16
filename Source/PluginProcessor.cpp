@@ -1,13 +1,3 @@
-/*
-  ==============================================================================
-
-    This file was auto-generated!
-
-    It contains the basic framework code for a JUCE plugin processor.
-
-  ==============================================================================
-*/
-
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "MidiConstants.h"
@@ -48,12 +38,9 @@ JuicySFAudioProcessor::JuicySFAudioProcessor()
         { "loadedBookmark", std::move(loadedBookmarkBuffer) },
         { "usedDlsRepair", false },
     }, {} }, nullptr);
-    // no properties, no subtrees (yet)
     valueTreeState.state.appendChild({ "banks", {}, {} }, nullptr);
 
-    // one assignment per MIDI channel (0..15): instrument, plus the mixer
-    // controls. Volume and pan default to the GM channel defaults, which are also
-    // FluidSynth's own channel initialisation values.
+    // One node per MIDI channel: instrument plus mixer controls (GM defaults).
     ValueTree channelPrograms{ "channelPrograms" };
     for (int i = 0; i < 16; i++) {
         channelPrograms.appendChild({ "ch", {
@@ -68,9 +55,7 @@ JuicySFAudioProcessor::JuicySFAudioProcessor()
     }
     valueTreeState.state.appendChild(channelPrograms, nullptr);
 
-    // Feed the VST3 unit interface's shared program list from the loaded font:
-    // names come from bank 0 (GM program numbers 0..127); missing slots fall back
-    // to "Program N" inside the extension.
+    // VST3 program list from bank 0; empty slots read "Program N".
     fluidSynthModel.onBanksRefreshed = [this] {
         StringArray names;
         for (int i = 0; i < 128; i++)
@@ -89,13 +74,9 @@ JuicySFAudioProcessor::JuicySFAudioProcessor()
     initialiseSynth();
 }
 
-// AudioParameterInt does not report itself as discrete, so JUCE's VST3 wrapper
-// publishes ParameterInfo.stepCount = 0 for it (juce_audio_plugin_client_VST3.cpp:
-// "if (! param.isDiscrete()) return 0"). Hosts that route MIDI Program Change via
-// the unit/program-list mechanism (Cubase) require the kIsProgramChange parameter
-// to be a discrete stepper with stepCount == programCount - 1 (127) to translate
-// program numbers onto it — with stepCount 0 they treat it as a continuous knob
-// and won't deliver PCs to it at all.
+// AudioParameterInt is not discrete, so JUCE's VST3 wrapper publishes stepCount
+// 0. Cubase only routes Program Change to a kIsProgramChange parameter with
+// stepCount == 127.
 struct DiscreteParameterInt final : public AudioParameterInt {
     using AudioParameterInt::AudioParameterInt;
     bool isDiscrete() const override { return true; }
@@ -111,46 +92,29 @@ AudioProcessorValueTreeState::ParameterLayout JuicySFAudioProcessor::createParam
             juce::AudioParameterIntAttributes{}.withLabel(label));
     };
 
-    // global params: represent the currently-selected channel in the UI
+    // Shared params: the editor's selected channel.
     layout.add(
-        // A font's own banks are 0-127 melodic plus 128 percussion (SF2 2.04
-        // section 7.2), but a channel's runtime bank reaches 255 once FluidSynth
-        // adds its drum offset to the Bank Select MSB. The parameter carries the
-        // channel value, so it has to span the wider range or the UI cannot show
-        // what the engine and the saved state hold.
+        // Spans 0-255: a drum channel's runtime bank is 128 + Bank Select MSB.
         intParam("bank", "which bank is selected in the SoundFont",
                  MidiConstants::midiMinValue, MidiConstants::maxChannelBank,
                  MidiConstants::midiMinValue, "Bank"),
-        // note: banks may be sparse, and lack a 0th preset. so defend against this.
+        // Banks may be sparse and lack preset 0.
         intParam("preset", "which patch (program/instrument) is selected in the SoundFont", MidiConstants::midiMinValue, MidiConstants::midiMaxValue, MidiConstants::midiMinValue, "Preset"));
 
-    // Master output trim. Not a MIDI controller and not per channel: it is the
-    // user's gain-staging control over the whole plugin, applied after rendering.
+    // Master trim over the whole plugin, applied after rendering.
     layout.add(make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{"outputLevel", 1}, "master output level",
         juce::NormalisableRange<float>{GuiConstants::outputLevelMinDb,
                                        GuiConstants::outputLevelMaxDb, 0.1f},
-        // +1.5 dB, not 0. Juicy16 renders about 10.4 dB quieter than VGMTrans
-        // does the same material, and this is the whole of what can be given back
-        // without pushing anything past full scale: measured across the owner's
-        // 24-rip corpus the loudest file peaks at -1.61 dBFS, so 1.5 dB leaves
-        // every one of them at or just under 0. It is a measured ceiling rather
-        // than a round number, and it does NOT close the gap - see
-        // docs/INVESTIGATION_ENVELOPE_DECAY.md for why the rest needs a limiter.
+        // +1.5 dB is the most the owner's 24-rip corpus allows without clipping
+        // (loudest peak -1.61 dBFS). Closing the rest of the gap to VGMTrans needs a
+        // limiter.
         GuiConstants::outputLevelDefaultDb,
         juce::AudioParameterFloatAttributes{}.withLabel("Out")));
 
-    // Reverb. FluidSynth has always been running one - `synth.reverb.active`
-    // defaults to on and Juicy16 never touched it - so until Beta 1 every rip was
-    // played through generic defaults chosen by nobody for this product. These
-    // are a control surface over that existing reverb: no new DSP, no new
-    // dependency, no new licence obligation. Per-channel CC91 sends still reach
-    // the engine at their own timestamps and feed the reverb these controls set.
-    // OFF by default, by owner decision on 2026-08-23. Juicy16's reverb was
-    // never audible before this release, so switching it on by default would
-    // change how every existing project sounds without the user asking. The
-    // controls are there and the GM default send feeds them the moment it is
-    // switched on; the choice to add reverb is the user's to make.
+    // Reverb: controls over FluidSynth's existing reverb. Off by default (owner
+    // decision, 2026-08-23) so existing projects do not change; CC91 sends feed
+    // it once enabled.
     layout.add(make_unique<juce::AudioParameterBool>(
         juce::ParameterID{"reverbOn", 1}, "reverb enabled", false,
         juce::AudioParameterBoolAttributes{}.withLabel("Reverb")));
@@ -167,11 +131,7 @@ AudioProcessorValueTreeState::ParameterLayout JuicySFAudioProcessor::createParam
                 juce::AudioParameterFloatAttributes{}.withLabel(label));
         };
         const auto* universal{&FluidSynthModel::reverbProfiles[0]};
-        // Size, damping and level take FluidSynth's own 0-1 ranges. WIDTH DOES
-        // NOT: FluidSynth accepts 0-100 there, but its own default is 0.8 and
-        // everything musically useful lives below 1, so the full range would put
-        // the entire useful span inside the first one percent of a knob's
-        // travel. Narrowed to 0-1 deliberately; nothing reachable is lost.
+        // Width is narrowed from FluidSynth's 0-100 to 0-1, where all useful values lie.
         layout.add(
             reverbParam("reverbSize", "reverb room size",
                         universal->values[FluidSynthModel::reverbSize], "Size"),
@@ -183,23 +143,10 @@ AudioProcessorValueTreeState::ParameterLayout JuicySFAudioProcessor::createParam
                         universal->values[FluidSynthModel::reverbLevel], "Level"));
     }
 
-    // Per-channel mixer parameters: volume (CC7), pan (CC10), mute, and solo, one
-    // of each for all 16 channels. Real host parameters rather than editor-only
-    // state, so a host can automate any channel and a right-click on a knob
-    // offers the host's own automation and controller-link menu.
-    //
-    // They are deliberately NOT in a parameter group. JUCE derives a VST3
-    // parameter's unitId from its group, and the vendored wrapper serves a FIXED
-    // 17-unit structure (root plus chUnit1..16) that Cubase caches before the
-    // component connection exists. Any group here would publish a parameter
-    // pointing at an 18th unit the host was never told about. Ungrouped, these
-    // land in the root unit beside bank, preset, and outputLevel, and the
-    // structure Cubase's program-change routing depends on is untouched.
-    //
-    // Incoming CC7/CC10 on a channel overwrite that channel's volume/pan exactly
-    // as Program Change overwrites a manual instrument pick: what the knob sets
-    // is a starting point, and the next event on that channel replaces it at the
-    // event's own timestamp.
+    // Per-channel volume (CC7), pan (CC10), mute and solo, automatable per channel.
+    // Deliberately ungrouped: a group would publish an 18th VST3 unit that the
+    // wrapper's fixed 17-unit structure (cached by Cubase) never declared.
+    // Incoming CC7/CC10 overwrite them at the event's timestamp.
     for (int ch = 1; ch <= 16; ++ch)
         layout.add(intParam(
             "volCh" + String(ch), "volume (CC7) for MIDI channel " + String(ch),
@@ -212,9 +159,7 @@ AudioProcessorValueTreeState::ParameterLayout JuicySFAudioProcessor::createParam
             MidiConstants::midiMinValue, MidiConstants::midiMaxValue,
             MidiConstants::centreValue,
             "Ch" + String(ch) + " Pan"));
-    // Mute and solo are the plugin's own, not MIDI controllers: nothing in a MIDI
-    // file changes them, and a silenced channel drops note-ons rather than having
-    // its CC7 forced to zero, so the file's own volume survives being muted.
+    // Mute and solo are plugin-side: they drop note-ons and leave the file's CC7 alone.
     for (int ch = 1; ch <= 16; ++ch)
         layout.add(make_unique<juce::AudioParameterBool>(
             juce::ParameterID{"muteCh" + String(ch), 1},
@@ -228,13 +173,9 @@ AudioProcessorValueTreeState::ParameterLayout JuicySFAudioProcessor::createParam
             juce::AudioParameterBoolAttributes{}.withLabel(
                 "Ch" + String(ch) + " Solo")));
 
-    // Per-channel program parameters ("progCh1".."progCh16"), each in its own
-    // parameter group. Two purposes:
-    //  - hosts can select any channel's instrument via automation in every format;
-    //  - in VST3, JUCE derives each parameter's unitId from its GROUP id
-    //    (hashCode of "chUnit<n>"), which the pinned wrapper IUnitInfo mirrors so hosts
-    //    like Cubase can associate MIDI channel N with unit N (HALion-style
-    //    multitimbral program routing).
+    // progCh1..progCh16, each in group "chUnitN". JUCE derives the VST3 unitId
+    // from the group, which the wrapper's IUnitInfo mirrors so Cubase maps MIDI
+    // channel N to unit N.
     for (int ch = 1; ch <= 16; ++ch) {
         layout.add(make_unique<juce::AudioProcessorParameterGroup>(
             "chUnit" + String(ch),
@@ -248,12 +189,9 @@ AudioProcessorValueTreeState::ParameterLayout JuicySFAudioProcessor::createParam
                 juce::AudioParameterIntAttributes{}.withLabel("Ch" + String(ch) + " Prog"))));
     }
 
-    // Host bend compensation, appended after the Beta 1 manifest so no frozen
-    // index moves. Both are global and both default to off. Override forces one
-    // bend range on every channel, for a host that never delivers the file's
-    // RPN; scale multiplies every incoming bend, for a host that shrank the
-    // bends on import - FL Studio imports every MIDI bend as plus or minus two
-    // semitones whatever the file's RPN said.
+    // Host bend compensation, appended after the frozen manifest; both default off.
+    // The override forces one range for hosts that drop the RPN; the scale undoes
+    // FL Studio's +-2 semitone bend import.
     layout.add(intParam("bendRange", "pitch-bend range override (0 follows the MIDI file)",
                         0, 24, 0, "Bend Rng"));
     layout.add(intParam("bendScale", "pitch-bend scale", 1, 24, 1, "Bend x"));
@@ -290,6 +228,10 @@ AudioProcessorValueTreeState::ParameterLayout JuicySFAudioProcessor::createParam
             juce::ParameterID{"vibratoScaleCh" + String(ch), 4},
             "CC1 vibrato strength for MIDI channel " + String(ch), 1, 24, 1,
             juce::AudioParameterIntAttributes{}.withLabel("x")));
+    // Choice order is frozen (hosts store the index). Linear is the default.
+    layout.add(make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{"interpolation", 5}, "Sample interpolation",
+        juce::StringArray{"7th-order", "Linear", "None"}, 1));
     return layout;
 }
 
@@ -327,20 +269,14 @@ bool JuicySFAudioProcessor::producesMidi() const
 
 double JuicySFAudioProcessor::getTailLengthSeconds() const
 {
-    // A bank can contain sustained/looped voices and arbitrarily long releases.
-    // Do not advertise silence to hosts while an instrument or reverb is ringing.
+    // Looped voices, long releases and reverb can ring indefinitely.
     return std::numeric_limits<double>::infinity();
 }
 
 int JuicySFAudioProcessor::getNumPrograms()
 {
-    // Report exactly one program. If we advertise a program LIST (we used to expose
-    // 128), VST3/AU hosts intercept incoming MIDI Program Change messages and
-    // consume them as host program-list changes (routed to setCurrentProgram) instead
-    // of delivering them as MIDI events to processBlock. That broke the core workflow:
-    // per-channel GM program changes from the DAW never reached the synth, so every
-    // channel stayed on its default patch. With a single program, the host passes
-    // Program Change through as MIDI, where FluidSynthModel applies it per channel.
+    // Exactly one program: with a program list, hosts consume MIDI Program Change
+    // themselves instead of passing it to processBlock.
     return 1;
 }
 
@@ -351,8 +287,7 @@ int JuicySFAudioProcessor::getCurrentProgram()
 
 void JuicySFAudioProcessor::setCurrentProgram(int /*index*/)
 {
-    // no-op: instruments are chosen per MIDI channel (via incoming Program Change
-    // or the per-channel dropdowns), not via a host program list.
+    // Programs are per MIDI channel, not a host program list.
 }
 
 const String JuicySFAudioProcessor::getProgramName(int /*index*/)
@@ -375,26 +310,21 @@ void JuicySFAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBloc
 
 void JuicySFAudioProcessor::releaseResources()
 {
-    // When playback stops, you can use this as an opportunity to free up any
-    // spare memory, etc.
     keyboardState.reset();
 }
 
 bool JuicySFAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
-    // Only mono/stereo and input/output must have same layout
+    // Mono or stereo; input must match output or be disabled.
     const AudioChannelSet& mainOutput = layouts.getMainOutputChannelSet();
     const AudioChannelSet& mainInput  = layouts.getMainInputChannelSet();
 
-    // input and output layout must either be the same or the input must be disabled altogether
     if (! mainInput.isDisabled() && mainInput != mainOutput)
         return false;
 
-    // do not allow disabling the main buses
     if (mainOutput.isDisabled())
         return false;
 
-    // only allow stereo and mono
     return mainOutput.size() <= 2;
 }
 
@@ -406,66 +336,42 @@ AudioProcessor::BusesProperties JuicySFAudioProcessor::getBusesProperties() {
 void JuicySFAudioProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiMessages) {
     jassert (!isUsingDoublePrecision());
 
-    // In case we have more outputs than inputs, this code clears any output
-    // channels that didn't contain input data, (because these aren't
-    // guaranteed to be empty - they may contain garbage).
-    // This is here to avoid people getting screaming feedback
-    // when they first compile a plugin, but obviously you don't need to keep
-    // this code if your algorithm always overwrites all the output channels.
+    // Clear outputs that have no matching input.
     for (int i = getTotalNumInputChannels();
          i < juce::jmin(getTotalNumOutputChannels(), buffer.getNumChannels()); ++i)
         buffer.clear (i, 0, buffer.getNumSamples());
 
-    // Now pass any incoming midi messages to our keyboard state object, and let it
-    // add messages to the buffer if the user is clicking on the on-screen keys
+    // Merge on-screen keyboard notes into the MIDI stream.
     keyboardState.processNextMidiBuffer(midiMessages, 0, buffer.getNumSamples(), true);
     
     fluidSynthModel.processBlock(buffer, midiMessages);
 
-    // and now get our synth to process these midi events and generate its output.
-    // synth.renderNextBlock(buffer, midiMessages, 0, numSamples);
 
-    // (see juce_VST3_Wrapper.cpp for the assertion this would trip otherwise)
-    // we are !JucePlugin_ProducesMidiOutput, so clear remaining MIDI messages from our buffer
+    // No MIDI output (the VST3 wrapper asserts otherwise).
     midiMessages.clear();
 }
 
 //==============================================================================
 bool JuicySFAudioProcessor::hasEditor() const
 {
-    return true; // (change this to false if you choose to not supply an editor)
+    return true;
 }
 
 AudioProcessorEditor* JuicySFAudioProcessor::createEditor()
 {
-    // grab a raw pointer to it for our own use
-    return /*pluginEditor = */new JuicySFAudioProcessorEditor (*this, valueTreeState);
+    return new JuicySFAudioProcessorEditor (*this, valueTreeState);
 }
 
 //==============================================================================
 void JuicySFAudioProcessor::getStateInformation (MemoryBlock& destData)
 {
-    // You should use this method to store your parameters in the memory block.
-    // You could do that either as raw data, or use the XML or ValueTree classes
-    // as intermediaries to make it easy to save and load complex data.
 
-    // Create an outer XML element..
     XmlElement xml{"MYPLUGINSETTINGS"};
-    // v6: the reverb gained a control surface - reverbOn, reverbProfile, and the
-    // four engine parameters. A v5 save has none of them and opens on the
-    // Universal profile, which is a deliberate default rather than an inherited
-    // one; see docs/CONTROLLER_SUPPORT.md.
-    // v5: volume and pan became per-channel parameters (volCh1..panCh16) and mute
-    // and solo were added, so the two selected-channel `volume`/`pan` parameters
-    // are gone and each channelPrograms node carries mute and solo as well.
-    // v4: as v3, but the `bank` parameter spans 0-255 instead of 0-128, so its
-    // normalised value means a different bank number than it did.
-    // v3: per-channel state is bank/preset plus the mixer controls volume and pan.
-    // v1 and v2 stored six CC71-79 sound-controller values instead; those are read
-    // as absent rather than migrated (see setStateInformation).
+    // Schema history: v10 interpolation; v9 vibrato strength; v8 chorus; v7 reset
+    // policy, trims and remembered controllers; v6 reverb; v5 per-channel mixer
+    // parameters; v4 bank spans 0-255; v3 volume/pan replaced CC71-79 (v1-v2).
     xml.setAttribute("stateVersion", currentStateVersion);
 
-    // Store the values of all our parameters, using their param ID as the XML attribute
     XmlElement* params{xml.createNewChildElement("params")};
     for (auto* param : getParameters()) {
          if (auto* p = dynamic_cast<AudioProcessorParameterWithID*> (param)) {
@@ -503,7 +409,7 @@ void JuicySFAudioProcessor::getStateInformation (MemoryBlock& destData)
         }
     }
     {
-        // per-channel instrument + mixer assignments
+        // Per-channel instrument and mixer state.
         ValueTree tree{valueTreeState.state.getChildWithName("channelPrograms")};
         XmlElement* channelProgramsElement{xml.createNewChildElement("channelPrograms")};
         for (int i = 0; i < tree.getNumChildren(); i++) {
@@ -514,8 +420,7 @@ void JuicySFAudioProcessor::getStateInformation (MemoryBlock& destData)
             const bool live = fluidSynthModel.getAppliedChannelProgram(i, liveBank, liveProgram);
             chElement->setAttribute("expression", fluidSynthModel.rememberedExpression(i));
             chElement->setAttribute("bendRange", fluidSynthModel.rememberedBendRange(i));
-            // Driven off the model's own list so the writer and the reader cannot
-            // drift apart when the per-channel schema changes.
+            // One schema list for writer and reader.
             for (const String& p : FluidSynthModel::perChannelParams) {
                 chElement->setAttribute(
                     p, p == "bank" && live ? liveBank
@@ -550,16 +455,12 @@ void JuicySFAudioProcessor::getStateInformation (MemoryBlock& destData)
 
 void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    // You should use this method to restore your parameters from this memory block,
-    // whose contents will have been created by the getStateInformation() call.
-    // This getXmlFromBinary() helper function retrieves our XML from the binary blob..
     shared_ptr<XmlElement> xmlState{getXmlFromBinary(data, sizeInBytes)};
 
     if (xmlState.get() != nullptr) {
 #if JUICYSF_TRACE_STATE
         DEBUG_PRINT(xmlState->toString());
 #endif
-        // make sure that it's actually our type of XML object..
         if (xmlState->hasTagName(valueTreeState.state.getType())) {
             const int stateVersion{xmlState->getIntAttribute("stateVersion", 1)};
             if (stateVersion > currentStateVersion) {
@@ -573,12 +474,8 @@ void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInByt
                     nullptr);
                 return;
             }
-            // v3 replaced the six per-channel sound controllers (CC71-79) with
-            // volume and pan (CC7/CC10). A v1 or v2 save has no volume/pan
-            // attributes at all, so those channels simply keep the GM defaults
-            // this instance was constructed with; the obsolete attributes are
-            // ignored rather than migrated, because there is no meaningful
-            // mapping from an envelope control to a mixer control.
+            // v1/v2 stored CC71-79 values, which have no mixer equivalent; those channels
+            // keep the GM defaults.
             const bool restoreMixer{stateVersion >= 3};
             fluidSynthModel.discardPendingStateUpdates();
             for (int ch = 0; ch < 16; ++ch)
@@ -588,6 +485,9 @@ void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInByt
                 for (int ch = 1; ch <= 16; ++ch)
                     valueTreeState.getParameter("trimCh" + String(ch))->setValueNotifyingHost(2.0f / 3.0f);
             }
+            // Older projects keep the 7th-order sound they were made with.
+            if (stateVersion < 10)
+                valueTreeState.getParameter("interpolation")->setValueNotifyingHost(0.0f);
             if (stateVersion < 9)
                 for (int ch = 1; ch <= 16; ++ch)
                     valueTreeState.getParameter("vibratoScaleCh" + String(ch))->setValueNotifyingHost(0.0f);
@@ -596,8 +496,7 @@ void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInByt
                     auto* control = valueTreeState.getParameter(id);
                     control->setValueNotifyingHost(control->getDefaultValue());
                 }
-            // Restore per-channel assignments BEFORE the soundFont, so that the
-            // font load (triggered below) re-applies them to the synth.
+            // Before the font, so the font load applies them.
             {
                 XmlElement* channelProgramsElement{xmlState->getChildByName("channelPrograms")};
                 if (channelProgramsElement) {
@@ -625,11 +524,8 @@ void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInByt
                     }
                 }
             }
-            // channelPrograms is the only record a pre-v5 save has of per-channel
-            // volume and pan, and it has none at all of mute and solo. Derive the
-            // parameters from it now: the params loop below reads each parameter's
-            // CURRENT value when the attribute is absent, so this becomes the
-            // restored value there rather than being overwritten by a default.
+            // Pre-v5 saves hold volume/pan only in channelPrograms. Derive the parameters
+            // now; the loop below keeps current values for absent attributes.
             fluidSynthModel.syncMixerParamsFromState();
             {
                 ValueTree tree{valueTreeState.state.getChildWithName("uiState")};
@@ -671,11 +567,7 @@ void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInByt
                 for (auto* param : getParameters()) {
                     if (auto* p = dynamic_cast<AudioProcessorParameterWithID*>(param)) {
                         double stored{params->getDoubleAttribute(p->paramID, p->getValue())};
-                        // v4 widened `bank` from 0-128 to 0-255. Parameters are
-                        // stored normalised, so the same 1.0 that meant bank 128
-                        // in a v3 save would restore as 255 here. Rescale through
-                        // the bank number itself rather than the ratio, so the
-                        // restored value is the bank the user actually saved.
+                        // v4 widened `bank` to 0-255; rescale v3's normalised value by bank number.
                         if (stateVersion < 4 && p->paramID == "bank")
                             stored = juce::jlimit(
                                 0.0,
@@ -687,8 +579,7 @@ void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInByt
                     }
                 }
             }
-            // Ensure the global params + UI reflect the restored selected channel,
-            // now that the font has loaded.
+            // Reflect the restored selection now that the font is loaded.
             fluidSynthModel.syncToSelectedChannel();
             if (auto* channels = xmlState->getChildByName("channelPrograms"))
                 for (auto* saved : channels->getChildIterator()) {
@@ -702,7 +593,7 @@ void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInByt
     }
 }
 
-// FluidSynth only supports float in its process function, so that's all we can support.
+// FluidSynth renders float only.
 bool JuicySFAudioProcessor::supportsDoublePrecisionProcessing() const {
     return false;
 }
@@ -712,7 +603,6 @@ FluidSynthModel& JuicySFAudioProcessor::getFluidSynthModel() {
 }
 
 //==============================================================================
-// This creates new instances of the plugin..
 AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
     return new JuicySFAudioProcessor();

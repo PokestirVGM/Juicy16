@@ -4,10 +4,8 @@
 namespace Juicy16 {
 
 namespace {
-// The only place in the plugin allowed to name a colour. Neutral greys, no
-// blue-green cast; every value that carries text was chosen to clear WCAG AA
-// (4.5:1) against every background it can be drawn on, and every value that only
-// draws a shape to clear 3:1.
+// The only place colours are named. Text colours clear WCAG AA (4.5:1) on every
+// background they appear on; shape-only colours clear 3:1.
 const juce::Colour kWindow          {0xff1c1c1c};
 const juce::Colour kHeader          {0xff262626};
 const juce::Colour kPanel           {0xff232323};
@@ -27,13 +25,10 @@ const juce::Colour kKnobTrack       {0xff3d3d3d};
 const juce::Colour kKeyboard        {0xff151515};
 const juce::Colour kMuteActive      {0xffd0705e};
 const juce::Colour kFocusRing       {0xff9a9a9a};
-// A scrim, not a colour: laid over a silenced row's own background.
+// A scrim over a silenced row, not a colour.
 const juce::Colour kRowSilenced     {0xa61c1c1c};
 
-// Twelve accents around the hue wheel. All sit in the same mid-luminance band as
-// the original four, which is what keeps every one of them clear of 3:1 against
-// the window, the header, and a selected row - a saturated or a dark hue would
-// pass on one background and fail on another.
+// Accents share one mid-luminance band so each clears 3:1 on every background.
 const juce::Colour kAccentSage      {0xff8fa47a};
 const juce::Colour kAccentOlive     {0xffa8a05c};
 const juce::Colour kAccentAmber     {0xffd8a24a};
@@ -92,8 +87,7 @@ juce::String accentName(Accent accent) {
     return "sage";
 }
 
-// An unknown name falls back to the default rather than failing: a project saved
-// by a later build that adds an accent still opens.
+// Unknown names fall back to the default so newer projects still open.
 Accent accentFromName(const juce::String& name) {
     for (const auto accent : allAccents())
         if (name == accentName(accent))
@@ -142,8 +136,7 @@ void PluginLookAndFeel::applyTokens() {
     setColour(rowSilencedColourId,        kRowSilenced);
     setColour(keyboardBackgroundColourId, kKeyboard);
 
-    // Stock JUCE ids, so any control the plugin has not styled by hand still
-    // lands in the palette rather than in LookAndFeel_V4's blue-green scheme.
+    // Stock JUCE ids, so unstyled controls still use the palette.
     setColour(juce::ResizableWindow::backgroundColourId, kWindow);
     setColour(juce::DocumentWindow::textColourId,        kTextPrimary);
 
@@ -179,7 +172,7 @@ void PluginLookAndFeel::applyTokens() {
     setColour(juce::TextButton::buttonColourId,          kControl);
     setColour(juce::TextButton::buttonOnColourId,        kAccent);
     setColour(juce::TextButton::textColourOffId,         kTextLabel);
-    // Accent fills are light; the on-state label has to darken to stay legible.
+    // Accent fills are light; the on-state label darkens.
     setColour(juce::TextButton::textColourOnId,          kWindow);
 
     setColour(juce::Slider::backgroundColourId,          kKnobTrack);
@@ -206,10 +199,7 @@ void PluginLookAndFeel::applyTokens() {
     setColour(juce::TooltipWindow::textColourId,         kTextPrimary);
     setColour(juce::TooltipWindow::outlineColourId,      kBorder);
 
-    // LookAndFeel_V4::initialiseColours does NOT cover every ColourId a JUCE
-    // control can ask for, and findColour asserts and returns black for one it
-    // has never been given. These are the ids this editor's controls reach for
-    // that the V4 scheme leaves unset.
+    // Ids LookAndFeel_V4 leaves unset; findColour would assert and return black.
     setColour(juce::DrawableButton::backgroundColourId,   juce::Colours::transparentBlack);
     setColour(juce::DrawableButton::backgroundOnColourId, kAccent.withAlpha(0.25f));
     setColour(juce::DrawableButton::textColourId,         kTextLabel);
@@ -245,8 +235,7 @@ void PluginLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int wi
     const float radius{(diameter - thickness) * 0.5f};
     const float angle{rotaryStartAngle
         + sliderPosProportional * (rotaryEndAngle - rotaryStartAngle)};
-    // Bipolar controls (pan) fill outward from twelve o'clock rather than from
-    // the left stop, so "centred" reads as no fill at all.
+    // Bipolar controls (pan) fill from twelve o'clock.
     const bool bipolar{static_cast<bool>(slider.getProperties().getWithDefault("bipolar", false))};
     const float originAngle{bipolar
         ? (rotaryStartAngle + rotaryEndAngle) * 0.5f
@@ -270,7 +259,7 @@ void PluginLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int wi
                                                 juce::PathStrokeType::rounded});
     }
 
-    // Pointer. Kept inside the arc so a small knob stays readable at row height.
+    // Pointer, kept inside the arc for small knobs.
     juce::Path pointer;
     const float pointerLength{radius * 0.72f};
     const float pointerThickness{juce::jmax(1.5f, thickness * 0.62f)};
@@ -305,10 +294,7 @@ juce::Label* PluginLookAndFeel::createSliderTextBox(juce::Slider& slider) {
     auto* label{LookAndFeel_V4::createSliderTextBox(slider)};
     label->setFont(juce::Font{juce::FontOptions{GuiConstants::valueFontHeight}});
     label->setJustificationType(juce::Justification::centred);
-    // A value readout is text beside a knob, not a boxed field. LookAndFeel_V2
-    // gives the label a border and fill from the slider's textBox colours; the
-    // palette has no chrome for it, so clear them here rather than leaving a
-    // stray outline that came from no token.
+    // Readouts are plain text: clear the border and fill V2 gives the label.
     label->setColour(juce::Label::outlineColourId, juce::Colours::transparentBlack);
     label->setColour(juce::Label::backgroundColourId, juce::Colours::transparentBlack);
     label->setColour(juce::Label::textColourId,
@@ -328,8 +314,7 @@ void PluginLookAndFeel::drawComboBox(juce::Graphics& g, int width, int height,
         : box.findColour(juce::ComboBox::outlineColourId));
     g.drawRoundedRectangle(bounds.reduced(0.5f), GuiConstants::cornerRadius, 1.0f);
 
-    // Chevron, matching the approved mockup: three-quarter-width strokes rather
-    // than JUCE's filled triangle.
+    // Stroked chevron.
     const float size{6.0f};
     const float cx{static_cast<float>(width) - GuiConstants::innerPadding - size * 0.5f};
     const float cy{static_cast<float>(height) * 0.5f};
@@ -386,8 +371,7 @@ void PluginLookAndFeel::drawToggleButton(juce::Graphics& g,
                                          bool shouldDrawButtonAsHighlighted,
                                          bool /*shouldDrawButtonAsDown*/) {
     const auto area{button.getLocalBounds().toFloat()};
-    // The switch keeps the mockup's 26x14 proportions whatever room it is given,
-    // and any label text sits to its left.
+    // Fixed 26x14 switch proportions; label text sits to the left.
     const float height{juce::jmin(area.getHeight(), 16.0f)};
     const float width{height * 26.0f / 14.0f};
     const auto track{juce::Rectangle<float>{width, height}
@@ -452,10 +436,7 @@ void PluginLookAndFeel::drawTableHeaderColumn(juce::Graphics& g,
         return;
     g.setColour(header.findColour(juce::TableHeaderComponent::textColourId));
     g.setFont(juce::Font{juce::FontOptions{GuiConstants::labelFontHeight}});
-    // A header sits over its column's own content: the channel number is right
-    // aligned, the knob columns are centred, everything else reads left to
-    // right. The column carries the alignment as a component property so this
-    // stays a drawing decision and the rack stays the one that knows its shape.
+    // Alignment comes from the rack's "headerJustification<column>" property.
     const auto stored{header.getProperties().getWithDefault(
         "headerJustification" + columnName, {})};
     const auto justification{stored.isVoid()

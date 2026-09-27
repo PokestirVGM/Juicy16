@@ -220,6 +220,7 @@ std::vector<juce::String> beta1ParameterIds()
     ids.insert(ids.end(), {"chorusOn", "chorusVoices", "chorusLevel",
                            "chorusRate", "chorusDepth", "chorusWaveform"});
     for (int ch = 1; ch <= 16; ++ch) ids.push_back("vibratoScaleCh" + juce::String(ch));
+    ids.push_back("interpolation");
     return ids;
 }
 
@@ -836,7 +837,7 @@ int main(int argc, char** argv)
                 dynamic_cast<juce::AudioProcessorParameterWithID*>(parameters[static_cast<int>(i)])};
             parameterContract = identified != nullptr
                 && identified->paramID == expectedParameterIds[i]
-                && identified->getVersionHint() == (i < 91 ? 1 : i < 108 ? 2 : i < 114 ? 3 : 4);
+                && identified->getVersionHint() == (i < 91 ? 1 : i < 108 ? 2 : i < 114 ? 3 : i < 130 ? 4 : 5);
             if (!parameterContract)
                 std::printf("    parameter %d expected %s got %s\n",
                             static_cast<int>(i),
@@ -3051,6 +3052,160 @@ int main(int argc, char** argv)
               "one renders as the same note does with no reset at all");
     }
     {
+        // The interpolation choice reaches the engine, and a reset SysEx keeps
+        // it (fluid_channel_init restores 4th-order on every channel).
+        JuicySFAudioProcessor choiceProcessor;
+        choiceProcessor.prepareToPlay(48000.0, blockSize);
+        const auto choiceState{makeState(argv[1])};
+        choiceProcessor.setStateInformation(
+            choiceState.getData(), static_cast<int>(choiceState.getSize()));
+        juce::RangedAudioParameter* interpolation{nullptr};
+        for (auto* parameter : choiceProcessor.getParameters())
+            if (auto* identified{dynamic_cast<juce::AudioProcessorParameterWithID*>(parameter)};
+                identified != nullptr && identified->paramID == "interpolation")
+                interpolation = dynamic_cast<juce::RangedAudioParameter*>(parameter);
+        constexpr int choiceBlocks{6};
+        constexpr int choiceFrames{blockSize * choiceBlocks};
+        const auto renderChoice{[&](int choice, bool resetFirst) {
+            interpolation->setValueNotifyingHost(interpolation->convertTo0to1(
+                static_cast<float>(choice)));
+            juce::AudioBuffer<float> flush{2, blockSize};
+            juce::MidiBuffer off;
+            addAllSoundOff(off);
+            render(choiceProcessor, flush, off);
+            juce::MidiBuffer none;
+            for (int i = 0; i < 8; ++i)
+                render(choiceProcessor, flush, none);
+            juce::MidiBuffer start;
+            if (resetFirst) {
+                const juce::uint8 gmReset[]{0x7E, 0x7F, 0x09, 0x01};
+                start.addEvent(
+                    juce::MidiMessage::createSysExMessage(gmReset, sizeof(gmReset)), 0);
+            }
+            for (const int note : {61, 67})
+                start.addEvent(
+                    juce::MidiMessage::noteOn(1, note, static_cast<juce::uint8>(110)), 1);
+            juce::AudioBuffer<float> captured{2, choiceFrames};
+            juce::AudioBuffer<float> slice{2, blockSize};
+            for (int block = 0; block < choiceBlocks; ++block) {
+                juce::MidiBuffer midi;
+                if (block == 0)
+                    midi = start;
+                render(choiceProcessor, slice, midi);
+                for (int ch = 0; ch < 2; ++ch)
+                    captured.copyFrom(ch, block * blockSize, slice, ch, 0, blockSize);
+            }
+            return captured;
+        }};
+        const auto choiceDifferenceDb{[&](const juce::AudioBuffer<float>& x,
+                                          const juce::AudioBuffer<float>& y) {
+            double signal{0.0}, difference{0.0};
+            for (int ch = 0; ch < 2; ++ch)
+                for (int i = 0; i < choiceFrames; ++i) {
+                    const double a{x.getSample(ch, i)}, b{y.getSample(ch, i)};
+                    signal += a * a;
+                    difference += (a - b) * (a - b);
+                }
+            return 10.0 * std::log10((difference + 1.0e-30) / (signal + 1.0e-30));
+        }};
+        if (interpolation == nullptr) {
+            check(false, "the interpolation parameter exists");
+        } else {
+            const auto seventh{renderChoice(0, false)};
+            const auto seventhRepeat{renderChoice(0, false)};
+            const auto linear{renderChoice(1, false)};
+            const auto linearAfterReset{renderChoice(1, true)};
+            const auto noInterpolation{renderChoice(2, false)};
+            const auto noneAfterReset{renderChoice(2, true)};
+            const double controlDb{choiceDifferenceDb(seventh, seventhRepeat)};
+            check(magnitude(linear, 0, choiceFrames) > audiblePresence
+                      && choiceDifferenceDb(seventh, linear) > controlDb + 6.0
+                      && choiceDifferenceDb(linear, noInterpolation) > controlDb + 6.0
+                      && choiceDifferenceDb(seventh, noInterpolation) > controlDb + 6.0,
+                  "each interpolation choice renders differently from the others");
+            check(choiceDifferenceDb(linear, linearAfterReset) <= controlDb + 1.0
+                      && choiceDifferenceDb(noInterpolation, noneAfterReset) <= controlDb + 1.0,
+                  "a reset SysEx keeps the chosen interpolation");
+            juce::MemoryBlock saved;
+            choiceProcessor.getStateInformation(saved);
+            JuicySFAudioProcessor recalled;
+            recalled.prepareToPlay(48000.0, blockSize);
+            recalled.setStateInformation(saved.getData(), static_cast<int>(saved.getSize()));
+            float recalledChoice{-1.0f};
+            for (auto* parameter : recalled.getParameters())
+                if (auto* identified{dynamic_cast<juce::RangedAudioParameter*>(parameter)};
+                    identified != nullptr && identified->paramID == "interpolation")
+                    recalledChoice = identified->convertFrom0to1(identified->getValue());
+            // A pre-schema-10 save into the same (used) instance returns to 7th-order.
+            const auto legacy{makeState(argv[1])};
+            recalled.setStateInformation(legacy.getData(), static_cast<int>(legacy.getSize()));
+            float legacyChoice{-1.0f};
+            for (auto* parameter : recalled.getParameters())
+                if (auto* identified{dynamic_cast<juce::RangedAudioParameter*>(parameter)};
+                    identified != nullptr && identified->paramID == "interpolation")
+                    legacyChoice = identified->convertFrom0to1(identified->getValue());
+            check(std::abs(recalledChoice - 2.0f) < 0.01f && std::abs(legacyChoice) < 0.01f,
+                  "the interpolation choice survives save/recall and an older save restores 7th-order");
+            JuicySFAudioProcessor fresh;
+            float freshChoice{-1.0f};
+            for (auto* parameter : fresh.getParameters())
+                if (auto* identified{dynamic_cast<juce::RangedAudioParameter*>(parameter)};
+                    identified != nullptr && identified->paramID == "interpolation")
+                    freshChoice = identified->convertFrom0to1(identified->getValue());
+            check(std::abs(freshChoice - 1.0f) < 0.01f, "a new instance defaults to linear interpolation");
+        }
+    }
+    {
+        // Balance (CC8/CC40) is ignored, as in Fruity LSD: FluidSynth's own
+        // balance muted the far side by 96 dB and outlived CC121.
+        JuicySFAudioProcessor balanceProcessor;
+        balanceProcessor.prepareToPlay(48000.0, blockSize);
+        const auto balanceState{makeState(argv[1])};
+        balanceProcessor.setStateInformation(
+            balanceState.getData(), static_cast<int>(balanceState.getSize()));
+        const auto sideLevels{[&](int balance, int pan) {
+            juce::AudioBuffer<float> sideAudio{2, blockSize};
+            juce::MidiBuffer off;
+            addAllSoundOff(off);
+            render(balanceProcessor, sideAudio, off);
+            juce::MidiBuffer none;
+            for (int i = 0; i < 8; ++i)
+                render(balanceProcessor, sideAudio, none);
+            juce::MidiBuffer start;
+            if (balance >= 0) {
+                start.addEvent(juce::MidiMessage::controllerEvent(1, 8, balance), 0);
+                start.addEvent(juce::MidiMessage::controllerEvent(1, 40, 0), 0);
+            }
+            start.addEvent(juce::MidiMessage::controllerEvent(1, 10, pan), 0);
+            start.addEvent(juce::MidiMessage::noteOn(1, 60, static_cast<juce::uint8>(110)), 1);
+            std::array<double, 2> level{};
+            for (int block = 0; block < 6; ++block) {
+                juce::MidiBuffer midi;
+                if (block == 0)
+                    midi = start;
+                render(balanceProcessor, sideAudio, midi);
+                for (int ch = 0; ch < 2; ++ch)
+                    for (int i = 0; i < blockSize; ++i)
+                        level[static_cast<std::size_t>(ch)] += std::abs(sideAudio.getSample(ch, i));
+            }
+            return level;
+        }};
+        const auto neutral{sideLevels(-1, 64)};
+        const auto hardLeftBalance{sideLevels(0, 64)};
+        const auto hardRightBalance{sideLevels(127, 64)};
+        const auto pannedLeft{sideLevels(0, 0)};
+        const auto near{[](double x, double y) { return std::abs(x - y) <= 0.02 * std::max(x, y); }};
+        int traced{-1}, tracedSample{-1};
+        check(neutral[0] > audiblePresence && neutral[1] > audiblePresence
+                  && near(neutral[0], hardLeftBalance[0]) && near(neutral[1], hardLeftBalance[1])
+                  && near(neutral[0], hardRightBalance[0]) && near(neutral[1], hardRightBalance[1])
+                  && balanceProcessor.getFluidSynthModel().getLastDispatchedController(
+                         0, 8, traced, tracedSample) && traced == 0,
+              "CC8 balance is received but changes neither side of the output");
+        check(pannedLeft[0] > pannedLeft[1] * 1.5,
+              "CC10 still pans after a CC8 on the same channel");
+    }
+    {
         // The master trim parameter defaults to +1.5 dB, but parameterChanged
         // fires only on a *change*, so nothing ever applied that default: a
         // fresh instance rendered at unity while the knob read +1.5 dB, and the
@@ -3694,7 +3849,7 @@ int main(int argc, char** argv)
                     allChannelProperties = allChannelProperties
                         && ch->hasAttribute(property);
         check(xml != nullptr && xml->hasTagName("MYPLUGINSETTINGS")
-                  && xml->getIntAttribute("stateVersion", -1) == 9
+                  && xml->getIntAttribute("stateVersion", -1) == 10
                   && allParams && allChannelProperties
                   && font != nullptr && font->hasAttribute("path")
                   && font->hasAttribute("bookmark"),
@@ -3927,7 +4082,7 @@ int main(int argc, char** argv)
         const auto* rewrittenParams{
             rewrittenXml != nullptr ? rewrittenXml->getChildByName("params") : nullptr};
         check(rewrittenXml != nullptr
-                  && rewrittenXml->getIntAttribute("stateVersion", -1) == 9
+                  && rewrittenXml->getIntAttribute("stateVersion", -1) == 10
                   && rewrittenParams != nullptr
                   && !rewrittenParams->hasAttribute("volume")
                   && !rewrittenParams->hasAttribute("pan")
@@ -3972,7 +4127,7 @@ int main(int argc, char** argv)
 
         // A save from a FUTURE schema is still refused rather than half-applied.
         juce::XmlElement future{"MYPLUGINSETTINGS"};
-        future.setAttribute("stateVersion", 10);
+        future.setAttribute("stateVersion", 11);
         juce::MemoryBlock futureState;
         juce::AudioProcessor::copyXmlToBinary(future, futureState);
         migrated.setStateInformation(

@@ -1479,9 +1479,9 @@ int main (int argc, char** argv) {
         CHECK(view != nullptr, "controller offers an editor view");
         if (view != nullptr) {
 #if defined(_WIN32)
-            constexpr auto platformType = kPlatformTypeHWND;
+            const auto platformType = kPlatformTypeHWND;
 #else
-            constexpr auto platformType = kPlatformTypeNSView;
+            const auto platformType = kPlatformTypeNSView;
 #endif
             CHECK(view->isPlatformTypeSupported(platformType) == kResultTrue,
                   "the editor view supports the host platform type");

@@ -95,7 +95,7 @@ COPYFILE_DISABLE=1 cp -R "$au_source" "$staging_dir/AU/"
 COPYFILE_DISABLE=1 cp -R "$vst3_source" "$staging_dir/VST3/"
 cp "$repo_dir/LICENSE.txt" "$repo_dir/NOTICE.md" "$repo_dir/README.md" \
    "$repo_dir/CHANGELOG.md" "$repo_dir/PRIVACY.txt" "$repo_dir/ROADMAP.md" \
-   "$repo_dir/building.macos.md" "$staging_dir/"
+   "$repo_dir/building.macos.md" "$repo_dir/building.win32.md" "$staging_dir/"
 # The installer, which must stay executable so a tester can double-click it.
 # SHA256SUMS is generated below and therefore covers it, and the installer
 # checks SHA256SUMS before copying anything.
@@ -107,12 +107,17 @@ chmod +x "$staging_dir/install_macos.command"
 # package at all.
 for document in ARCHITECTURE.md BETA_TESTER_GUIDE.md COMPATIBILITY.md \
                 CONTROLLER_SUPPORT.md DEPENDENCIES.md KNOWN_ISSUES.md \
-                LICENSING.md TROUBLESHOOTING.md; do
+                LICENSING.md TROUBLESHOOTING.md WINDOWS_RELEASE.md; do
   cp "$repo_dir/docs/$document" "$staging_dir/docs/"
 done
+mkdir -p "$staging_dir/vendor/juce_patched"
+cp "$repo_dir/vendor/juce_patched/README.md" \
+   "$repo_dir/vendor/juce_patched/juce-8.0.14-vst3-multitimbral.patch" \
+   "$staging_dir/vendor/juce_patched/"
 mkdir -p "$staging_dir/vendor/fluidsynth_patched"
 cp "$repo_dir/vendor/fluidsynth_patched/README.md" \
    "$repo_dir/vendor/fluidsynth_patched/cc1-vibrato-scale.patch" \
+   "$repo_dir/vendor/fluidsynth_patched/dls-full-range-pan.patch" \
    "$repo_dir/vendor/fluidsynth_patched/apply.cmake" \
    "$staging_dir/vendor/fluidsynth_patched/"
 for notice in JUCE-framework_AGPL3.txt JUCE-AudioUnitSDK.txt JUCE-HarfBuzz.txt \

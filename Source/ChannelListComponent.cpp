@@ -1,7 +1,4 @@
-//
-// The 16-channel rack: one row per MIDI channel, each owning that channel's
-// mute, solo, instrument, volume and pan.
-//
+// The 16-channel rack.
 
 #include "ChannelListComponent.h"
 #include "Theme.h"
@@ -9,21 +6,19 @@
 using namespace std;
 
 namespace {
-// Names read by screen readers and shown as tooltips. Built per row rather than
-// stored, because a cell component is recycled across rows as the table scrolls.
+// Accessible names and tooltips, built per row because cells are recycled.
 String channelPrefix(int row) {
     return String{"MIDI channel "} + String(row + 1);
 }
 } // namespace
 
 //==============================================================================
-// PatchCell: a ComboBox bound to one MIDI channel (table row).
+// PatchCell: instrument dropdown for one channel.
 //==============================================================================
 ChannelListComponent::PatchCell::PatchCell(ChannelListComponent& ownerRef)
 : owner{ownerRef}
 {
     addAndMakeVisible(combo);
-    // user picked a patch for this channel
     combo.onChange = [this] {
         owner.applyComboSelection(row, combo.getSelectedId());
     };
@@ -38,7 +33,7 @@ void ChannelListComponent::PatchCell::setRow(int newRow) {
     combo.setHelpText(
         "Choose the starting instrument. Incoming Bank Select and Program Change may replace it.");
 
-    // (re)populate items only when the loaded font's patch list changed
+    // Repopulate only when the font's patch list changed.
     if (cellListVersion != owner.patchListVersion) {
         combo.clear(juce::dontSendNotification);
         for (size_t i = 0; i < owner.patches.size(); ++i)
@@ -46,8 +41,7 @@ void ChannelListComponent::PatchCell::setRow(int newRow) {
         cellListVersion = owner.patchListVersion;
     }
 
-    // reflect this channel's current program (driven either by a manual pick or
-    // by an incoming MIDI program change). dontSendNotification so we don't loop.
+    // Show the channel's current program without notifying (avoids a loop).
     ValueTree chNode{owner.valueTreeState.state.getChildWithName("channelPrograms")
         .getChildWithProperty("num", row)};
     int id{0};
@@ -60,7 +54,7 @@ void ChannelListComponent::PatchCell::setRow(int newRow) {
     if (id != 0)
         combo.setSelectedId(id, juce::dontSendNotification);
     else if (chNode.isValid())
-        // saved patch isn't present in the loaded font: show a bank/preset placeholder
+        // Saved patch is missing from the loaded font.
         combo.setText("Missing " + String(static_cast<int>(chNode.getProperty("bank", 0))) + ":"
                       + String(static_cast<int>(chNode.getProperty("preset", 0))),
                       juce::dontSendNotification);
@@ -69,16 +63,12 @@ void ChannelListComponent::PatchCell::setRow(int newRow) {
 }
 
 void ChannelListComponent::PatchCell::resized() {
-    // Half the group gap on each side. Every row cell insets itself the same
-    // way, so two adjacent cells produce a full groupGap between their contents
-    // without any cell needing to know what sits beside it. Without it the
-    // instrument dropdown butted straight against the solo button - 0px on one
-    // side of the mute/solo pair and 8px on the other.
+    // Half a group gap per side, so adjacent cells get a full gap between them.
     combo.setBounds(getLocalBounds().reduced(GuiConstants::groupGap / 2, 2));
 }
 
 //==============================================================================
-// MuteSoloCell: this channel's mute and solo, bound to muteChN and soloChN.
+// MuteSoloCell: bound to muteChN and soloChN.
 //==============================================================================
 ChannelListComponent::MuteSoloCell::MuteSoloCell(ChannelListComponent& ownerRef)
 : owner{ownerRef}
@@ -92,10 +82,8 @@ ChannelListComponent::MuteSoloCell::MuteSoloCell(ChannelListComponent& ownerRef)
 }
 
 void ChannelListComponent::MuteSoloCell::lookAndFeelChanged() {
-    // A lit mute and a lit solo must never be told apart by position alone, so
-    // they get different hues: solo takes the accent, mute keeps its own warm
-    // red in every accent. Both carry a dark label, which is legible on either
-    // fill - a near-white fill with a dark letter read as a blank white box.
+    // Solo takes the accent, mute keeps its own red, so they differ by hue; both
+    // use a dark label.
     auto& theme{getLookAndFeel()};
         if (!theme.isColourSpecified(Juicy16::textPrimaryColourId)) return;
     solo.setColour(juce::TextButton::buttonOnColourId,
@@ -106,7 +94,7 @@ void ChannelListComponent::MuteSoloCell::lookAndFeelChanged() {
 
 void ChannelListComponent::MuteSoloCell::setRow(int newRow) {
     if (row == newRow)
-        return; // recycled onto the same channel: the attachments already fit
+        return; // same channel: attachments still fit
     row = newRow;
 
     const String prefix{channelPrefix(row)};
@@ -123,7 +111,7 @@ void ChannelListComponent::MuteSoloCell::setRow(int newRow) {
         "While any channel is soloed, every channel that is not soloed is silenced.");
     solo.setTooltip(solo.getHelpText());
 
-    // Rebuild rather than retarget: an attachment binds one parameter for life.
+    // Rebuild: an attachment binds one parameter for life.
     muteAttachment.reset();
     soloAttachment.reset();
     muteAttachment = make_unique<AudioProcessorValueTreeState::ButtonAttachment>(
@@ -141,23 +129,20 @@ void ChannelListComponent::MuteSoloCell::resized() {
 }
 
 //==============================================================================
-// MixerCell: one channel's volume or pan knob, bound to volChN / panChN.
+// MixerCell: volume or pan knob, bound to volChN / panChN.
 //==============================================================================
 ChannelListComponent::MixerCell::MixerCell(ChannelListComponent& ownerRef, int column)
 : owner{ownerRef}
 , columnId{column}
 {
     knob.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-    // The value box is the readout in the approved layout; editable, so a value
-    // can be typed rather than only dragged.
+    // Editable readout, so values can be typed.
     knob.setTextBoxStyle(juce::Slider::TextBoxRight, false,
                          GuiConstants::rowValueWidth, GuiConstants::rowKnobSize);
     knob.setRange(MidiConstants::midiMinValue, MidiConstants::midiMaxValue, 1);
-    // Pan is bipolar: the accent arc grows outward from centre, so "centred"
-    // reads as no fill. See Juicy16::LookAndFeel::drawRotarySlider.
+    // Pan is bipolar: the arc grows from centre.
     knob.getProperties().set("bipolar", columnId == panColumn);
-    // JUCE sliders decline keyboard focus by default, which would leave the
-    // rack mouse-only. A focused slider handles arrow keys.
+    // Sliders refuse focus by default; this enables arrow keys.
     knob.setWantsKeyboardFocus(true);
     addAndMakeVisible(knob);
 }
@@ -222,27 +207,20 @@ ChannelListComponent::ChannelListComponent(
         "Up and down arrows select a MIDI channel; Return opens that channel's instrument list.");
 
     table.setOutlineThickness(0);
-    // GuiConstants::defaultHeight is derived from these two, so a change here
-    // moves the default window height with it.
+    // GuiConstants::defaultHeight derives from these.
     table.setRowHeight(GuiConstants::channelRowHeight);
     table.setHeaderHeight(GuiConstants::channelHeaderHeight);
 
     const auto addColumn = [this](const String& name, int id, int width, bool fixed,
                                   Justification justification) {
-        // A fixed column is visible and nothing else. `notSortable` still leaves
-        // JUCE's resizable and draggable flags set, so every boundary offered a
-        // resize cursor and every header could be dragged into a new order - on
-        // columns whose min and max width are the same value, so neither did
-        // anything. Only Instrument, the column that actually stretches, is
-        // resizable.
+        // Fixed columns are neither resizable nor draggable; only Instrument stretches.
         table.getHeader().addColumn(
             name, id, width,
             fixed ? width : GuiConstants::minInstrumentWidth,
             fixed ? width : -1,
             fixed ? TableHeaderComponent::visible
                   : (TableHeaderComponent::visible | TableHeaderComponent::resizable));
-        // Each header aligns over its own column's content; the LookAndFeel draws
-        // it, so the rack states the alignment rather than the theme guessing.
+        // The rack states each header's alignment; the LookAndFeel draws it.
         if (name.isNotEmpty())
             table.getHeader().getProperties().set(
                 "headerJustification" + name, justification.getFlags());
@@ -261,15 +239,12 @@ ChannelListComponent::ChannelListComponent(
     addColumn("Trim dB", trimColumn, GuiConstants::mixerCellWidth, true, Justification::centred);
     addColumn("Signal", activityColumn, GuiConstants::activityWidth, true, Justification::centred);
     startTimerHz(20);
-    // Keyboard-reachable: arrow keys move the selection, Return opens the
-    // selected row's instrument list. Nothing drives row selection from MIDI, so
-    // there is no selection for the keyboard to fight.
+    // Arrow keys move the selection; Return opens the instrument list.
     table.setWantsKeyboardFocus(true);
     table.setMultipleSelectionEnabled(false);
 
     valueTreeState.state.addListener(this);
-    // Open on whichever channel the restored state was editing, so the first
-    // arrow key moves from there rather than from row 0.
+    // Start on the restored state's selected channel.
     syncTableSelectionFromState();
 }
 
@@ -322,14 +297,12 @@ void ChannelListComponent::paintRowBackground(
     else if (rowNumber % 2)
         g.fillAll(theme.findColour(Juicy16::rowAlternateColourId));
     if (selected) {
-        // A 2px accent marker rather than a wash of colour, so the row text keeps
-        // its contrast and the selection reads at a glance.
+        // A 2px accent marker keeps row text contrast.
         g.setColour(theme.findColour(Juicy16::accentColourId));
         g.fillRect(0, 0, 2, height);
     }
     if (isRowSilenced(rowNumber)) {
-        // Whether this channel muted itself or another channel soloed, the row
-        // reads as not sounding. Soloing one channel visibly quiets fifteen.
+        // Muted or solo-silenced rows read as not sounding.
         g.setColour(theme.findColour(Juicy16::rowSilencedColourId));
         g.fillRect(0, 0, width, height);
     }
@@ -346,8 +319,7 @@ void ChannelListComponent::refreshSilencedRows() {
     lastSilencedMask = mask;
     for (int row = 0; row < numChannels; ++row) {
         const float alpha{(mask & (1u << row)) != 0 ? 0.45f : 1.0f};
-        // Mute and solo stay at full strength: they are how the user gets the
-        // channel back, so they must not recede with the rest of the row.
+        // Mute and solo stay full strength: they bring the channel back.
         for (const int column : {instrumentColumn, volumeColumn, panColumn, trimColumn})
             if (auto* cell{table.getCellComponent(column, row)})
                 cell->setAlpha(alpha);
@@ -377,7 +349,7 @@ void ChannelListComponent::paintCell(
         g.fillRect(15, height / 2 - 3, juce::roundToInt(static_cast<float>(width - 20) * level), 6);
         return;
     }
-    if (columnId != channelColumn) return; // every other column is drawn by its own control
+    if (columnId != channelColumn) return; // other columns draw themselves
 
     auto& theme{getLookAndFeel()};
     g.setColour(theme.findColour(rowNumber == getSelectedChannelIndex()
@@ -385,7 +357,7 @@ void ChannelListComponent::paintCell(
         : Juicy16::textValueColourId)
         .withMultipliedAlpha(isRowSilenced(rowNumber) ? 0.45f : 1.0f));
     g.setFont(font);
-    // channel number, displayed 1-indexed
+    // 1-based channel number.
     g.drawText(String(rowNumber + 1),
                0, 0, width - GuiConstants::innerPadding, height,
                Justification::centredRight, true);
@@ -398,7 +370,7 @@ Component* ChannelListComponent::refreshComponentForCell(
     Component* existingComponentToUpdate
 ) {
     if (columnId == channelColumn || columnId == activityColumn) {
-        // painted, not a control
+        // Painted, not a control.
         jassert(existingComponentToUpdate == nullptr);
         return nullptr;
     }
@@ -454,7 +426,7 @@ void ChannelListComponent::selectedRowsChanged(int lastRowSelected) {
 juce::ComboBox* ChannelListComponent::patchComboForRow(int row) {
     if (row < 0 || row >= numChannels)
         return nullptr;
-    // A row that is scrolled out of view has no cell component yet.
+    // Off-screen rows have no cell component yet.
     table.scrollToEnsureRowIsOnscreen(row);
     auto* cell{dynamic_cast<PatchCell*>(table.getCellComponent(instrumentColumn, row))};
     return cell == nullptr ? nullptr : &cell->getCombo();
@@ -471,8 +443,7 @@ void ChannelListComponent::syncTableSelectionFromState() {
         || table.getSelectedRow() == selected)
         return;
     const juce::ScopedValueSetter<bool> guard{syncingSelection, true};
-    // Scroll it into view: at the minimum window height only part of the list is
-    // visible, so arrow-keying off-screen would otherwise lose the selection.
+    // Scroll so arrow keys never select an off-screen row.
     table.selectRow(selected);
 }
 
@@ -481,32 +452,27 @@ void ChannelListComponent::valueTreePropertyChanged(
     const Identifier& property) {
     const Identifier type{treeWhosePropertyHasChanged.getType()};
     if (type == StringRef("banks")) {
-        // a font (re)loaded: rebuild the shared patch list, then refresh every
-        // row's dropdown items + selection.
+        // Font reloaded: rebuild the patch list and every dropdown.
         rebuildPatchList();
         table.updateContent();
     } else if (type == StringRef("ch")) {
-        // Only a program change needs the dropdowns rebuilt. Volume, pan, mute
-        // and solo reach their controls through parameter attachments, and a
-        // game rip streams CC7/CC10 continuously - rebuilding the table on every
-        // one of those would rebuild every visible cell for nothing.
+        // Only program changes rebuild dropdowns; volume, pan, mute and solo update
+        // through attachments, and rips stream CC7/CC10 continuously.
         if (property == StringRef("bank") || property == StringRef("preset"))
             table.updateContent();
-        // Solo changes what fifteen OTHER rows look like, so this cannot be a
-        // per-row repaint driven by the row that changed.
+        // Solo changes other rows' appearance too.
         else if (property == StringRef("mute") || property == StringRef("solo"))
             refreshSilencedRows();
     } else if (type == StringRef("uiState")
                && property == StringRef("selectedChannel")) {
-        // the selection marker is a paint concern, not a content one
+        // Selection is paint-only.
         table.repaint();
         syncTableSelectionFromState();
     }
 }
 
 int ChannelListComponent::instrumentColumnWidth() const {
-    // Everything the fixed columns leave behind. Nothing is clamped away, so no
-    // visible region belongs to no control.
+    // Whatever the fixed columns leave.
     return juce::jmax(
         GuiConstants::minInstrumentWidth,
         getWidth()
@@ -518,8 +484,7 @@ int ChannelListComponent::instrumentColumnWidth() const {
 void ChannelListComponent::resized() {
     table.setBoundsInset(BorderSize<int>(0));
     table.getHeader().setColumnWidth(instrumentColumn, instrumentColumnWidth());
-    // Header changes notify asynchronously. Lay out recycled cells now so the
-    // controls stay under their headings during the first frame and resizing.
+    // Header changes notify asynchronously; lay out cells now to avoid a stale frame.
     table.updateContent();
 }
 
@@ -542,8 +507,7 @@ void ChannelListComponent::timerCallback() {
             }
             cell->getCombo().setTooltip(description);
         }
-        // Only this column animates on the timer. Selection, mute/solo, bank
-        // changes and parameter attachments already invalidate their own areas.
+        // Only the activity column animates.
         table.repaint(table.getCellPosition(activityColumn, ch, true));
     }
 }

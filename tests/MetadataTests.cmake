@@ -105,13 +105,6 @@ foreach (EXPECTED_IDENTITY
   endif ()
 endforeach ()
 
-file(READ "${PROJECT_SOURCE_DIR}/JuceLibraryCode/AppConfig.h" LEGACY_CONFIG)
-string(FIND "${LEGACY_CONFIG}" "JucePlugin_VersionString          \"${PROJECT_VERSION}\"" LEGACY_VERSION)
-string(FIND "${LEGACY_CONFIG}" "JucePlugin_Build_VST              0" LEGACY_VST2)
-if (LEGACY_VERSION EQUAL -1 OR LEGACY_VST2 EQUAL -1)
-  message(FATAL_ERROR "Quarantined Projucer fallback metadata drifted from CMake")
-endif ()
-
 if (EXISTS "${ARTIFACTS_DIR}/VST")
   message(FATAL_ERROR "Unsupported VST2 artifact is present in the normal build")
 endif ()

@@ -1,11 +1,5 @@
-//
-// The right-hand panel: the plugin's global controls, kept apart from the
-// channel rack so they read as global rather than as a seventeenth channel.
-//
-// Master output trim lives here with room for its label and its value, which is
-// the defect Phase 9 records against the old 50px "Master" group box. The reverb
-// section (Phase 10) lands between master and the bank summary.
-//
+// Right-hand panel: global controls (master trim, effects, bank summary,
+// selected-channel diagnostics), kept apart from the channel rack.
 
 #pragma once
 
@@ -24,10 +18,8 @@ public:
 
     void paint(Graphics&) override;
     void resized() override;
-    // Every token colour is resolved here rather than in the constructor. The
-    // panel is built as an editor member BEFORE the editor installs its
-    // LookAndFeel, so a constructor findColour asks the default one, which has
-    // never heard of Juicy16's ColourIds: it asserts and returns black.
+    // Colours resolve here: the panel is built before the editor installs its
+    // LookAndFeel.
     void lookAndFeelChanged() override;
 
 private:
@@ -76,7 +68,7 @@ private:
     unique_ptr<AudioProcessorValueTreeState::ButtonAttachment> reverbEnableAttachment;
     juce::ComboBox reverbProfile;
     unique_ptr<AudioProcessorValueTreeState::ComboBoxAttachment> reverbProfileAttachment;
-    // size, damping, width, level - one knob and one caption each
+    // Size, damping, width, level.
     juce::OwnedArray<Slider> reverbKnobs;
     juce::OwnedArray<Label> reverbLabels;
     juce::OwnedArray<SliderAttachment> reverbAttachments;
@@ -85,8 +77,7 @@ private:
     Label bankName;
     Label bankDetail;
 
-    // y of the divider under the master block, set in resized() and drawn in
-    // paint() so both agree without a second layout pass.
+    // Divider positions, set in resized() and drawn in paint().
     int masterDividerY{0};
     int bankDividerY{0};
     int reverbDividerY{0};

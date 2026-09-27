@@ -1,7 +1,3 @@
-//
-// Created by Alex Birch on 27/09/2017.
-//
-
 #include "SurjectiveMidiKeyboardComponent.h"
 
 /*
@@ -156,7 +152,7 @@ void SurjectiveMidiKeyboardComponent::setKeyWidth (const float widthInPixels)
 {
     jassert (widthInPixels > 0);
 
-    if (! juce::approximatelyEqual(keyWidth, widthInPixels)) // Prevent infinite recursion if the width is being computed in a 'resized()' call-back
+    if (! juce::approximatelyEqual(keyWidth, widthInPixels)) // avoids recursion from resized()
     {
         keyWidth = widthInPixels;
         resized();
@@ -533,12 +529,8 @@ void SurjectiveMidiKeyboardComponent::drawWhiteNote (int midiNoteNumber,
         switch (orientation)
         {
             case horizontalKeyboard: {
-                // Negative-octave labels ("C-1", "C-2") are wider than a single white
-                // key at typical keyboard widths, so a rect sized to just this key
-                // clips the trailing digit (drawText with useEllipsesIfTooBig=false
-                // truncates rather than shrinking). Widen the draw area, centred on
-                // the key, so the full label always fits; neighbouring keys aren't
-                // affected since idle keys fill with a transparent colour.
+                // Widen the draw area around the key so negative-octave labels ("C-1") are not
+                // clipped; idle neighbours are transparent.
                 const int labelWidth = jmax (w - 1, w * 2);
                 g.drawText (text, x + 1 - (labelWidth - (w - 1)) / 2, y, labelWidth, h - 2, Justification::centredBottom, false);
                 break;
@@ -751,12 +743,12 @@ void SurjectiveMidiKeyboardComponent::resized()
 //==============================================================================
 void SurjectiveMidiKeyboardComponent::handleNoteOn (MidiKeyboardState*, int /*midiChannel*/, int /*midiNoteNumber*/, float /*velocity*/)
 {
-    shouldCheckState = true; // (probably being called from the audio thread, so avoid blocking in here)
+    shouldCheckState = true; // may be the audio thread: do not block
 }
 
 void SurjectiveMidiKeyboardComponent::handleNoteOff (MidiKeyboardState*, int /*midiChannel*/, int /*midiNoteNumber*/, float /*velocity*/)
 {
-    shouldCheckState = true; // (probably being called from the audio thread, so avoid blocking in here)
+    shouldCheckState = true; // may be the audio thread: do not block
 }
 
 //==============================================================================

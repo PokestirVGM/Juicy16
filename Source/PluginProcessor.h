@@ -1,13 +1,3 @@
-/*
-  ==============================================================================
-
-    This file was auto-generated!
-
-    It contains the basic framework code for a JUCE plugin processor.
-
-  ==============================================================================
-*/
-
 #pragma once
 
 #if JUCE_MAC || JUCE_IOS
@@ -22,8 +12,6 @@
 using namespace std;
 
 //==============================================================================
-/**
-*/
 class JuicySFAudioProcessor  : public AudioProcessor
 {
 public:
@@ -65,8 +53,7 @@ public:
 
     bool supportsDoublePrecisionProcessing() const override;
 
-    // VST3 only: per-channel units + program list (see VST3Multitimbral.h).
-    // Inert in AU/Standalone builds.
+    // VST3 per-channel units and program list; inert elsewhere.
     juce::VST3ClientExtensions* getVST3ClientExtensions() override { return &vst3Extensions; }
 
     FluidSynthModel& getFluidSynthModel();
@@ -74,7 +61,7 @@ public:
     MidiKeyboardState keyboardState;
 
 private:
-    static constexpr int currentStateVersion{9};
+    static constexpr int currentStateVersion{10};
     void initialiseSynth();
 
     AudioProcessorValueTreeState valueTreeState;

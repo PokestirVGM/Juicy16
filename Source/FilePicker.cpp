@@ -1,14 +1,7 @@
-//
-// Created by Alex Birch on 03/10/2017.
-//
-
 #include "FilePicker.h"
 #include "Theme.h"
 #include "Util.h"
 
-// #ifdef __APPLE__
-//   #include <CoreFoundation/CFURL.h>
-// #endif
 #if JUCE_MAC || JUCE_IOS
   #include <juce_core/native/juce_CFHelpers_mac.h>
   #include <CoreFoundation/CFString.h>
@@ -24,9 +17,7 @@ void FolderIconButton::paintButton(Graphics& g, bool isMouseOverButton, bool isB
     else if (isMouseOverButton)
         colour = colour.withAlpha(0.8f);
 
-    // The folder from the approved header design, traced in its own 24x24
-    // coordinates so the proportions hold at any size. Corner rounds are
-    // quadratics rather than true arcs; indistinguishable at a 14px icon.
+    // Folder outline on a 24x24 grid.
     juce::Path folder;
     folder.startNewSubPath(3.0f, 7.0f);
     folder.quadraticTo(3.0f, 5.0f, 5.0f, 5.0f);   // top-left round
@@ -40,10 +31,7 @@ void FolderIconButton::paintButton(Graphics& g, bool isMouseOverButton, bool isB
     folder.quadraticTo(3.0f, 19.0f, 3.0f, 17.0f);
     folder.closeSubPath();
 
-    // Scale the whole 24-unit grid - not the path's own bounds - to the icon box,
-    // so the stroke lands at the design's weight (2 units at 16/24 scale is
-    // 1.33px) instead of being computed from whatever the outline happens to
-    // span. Sizing from the bounds is what made the first version look heavy.
+    // Scale the 24-unit grid, not the path bounds, so the stroke keeps the design weight.
     const auto bounds{getLocalBounds().toFloat()};
     const float box{juce::jmin(static_cast<float>(GuiConstants::folderIconSize),
                                juce::jmin(bounds.getWidth(), bounds.getHeight()))};
@@ -60,7 +48,6 @@ void FolderIconButton::paintButton(Graphics& g, bool isMouseOverButton, bool isB
 
 FilePicker::FilePicker(
     AudioProcessorValueTreeState& state
-    // FluidSynthModel& fluidSynthModel
 )
 : fileChooser{
     "File",
@@ -72,13 +59,11 @@ FilePicker::FilePicker(
     String(),
     "Select a SoundFont or DLS file to load."}
 , valueTreeState{state}
-// , fluidSynthModel{fluidSynthModel}
-// , currentPath{}
 #if JUCE_MAC || JUCE_IOS
 , bookmarkCreationOptions{kCFURLBookmarkCreationWithSecurityScope}
 #endif
 {
-    // faster (rounded edges introduce transparency)
+    // Rounded edges would add transparency.
     setOpaque (true);
 
     fileChooser.setName("Sound bank file");
@@ -86,17 +71,13 @@ FilePicker::FilePicker(
     fileChooser.setDescription("Selected DLS, SF2, or SF3 bank file");
     fileChooser.setHelpText("Choose a DLS, SF2, or SF3 bank for all 16 MIDI channels.");
 
-    // setDisplayedFilePath(fluidSynthModel.getCurrentSoundFontAbsPath());
     setDisplayedFilePath(valueTreeState.state.getChildWithName("soundFont").getProperty("path", ""));
 
     addAndMakeVisible (fileChooser);
     fileChooser.addListener (this);
-    // scoped LookAndFeel swaps the "..." browse button for a folder icon; assigning
-    // it (rather than passing at construction) triggers FilenameComponent's
-    // lookAndFeelChanged(), which recreates the browse button using it.
+    // Setting it after construction makes FilenameComponent rebuild the browse button.
     fileChooser.setLookAndFeel(&folderIconLookAndFeel);
     valueTreeState.state.addListener(this);
-//    valueTreeState.state.getChildWithName("soundFont").sendPropertyChangeMessage("path");
 
 #if JUCE_MAC || JUCE_IOS
     bookmarkCreationOptions |= kCFURLBookmarkCreationSecurityScopeAllowOnlyReadAccess;
@@ -112,16 +93,14 @@ void FilePicker::resized() {
     fileChooser.setBounds (r);
 }
 
-/**
- * This is required to support setOpaque(true)
- */
+// Required by setOpaque(true).
 void FilePicker::paint(Graphics& g)
 {
     g.fillAll(getLookAndFeel().findColour(Juicy16::headerBackgroundColourId));
 }
 
 void FilePicker::filenameComponentChanged (FilenameComponent*) {
-    // Set path first so the bookmark handler's path fallback reads the correct new path.
+    // Path first, so the bookmark handler's fallback reads the new path.
     {
         Value value{valueTreeState.state.getChildWithName("soundFont").getPropertyAsValue("path", nullptr)};
         value.setValue(fileChooser.getCurrentFile().getFullPathName());
@@ -131,9 +110,7 @@ void FilePicker::filenameComponentChanged (FilenameComponent*) {
     CFUniquePtr<CFURLRef> cfURL{CFURLCreateWithFileSystemPath(nullptr, fileExtensionCF.get(), CFURLPathStyle::kCFURLPOSIXPathStyle, false)};
     CFErrorRef cfError = nullptr;
 
-    // CFURLCreateBookmarkData causes this error:
-    // cannot open file at line 45340 of [d24547a13b]
-    // os_unix.c:45340: (0) open(/var/db/DetachedSignatures) - Undefined error: 0
+    // Logs a harmless "open(/var/db/DetachedSignatures)" error.
     CFUniquePtr<CFDataRef> cfData{CFURLCreateBookmarkData(nullptr, cfURL.get(), bookmarkCreationOptions, nullptr, nullptr, &cfError)};
 
     if (cfData) {
@@ -143,8 +120,7 @@ void FilePicker::filenameComponentChanged (FilenameComponent*) {
         var bookmarkVar{static_cast<const void*>(cfDataBytePtr), static_cast<size_t>(cfDataByteLength)};
         value.setValue(bookmarkVar);
     } else {
-        // Clear a bookmark left by the previously selected file. This triggers the
-        // model's path fallback instead of waiting forever for a bookmark update.
+        // Clear the previous file's bookmark so the model falls back to the path.
         MemoryBlock emptyBookmark;
         Value value{valueTreeState.state.getChildWithName("soundFont").getPropertyAsValue("bookmark", nullptr)};
         value.setValue(var{std::move(emptyBookmark)});

@@ -1,24 +1,11 @@
+// Per-channel VST3 program routing (HALion-style units).
 //
-// Per-channel VST3 multitimbral support (the HALion-style "units" mechanism).
-//
-// Juicy16's pinned wrapper patch owns IUnitInfo on both the VST3 component and
-// controller. This extension supplies the runtime program names and forwards
-// program-list refresh notifications without claiming IUnitInfo itself. The
-// wrapper exposes:
-//   - a root unit plus 16 child units "Ch 1".."Ch 16", whose unit IDs use the
-//     wrapper's own group-hash formula over our parameter-group IDs
-//     ("chUnit1".."chUnit16"), so each channel's progChN parameter lives inside
-//     its channel's unit;
-//   - one shared program list (128 GM slots, names from the loaded font) attached
-//     to every channel unit;
-//   - getUnitByBus mapping MIDI input channel N -> unit N, which is exactly what
-//     hosts like Cubase use to route per-channel MIDI Program Change to the
-//     corresponding unit's program.
-//
-// This header stays free of VST3 SDK includes; all SDK types live in the .cpp.
-// The extension is inert in the AU/Standalone builds even though it is compiled
-// into the shared target.
-//
+// The pinned wrapper patch owns IUnitInfo on the component and controller: a
+// root unit plus units "Ch 1".."Ch 16" (IDs hashed from the "chUnitN" parameter
+// groups, so each progChN lives in its channel's unit), one shared 128-entry
+// program list, and getUnitByBus mapping MIDI channel N to unit N, which Cubase
+// uses to route Program Change. This extension supplies the program names and
+// forwards list-change notifications. SDK-free header; inert outside VST3.
 
 #pragma once
 
@@ -32,13 +19,12 @@ public:
 
     void setIComponentHandler (Steinberg::FUnknown*) override;
 
-    // Message thread: replace the shared program list's names (index = GM program
-    // number 0..127) and notify the host (IUnitHandler) so it re-reads the list.
-    // Called whenever a DLS/SoundFont (re)load changes the available presets.
+    // Message thread. Replaces the program names (index = GM program) and tells
+    // the host to re-read the list. Called on every bank load.
     void setProgramNames (const juce::StringArray& names);
 
 private:
-    Steinberg::FUnknown* unitHandler{nullptr}; // host's IUnitHandler (held with one ref)
+    Steinberg::FUnknown* unitHandler{nullptr};  // host's IUnitHandler, one ref held
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (JuicyVST3Extensions)
 };

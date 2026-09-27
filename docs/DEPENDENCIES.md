@@ -1,63 +1,49 @@
-# Dependency inventory and security review
+# Dependencies
 
-## Development update — 2026-09-05
+Everything built into Juicy16. The exact versions and checksums live in
+`tools/build_macos_dependencies.sh` and `tools/build_windows_dependencies.ps1`;
+if this page disagrees with them, the scripts win. Licences are covered in
+[LICENSING.md](LICENSING.md).
 
-Both dependency recipes now apply the [CC1 vibrato extension](../vendor/fluidsynth_patched/README.md) to pinned FluidSynth 2.5.7, archive SHA-256 `ce27840221ab00dd59bf27e85ecbba480c6c2a7c9fbec4243658f68f59c07f4a`. The complete macOS arm64 static closure was rebuilt locally; the Windows x64 closure was subsequently built and validated on 2026-09-22. This adopts the DLS/SF2 fixes in [2.5.6](https://github.com/FluidSynth/fluidsynth/releases/tag/v2.5.6) and further DLS fixes in [2.5.7](https://github.com/FluidSynth/fluidsynth/releases/tag/v2.5.7). The historical installed-artifact review below applies to the earlier 2.5.5 release and is not a validation of a new distributable.
+| Component | Version | What it's for |
+| --- | --- | --- |
+| JUCE | 8.0.14 | Plugin framework (with its bundled HarfBuzz, SheenBidi, zlib, libpng, JPEG) |
+| FluidSynth | 2.5.7 + Juicy16 patches | The synth: SF2, SF3 and DLS loading and playback |
+| GCEM | commit `012ae73c` | Maths headers FluidSynth needs |
+| libsndfile | 1.2.2 + security patch | SF3 sample decoding |
+| FLAC | 1.5.0 | Codec for libsndfile |
+| libogg | 1.3.6 | Ogg container |
+| libvorbis | 1.3.7 | Codec for libsndfile |
+| Opus | 1.6.1 | Codec for libsndfile |
 
-Everything statically linked into or embedded in a Juicy16 macOS release artifact, with the version actually built. Licensing obligations are in [LICENSING.md](LICENSING.md) and [NOTICE.md](../NOTICE.md); this document tracks **what is present and whether it is current**.
+The FluidSynth 2.5.7 archive's SHA-256 is
+`ce27840221ab00dd59bf27e85ecbba480c6c2a7c9fbec4243658f68f59c07f4a`.
 
-The pinned versions and their checksums live in `tools/build_macos_dependencies.sh`, which is the authority. Anything below that disagrees with that script is stale.
+Everything is linked statically, so the plugin only depends on system frameworks
+(macOS) or system DLLs (Windows). The AU and VST3 SDKs come with JUCE as headers.
 
-## macOS arm64 release closure
+## Patches
 
-| Component | Version built | Source | Role |
-| --- | --- | --- | --- |
-| JUCE | 8.0.14 (exact) | juce-framework/JUCE | Framework, plugin wrappers, embedded HarfBuzz/SheenBidi/zlib/libpng/IJG JPEG |
-| FluidSynth | 2.5.7 (exact) | FluidSynth/fluidsynth | Synthesis engine, SF2/SF3/DLS loading |
-| GCEM | commit `012ae73c` | kthohr/gcem | Header-only constexpr math required by FluidSynth |
-| libsndfile | 1.2.2 + IRCAM hardening patch | libsndfile/libsndfile | SF3 sample decoding; see `vendor/libsndfile_patched/` |
-| FLAC | 1.5.0 | xiph/flac | libsndfile codec |
-| libogg | 1.3.6 | xiph/ogg | Container for Vorbis/Opus |
-| libvorbis | 1.3.7 | xiph/vorbis | libsndfile codec |
-| Opus | 1.6.1 | downloads.xiph.org | libsndfile codec |
+- **FluidSynth:** CC1 vibrato strength and full-range DLS pan. See
+  [vendor/fluidsynth_patched](../vendor/fluidsynth_patched/README.md).
+- **libsndfile:** a backported fix for CVE-2025-52194, a buffer overflow a crafted
+  `.sf3` file could reach. The build checks the patched file's hash.
 
-The Audio Unit and VST3 SDK interface sources ship with JUCE and are compiled as headers; no separate SDK binary is linked.
+## Windows validation
 
-The Windows x64 candidate now builds these same pinned versions with MSVC and a static CRT. SF2/SF3/DLS runtime loading and system-only PE imports pass. Its native recipe prefers CMake config packages to preserve the static codec closure and enables Opus static runtime explicitly. See [Windows evidence](WINDOWS_RELEASE.md).
+The 2026-09-22 Windows 0.6.1-beta.4 candidate passed static MSVC runtime/codec,
+SF2/SF3/DLS loading and system-only DLL checks. The native recipe uses CMake
+config packages and explicitly enables Opus's static runtime. That evidence
+predates the full-range DLS pan patch and 1.0.0-beta.1; rebuild and validate the
+merged version before release. See [Windows evidence](WINDOWS_RELEASE.md).
 
-## Security and currency review
+## Security notes
 
-Reviewed 2026-08-24 against a built and installed release artifact, not against
-the recipe that produces it. Every static version in the artifact matches the
-table above, and the installed AU's dynamic dependencies are **system frameworks
-only** — no Homebrew path and no bundled dylib.
+The riskiest code is the file parsing: FluidSynth's bank loaders and, for SF3,
+libsndfile and its codecs. Juicy16 limits what reaches them. It never repairs a
+file over 512 MB, and it rejects files whose header claims more data than they
+contain.
 
-All pinned versions are current upstream releases at time of review, with one
-backport:
-
-- **CVE-2025-52194, libsndfile 1.2.2.** A buffer overflow in `ircam_read_header`,
-  reachable because FluidSynth passes a SoundFont's embedded sample bytes to
-  libsndfile's format detection and only *warns* when the result is not OGG — so
-  a crafted `.sf3`, the plugin's primary untrusted input, could reach the
-  vulnerable reader. Upstream has no release carrying the fix, so
-  `vendor/libsndfile_patched/` backports it and both dependency recipes bracket
-  the edit with pre- and post-edit `src/ircam.c` hashes, failing the build on any
-  mismatch. The patched closure is built and linked, not merely specified. The
-  related MPEG advisories are unreachable because `ENABLE_MPEG=OFF` keeps that
-  code out of the binary.
-
-**Finding: `WebKit.framework` is linked but unused.** The build sets
-`JUCE_WEB_BROWSER=0` and no code path reaches it, but `juce_gui_extra` declares
-the framework at module level so it is linked regardless. Low severity — a system
-framework, not dlopen'd — but avoidable attack surface in an audio plugin. Worth
-removing before 1.0 by dropping `juce_gui_extra` if nothing else needs it.
-
-The Windows closure is intended but not yet built, so it is not reviewed here.
-
-## Attack surface notes
-
-The parsing surface reachable from a user-selected file is FluidSynth's SF2/SF3/DLS loaders and, for SF3, libsndfile with its FLAC/Ogg/Vorbis/Opus codecs. That is the highest-risk area in the closure, since the input is arbitrary and user-supplied.
-
-Juicy16 bounds its own handling ahead of those parsers: the DLS repair path never reads a file larger than 512 MB into memory, and a RIFF container declaring more data than the file holds is rejected before FluidSynth sees it. See [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
-
-No runtime networking exists. JUCE's cURL and web-browser support are compiled out, so nothing in the closure opens a socket.
+There's no networking: JUCE's web and cURL support are compiled out.
+`WebKit.framework` is still linked on macOS because `juce_gui_extra` declares
+it, but nothing uses it.

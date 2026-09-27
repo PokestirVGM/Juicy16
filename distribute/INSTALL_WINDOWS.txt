@@ -1,0 +1,15 @@
+Installing Juicy16 on Windows (x64 VST3)
+
+1. Unzip the whole archive.
+2. Copy the folder VST3\Juicy16.vst3 into:
+       C:\Program Files\Common Files\VST3
+   (Administrator permission may be requested.)
+3. Restart your DAW and rescan plug-ins. Juicy16 appears as an instrument.
+
+Juicy16 is self-contained: no Visual C++ redistributable or other runtime is
+needed. Windows 10 version 1607 or later, 64-bit.
+
+Optional: check the download with PowerShell from inside the unzipped folder:
+    Get-Content SHA256SUMS | ForEach-Object { $h,$f = $_ -split '  ',2; if ((Get-FileHash $f).Hash -ne $h.ToUpper()) { "MISMATCH $f" } }
+
+Read docs\BETA_TESTER_GUIDE.md and docs\KNOWN_ISSUES.md before reporting a bug.

@@ -13,7 +13,7 @@ void showPercent(Slider& slider) {
     slider.updateText();
 }
 
-// The panel's section headings: small, letterspaced, quiet.
+// Small, letterspaced section heading.
 void styleHeading(Label& label, const String& text) {
     label.setText(text.toUpperCase(), NotificationType::dontSendNotification);
     label.setFont(Font{juce::FontOptions{GuiConstants::labelFontHeight}});
@@ -71,7 +71,7 @@ MixerPanelComponent::MixerPanelComponent(AudioProcessorValueTreeState& state, Fl
     outputLevelSlider.setSliderStyle(Slider::RotaryHorizontalVerticalDrag);
     outputLevelSlider.setRange(GuiConstants::outputLevelMinDb,
                                GuiConstants::outputLevelMaxDb, 0.1);
-    // The readout is the large number beside the knob, not a text box under it.
+    // The readout is the large number beside the knob.
     outputLevelSlider.setTextBoxStyle(Slider::NoTextBox, true, 0, 0);
     outputLevelSlider.getProperties().set("bipolar", true); // 0 dB is the origin
     outputLevelSlider.setName("Output level");
@@ -81,8 +81,7 @@ MixerPanelComponent::MixerPanelComponent(AudioProcessorValueTreeState& state, Fl
         "Master output trim for the whole plugin, in decibels. Not a MIDI "
         "controller: nothing in a MIDI file changes it.");
     outputLevelSlider.setTooltip(outputLevelSlider.getHelpText());
-    // JUCE sliders decline keyboard focus by default, which would leave this
-    // mouse-only. A focused slider handles arrow keys.
+    // Sliders refuse focus by default; this enables arrow keys.
     outputLevelSlider.setWantsKeyboardFocus(true);
     outputLevelSlider.onValueChange = [this] { syncOutputLevelReadout(); };
     addAndMakeVisible(outputLevelSlider);
@@ -90,8 +89,7 @@ MixerPanelComponent::MixerPanelComponent(AudioProcessorValueTreeState& state, Fl
     outputLevelValue.setFont(Font{juce::FontOptions{GuiConstants::masterValueFontHeight}});
     outputLevelValue.setJustificationType(Justification::centredLeft);
     outputLevelValue.setInterceptsMouseClicks(false, false);
-    // The slider is the accessible control; this is its visible readout, and a
-    // screen reader announcing it twice would be noise.
+    // The slider is the accessible control; avoid a duplicate announcement.
     outputLevelValue.setAccessible(false);
     addAndMakeVisible(outputLevelValue);
 
@@ -173,8 +171,7 @@ MixerPanelComponent::MixerPanelComponent(AudioProcessorValueTreeState& state, Fl
             caption->setFont(Font{juce::FontOptions{GuiConstants::labelFontHeight}});
             caption->setJustificationType(Justification::centred);
             caption->setInterceptsMouseClicks(false, false);
-            // The knob is the accessible control; its caption would only be
-            // announced twice.
+            // The knob is the accessible control.
             caption->setAccessible(false);
             addAndMakeVisible(*caption);
             reverbLabels.add(std::move(caption));
@@ -288,8 +285,7 @@ void MixerPanelComponent::syncBankSummary() {
     const String loadedPath{fontState.getProperty("loadedPath", "").toString()};
     auto& theme = getLookAndFeel();
     const int colour = loadedPath.isEmpty() ? Juicy16::textLabelColourId : Juicy16::textPrimaryColourId;
-    // This also runs before the editor attaches its theme. Text can be prepared
-    // immediately; custom colours are resolved when that theme is available.
+    // Runs before the editor theme is attached; colours resolve once it is.
     if (theme.isColourSpecified(colour)) bankName.setColour(Label::textColourId, theme.findColour(colour));
     if (loadedPath.isEmpty()) {
         bankName.setText("No bank loaded", NotificationType::dontSendNotification);
@@ -301,9 +297,7 @@ void MixerPanelComponent::syncBankSummary() {
     bankName.setText(file.getFileName(), NotificationType::dontSendNotification);
     bankName.setTooltip(loadedPath);
 
-    // Preset count, not "channels active": how many channels a file touches is
-    // not something the plugin can know without a definition of "touched", and
-    // the count of presets in the bank is a fact it does have.
+    // Preset count: a fact the bank has, unlike "channels active".
     int presets{0};
     const ValueTree banks{valueTreeState.state.getChildWithName("banks")};
     for (int b = 0; b < banks.getNumChildren(); ++b)
@@ -344,8 +338,7 @@ void MixerPanelComponent::lookAndFeelChanged() {
         caption->setColour(Label::textColourId, label);
     for (Label* caption : chorusLabels)
         caption->setColour(Label::textColourId, label);
-    // The bank name switches between primary and label depending on whether a
-    // bank is loaded, so let that logic own it.
+    // syncBankSummary owns the name's colour.
     syncBankSummary();
 }
 

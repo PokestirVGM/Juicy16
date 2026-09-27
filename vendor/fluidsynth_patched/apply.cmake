@@ -19,12 +19,14 @@ function(edit_file relative base result before after)
   endif()
   file(WRITE "${path}" "${content}")
 endfunction()
-edit_file("include/fluidsynth/synth.h" "b63d328166b9cd0ae5e8249aab880e43675d7a12a2d409c3dc43c553fc385765" "835010ecdc847d1e9475da5d7acfa7b845eceac0f07430100e19e9a3a6e564fd"
+edit_file("include/fluidsynth/synth.h" "b63d328166b9cd0ae5e8249aab880e43675d7a12a2d409c3dc43c553fc385765" "6aba9116e8a111e29610a0820811989267a919fc04f960620be08b176e8f0941"
 [==[FLUIDSYNTH_API float fluid_synth_get_gen(fluid_synth_t *synth, int chan, int param);]==]
 [==[FLUIDSYNTH_API float fluid_synth_get_gen(fluid_synth_t *synth, int chan, int param);
 /* Juicy16 extension: CC1-driven pitch LFO depth only, without rewriting MIDI. */
 #define FLUIDSYNTH_JUICY16_VIBRATO_SCALE 1
-FLUIDSYNTH_API int fluid_synth_set_cc1_vibrato_scale(fluid_synth_t *synth, int chan, float scale);]==])
+FLUIDSYNTH_API int fluid_synth_set_cc1_vibrato_scale(fluid_synth_t *synth, int chan, float scale);
+/* Juicy16 extension: CC10 reaches both edges on every DLS region. */
+#define FLUIDSYNTH_JUICY16_DLS_FULL_PAN 1]==])
 edit_file("src/synth/fluid_chan.h" "cf4d1000361fd12f516e7f540a36c444d5c3101b213784cb42df66724544603a" "6a2bbb7e59e5cc3a4b3d98a537106a29d9dd97f0faa117e21f70a6882a4be4f9"
 [==[    int channum;                          /**< MIDI channel number */]==]
 [==[    int channum;                          /**< MIDI channel number */
@@ -60,3 +62,16 @@ int fluid_synth_set_cc1_vibrato_scale(fluid_synth_t *synth, int chan, float scal
 }
 
 static void fluid_synth_reset_basic_channel_LOCAL(fluid_synth_t *synth, int chan, int nbr_chan);]==])
+edit_file("src/sfloader/fluid_dls.cpp" "9bfb042b0170723d09403a7719fc0cd733c726a84073e97c6a1e9bd148beb73a" "f3e1291f5bcedd290fa8e849d679fc66dee2823d7a8d71dc70e94fa2cba518dd"
+[==[            // See also https://github.com/FluidSynth/fluidsynth/pull/1626 conversation for "Key Number to Pitch" articulation implementation]==]
+[==[            /* Juicy16: CC10 can move every region to either edge. Depth is the
+             * standard 500 plus the region's own static pan, so hard-panned stereo
+             * pairs follow pan fully instead of the bank's own narrower range. */
+            {
+                fluid_mod_t full_pan;
+                fluid_mod_clone(&full_pan, &default_pan_mod);
+                fluid_mod_set_amount(&full_pan, 500.0 + std::abs(art.gens[GEN_PAN].value_or(0)));
+                fluid_voice_add_mod_local(voice, &full_pan, FLUID_VOICE_OVERWRITE, voice->mod_count);
+            }
+
+            // See also https://github.com/FluidSynth/fluidsynth/pull/1626 conversation for "Key Number to Pitch" articulation implementation]==])

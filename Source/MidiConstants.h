@@ -97,15 +97,15 @@ enum fluid_midi_control_change
     LEGATO_SWITCH = 0x44,
     HOLD2_SWITCH = 0x45,
     SOUND_CTRL1 = 0x46,
-    SOUND_CTRL2 = 0x47, // MIDI CC 71 Timbre/Harmonic Intensity (filter resonance)
-    SOUND_CTRL3 = 0x48, // MIDI CC 72 Release time
-    SOUND_CTRL4 = 0x49, // MIDI CC 73 Attack time
-    SOUND_CTRL5 = 0x4A, // MIDI CC 74 Brightness (cutoff frequency, FILTERFC)
-    SOUND_CTRL6 = 0x4B, // MIDI CC 75 Decay Time
+    SOUND_CTRL2 = 0x47,  // CC71 timbre/resonance
+    SOUND_CTRL3 = 0x48,  // CC72 release
+    SOUND_CTRL4 = 0x49,  // CC73 attack
+    SOUND_CTRL5 = 0x4A,  // CC74 brightness
+    SOUND_CTRL6 = 0x4B,  // CC75 decay
     SOUND_CTRL7 = 0x4C,
     SOUND_CTRL8 = 0x4D,
     SOUND_CTRL9 = 0x4E,
-    SOUND_CTRL10 = 0x4F, // MIDI CC 79 undefined
+    SOUND_CTRL10 = 0x4F,  // CC79
     GPC5 = 0x50,
     GPC6 = 0x51,
     GPC7 = 0x52,
@@ -132,60 +132,23 @@ enum fluid_midi_control_change
     POLY_ON = 0x7F
 };
 
-/*
- Attenuation range in centibels.
- Attenuation range is the dynamic range of the volume envelope generator
- from 0 to the end of attack segment.
- fluidsynth is a 24 bit synth, it could (should??) be 144 dB of attenuation.
- However the spec makes no distinction between 16 or 24 bit synths, so use
- 96 dB here.
- 
- Note about usefulness of 24 bits:
- 1)Even fluidsynth is a 24 bit synth, this format is only relevant if
- the sample format coming from the soundfont is 24 bits and the audio sample format
- choosen by the application (audio.sample.format) is not 16 bits.
- 
- 2)When the sample soundfont is 16 bits, the internal 24 bits number have
- 16 bits msb and lsb to 0. Consequently, at the DAC output, the dynamic range of
- this 24 bit sample is reduced to the the dynamic of a 16 bits sample (ie 90 db)
- even if this sample is produced by the audio driver using an audio sample format
- compatible for a 24 bit DAC.
- 
- 3)When the audio sample format settings is 16 bits (audio.sample.format), the
- audio driver will make use of a 16 bit DAC, and the dynamic will be reduced to 96 dB
- even if the initial sample comes from a 24 bits soundfont.
- 
- In both cases (2) or (3), the real dynamic range is only 96 dB.
- 
- Other consideration for FLUID_NOISE_FLOOR related to case (1),(2,3):
- - for case (1), FLUID_NOISE_FLOOR should be the noise floor for 24 bits (i.e -138 dB).
- - for case (2) or (3), FLUID_NOISE_FLOOR should be the noise floor for 16 bits (i.e -90 dB).
- */
+// Attenuation range of the volume envelope in centibels (96 dB).
 #define FLUID_PEAK_ATTENUATION  960.0f
 
 struct MidiConstants {
     inline static const int midiMinValue = 0;
     inline static const int midiMaxValue = 127;
-    // CC124-127: Omni Off, Omni On, Mono On, Poly On. FluidSynth treats these as
-    // basic-channel reconfiguration, which disables MIDI channels; Juicy16
-    // restores its 16-channel layout immediately afterwards. See
-    // FluidSynthModel::restoreSixteenChannelLayout.
+    // CC124-127 reconfigure FluidSynth's basic channels; Juicy16 restores its
+    // 16-channel layout afterwards (restoreSixteenChannelLayout).
     inline static const int firstChannelModeCc = 124;
-    // GM channel defaults, matching FluidSynth's own channel initialisation.
+    // GM channel defaults, as FluidSynth initialises them.
     inline static const int defaultChannelVolume = 100; // CC7
     inline static const int centreValue = 64;           // CC10 pan centre
-    // CC91 Reverb Send. General MIDI System Level 1 specifies 40 as a channel's
-    // default; GS and XG agree. FluidSynth initialises it to 0 instead, which
-    // means nothing reaches the reverb until a file explicitly asks - so a user
-    // turning up the reverb controls hears nothing at all. Juicy16 seeds the
-    // documented default, exactly as it seeds volume 100 and pan 64.
+    // GM default reverb send. FluidSynth starts at 0, so reverb was silent until a
+    // file asked for it.
     inline static const int defaultReverbSend = 40;     // CC91
-    // SF2 2.04 section 7.2 limits a file's wBank to 0-127 melodic plus 128
-    // percussion, and that is what a font's own bank numbering contains. The
-    // runtime channel bank is wider: on a drum channel FluidSynth adds its 128
-    // drum offset on top of the Bank Select MSB, so CC0=127 - the XG drum
-    // convention - lands on 255. Every surface that carries a channel's bank
-    // must therefore reach 255, not 128.
+    // A font's banks are 0-127 plus 128 percussion, but a drum channel's runtime
+    // bank is 128 + Bank Select MSB, so CC0=127 reaches 255.
     inline static const int percussionBank = 128;
     inline static const int maxChannelBank = 255;
 };

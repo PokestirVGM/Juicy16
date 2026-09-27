@@ -1,375 +1,133 @@
-# MIDI controller support contract
+# MIDI and controller behaviour
 
-## Playback policy and diagnostics (unreleased)
+This is how Juicy16 handles MIDI. It runs on FluidSynth 2.5.7 with a couple of
+small patches ([details](../vendor/fluidsynth_patched/README.md)).
 
-Settings now offers **DAW recovery** (default, including older projects) and **Standard MIDI**. The recovery-specific reset and same-timestamp reconciliation described below applies to DAW recovery. Standard MIDI preserves the event order actually delivered by the host, lets GM/GS/XG reset select defaults, and lets CC121 clear expression. Host transport controls and channel isolation remain unchanged; an explicit bend-range override still takes precedence. Standard MIDI cannot recover ordering information a host has already discarded.
+## The basics
 
-Expression and bend-range memory are saved per channel, including cents, so recovery survives reopening a project. Program and CC7/CC10 snapshots use the engine's latest applied state rather than its deferred UI mirror. Bank Select without Program Change remains pending.
+- Every controller reaches the synth on its own channel at its exact position in
+  the block, except **balance (CC8/CC40)**, which is ignored like in Fruity LSD.
+- Pitch bend keeps its full 14-bit range (0–16383, centre 8192).
+- Channel and key pressure pass through unchanged.
+- Whether a controller is *audible* can depend on the bank's own modulators.
+- FluidSynth renders in 64-sample chunks, so a note can start up to 63 samples
+  late.
 
-Each **Trim** is an independent audio gain (-24 to +12 dB, default 0), smoothed over 20 ms, after synthesis and including that channel's reverb contribution. MIDI CC7 and CC11 do not overwrite it. Sixteen internal dry/effect groups are summed into the existing stereo output; the reverb still has one shared set of controls and no new send controls. Chorus remains off by default and has its own global controls below.
+## Controllers
 
-**Signal** shows a MIDI activity dot and post-trim channel audio peak. The selected-channel panel shows expression, sustain, bend range/value and the actual fallback bank/program when it differs from the requested patch. **Peak** shows master output after trim; **OVER** latches when samples exceed 0 dBFS and clears on click. It does not limit the signal. The host tail is reported as unbounded because an instrument or sustain pedal can continue indefinitely.
-
-Event dispatch uses host sample offsets, but FluidSynth renders internally in 64-sample units. Measured synthesis onset has an additional 0–63 engine-sample delay (up to 1.31 ms at 48 kHz). Exact sample-accurate synthesis is not yet achieved.
-
-This document describes Juicy16 Beta 1 with the pinned FluidSynth 2.5.5 engine.
-It separates message delivery—which Juicy16 controls—from audible interpretation,
-which may depend on FluidSynth mode and modulators in the loaded DLS/SF2/SF3 bank.
-
-## Delivery
-
-Juicy16 forwards every valid CC0–CC127 message unchanged to the originating MIDI
-channel at its event sample. Pitch bend remains a 14-bit value from 0 through
-16383, centered at 8192. Channel pressure and polyphonic key pressure are also
-forwarded unchanged. The automated suite proves these delivery properties; it
-does not imply that every bank gives every controller an audible destination.
-
-## Paired and high-resolution controllers
-
-FluidSynth stores both halves of MSB/LSB pairs, but its general synthesis
-modulators use the 7-bit MSB only. Portamento time is the general-controller
-exception: FluidSynth combines its MSB and LSB. Data Entry CC6/38 is combined for
-supported RPN/NRPN operations. RPN 0,0 whole-semitone bend ranges and RPN Null are
-automated.
-
-Cents-level RPN 0,0 bend range **is** honoured, measured rather than assumed. With
-a range of 2 semitones plus 50 cents, a full-up bend raises pitch by a factor of
-1.1596; 2.5 semitones predicts 1.1553 and 2 semitones alone predicts 1.1224, so
-the Data Entry LSB is clearly in effect. `getPitchWheelSensitivity` reports whole
-semitones only, which is a limit of that diagnostic accessor and not of the
-engine. The offline suite asserts this in the audio domain at 48 kHz.
-
-A GM/GS/XG reset SysEx re-asserts, on each channel, the bend range the MIDI
-stream last set there — through the RPN itself, so cents survive, leaving the
-RPN null as the reset left it. This is the program re-assert policy applied to
-bend range, and for the same reason: under VST3 the RPN controllers are host
-parameters that the host's cache does not send twice, so on every replay the
-tick-0 reset would otherwise leave the channel at two semitones. A channel the
-stream never configured resets to two. Reset All Controllers (CC121) keeps the
-range, as FluidSynth always did.
-
-Bank Select is mode-dependent state for the next Program Change, never a patch
-change by itself. Juicy16 explicitly pins FluidSynth's initial mode to GS for
-Beta 1: CC0 selects the pending bank, while CC32 is still delivered/stored but
-does not contribute to the GS bank number. GM, GS, and XG reset messages can
-change the live convention as required by those reset families. The editor and
-saved channel state update only after Program Change succeeds; they store the
-logical bank reported by the accepted font program, not the pending CC bytes.
-VST3 `progChN` changes only the program and retains that channel's current bank.
-
-Cross-bank selection is automated rather than inferred. The offline suite
-synthesises an SF2 whose presets sit in banks 0, 1, 8, and 128 and each sound a
-different pitch, so the rendered note names the bank and program FluidSynth
-actually chose. It proves CC0 reaches banks 1 and 8, that CC32 does not move the
-channel out of the bank CC0 chose, that a return to CC0 = 0 restores the melodic
-bank, and that channel 10 reaches bank 128 with no Bank Select at all — with the
-engine, the saved channel state, the editor parameters, and the audio agreeing at
-every step. The macOS system DLS covers the same path across banks 0 and 1 on a
-real DLS bank. The pinned SF3 fixture defines only banks 0 and 128, so SF3 is
-proven for percussion-versus-melodic selection only; no SF3 bank with a melodic
-bank above 0 has been tested. Bank selection happens in FluidSynth's shared preset
-lookup, above the format-specific sample decoding that distinguishes SF3 from SF2,
-but that is reasoning rather than measurement.
-
-Selecting a bank/program the bank file does not define is accepted, not refused.
-FluidSynth 2.5.5 records the requested bank and program on the channel and
-substitutes bank 0 program 0 for synthesis, so the editor and saved state show
-what the MIDI asked for while a different patch sounds. Juicy16 deliberately keeps
-the requested value, because it is what should be restored when the project is
-reopened with the intended bank. See `KNOWN_ISSUES.md`.
-
-FluidSynth supports a per-font bank offset, which shifts the engine bank numbers a
-font's banks answer to. Juicy16 never installs one, so its raw and logical bank
-numbers are always identical in practice. The conversion is still tested: the
-offline suite installs an offset and asserts that manual selection, MIDI Bank
-Select, the persisted channel state, the editor parameters, and the sounding
-preset all resolve to the font's own bank numbering.
-
-Pitch bend itself is not a paired 7-bit CC and retains its complete 14-bit range.
-
-## Same-timestamp ordering
-
-A MidiBuffer keeps equal timestamps in insertion order. Under VST3 that is the
-host's parameter-queue order, not the file's: every CC is a separate parameter,
-Program Change arrives through a parameter too, and a SysEx is an event that
-JUCE's wrapper copies in *after* the parameter queue. So at a game rip's tick 0
-the GM reset can reach the synth after the RPN written to follow it, Bank
-Select after the Program Change that consumes it, and an RPN Data Entry before
-or after the selector it belongs to.
-
-Juicy16 therefore orders each timestamp's events by role before dispatch:
-reset and other SysEx first, then Bank Select, then Program Change, then every
-ordinary message in buffer order, then the RPN/NRPN machinery last (so a Reset
-All Controllers written ahead of it still lands ahead). The RPN machinery is
-rebuilt per channel as select → write → deselect from the one thing VST3 does
-preserve, each controller's own queue order: the k-th Data Entry of a unit
-goes after the k-th selection and before the k-th null, a trailing selector run
-joins the unit it completes, and a null written ahead of everything stays
-ahead. A correctly ordered file is left as written; the suite pins RPN with a
-trailing null, two nulled RPN blocks on one tick, NRPN followed by RPN on one
-tick, and the VST3 shapes (queues back to back, MSB and LSB queues straddling
-the Data Entry, the reset queued last). Limits are in `KNOWN_ISSUES.md`.
-
-## Common controller interpretation
-
-| Controllers | Beta 1 behavior |
+| Controller | What it does |
 |---|---|
-| CC1/2, CC7/10/11 | Delivered exactly. Volume, pan, and expression use FluidSynth's standard channel behavior; modulation/breath audibility can depend on bank modulators. |
-| CC5/37, CC65, CC68 | Portamento time pair, portamento switch, and legato switch are delegated to FluidSynth. Their audible result depends on channel mode and material. |
-| CC64 | FluidSynth sustain pedal. Releasing it damps voices held by sustain. |
-| CC66 | FluidSynth sostenuto pedal. It captures voices already active when the pedal is pressed. |
-| CC67 | Delivered as the soft-pedal controller; audible behavior depends on bank modulators. |
-| CC91/93 | Per-channel reverb and chorus sends, delivered exactly. CC91 feeds the reverb described below. CC93 feeds the optional chorus described below and defaults to zero. |
-| CC98/99, CC100/101, CC6/38 | FluidSynth NRPN/RPN selection and Data Entry. RPN 0,0 bend range and RPN Null are regression-tested, including same-timestamp order under VST3 (above). |
-| CC120 | All Sound Off immediately silences the addressed channel. |
-| CC121 | Reset All Controllers resets switches, RPN/NRPN selection, pressure, and pitch wheel. FluidSynth intentionally preserves bank, volume, pan, effects sends, sound controls CC70–79, and the configured bend range. Juicy16 then re-asserts the expression (CC11) the stream last set on that channel — hosts send CC121 on stop and never resend an unchanged CC11 under VST3; see `KNOWN_ISSUES.md`. |
-| CC122 | Local Control is accepted/stored by FluidSynth but intentionally has no synthesis action in this plugin engine. |
-| CC123 | All Notes Off releases the addressed channel's notes according to pedal/envelope state; it is not the immediate-kill behavior of CC120. |
-| CC124–127 | Delivered to FluidSynth, then Juicy16 restores its 16-channel layout. See the section below. |
+| CC1, CC2 | Modulation and breath. What they do depends on the bank. |
+| CC7, CC10, CC11 | Volume, pan and expression. CC7 and CC10 also move the row's knobs. |
+| CC8, CC40 | Balance. Ignored. |
+| CC5/37, CC65, CC68 | Portamento time, portamento and legato, handled by FluidSynth. |
+| CC64, CC66, CC67 | Sustain, sostenuto and soft pedals. |
+| CC71–79 | Passed through but do nothing, same as stock FluidSynth. |
+| CC91, CC93 | Reverb and chorus send per channel. CC91 starts at 40 (the GM default), CC93 at 0. |
+| CC98–101, CC6/38 | NRPN/RPN and Data Entry. RPN 0,0 sets the bend range, cents included. |
+| CC120 | All Sound Off: silences the channel at once. |
+| CC121 | Reset All Controllers. Volume, pan, sends and bend range stay. Juicy16 then restores the channel's last CC11, because hosts send CC121 on stop. |
+| CC123 | All Notes Off: releases notes normally. |
+| CC124–127 | Mode messages. They reach FluidSynth, then Juicy16 restores its 16 independent channels, so mono mode isn't supported. |
 
-## Channel-mode messages and the 16-channel layout
+## Bank Select and Program Change
 
-CC124–127 are MIDI 1.0 channel-mode messages, and FluidSynth implements them
-faithfully: Omni Off and Mono On assign a group of consecutive channels to a
-basic channel and **disable the rest**. On a MIDI 1.0 sound module that is
-correct. On a fixed 16-channel multitimbral instrument it is destructive — a
-single CC124 on channel 1 used to leave only channel 1 responding, silent and
-unreadable everywhere else, until the next reset.
+- CC0 picks the bank for the next Program Change (GS style). CC32 is stored but
+  doesn't change the bank.
+- Nothing is saved or shown until the Program Change actually succeeds.
+- On channel 10 the bank reads as 128 + CC0, so XG's CC0=127 shows 255. That's
+  expected.
+- If channel 10 finds no drum kit, it falls back to the same program in the
+  normal bank. Banks converted from GBA or SF2 often keep their kit at 0:0.
+- A bank or program the loaded bank doesn't have plays a substitute, but your
+  choice is kept so the right bank plays it later.
 
-Juicy16 therefore **forwards the controller and then restores its own layout**.
-Both contracts hold at once: every CC0–127 still reaches FluidSynth at its own
-sample position, and there are still exactly 16 independent channels afterwards.
-The restored layout is FluidSynth's own default — one basic channel at 0 in
-Omni-On Poly whose group covers every MIDI channel.
+## Resets
 
-The regression suite renders all four controllers across six values each, checks
-that no channel is ever disabled, that the controller was genuinely delivered
-rather than filtered, and that channel 16 still sounds immediately afterwards.
-A burst of interleaved mode messages across different channels is covered too,
-because that is what a host's reset burst actually looks like.
+A GM, GS or XG reset from the file sets each channel back to its defaults, then
+Juicy16 puts back the channel's program, volume, pan, expression and bend range.
+That's because VST3 hosts never resend those on replay, so without it the second
+play would sound different from the first.
 
-Mono mode is therefore not honoured as a per-channel monophonic setting. That is
-a deliberate trade: the 16-channel routing model is the product, and MIDI's
-basic-channel mechanism cannot express both.
+**Settings → Reset policy** switches this off: *Standard MIDI* follows the reset
+exactly, while *DAW recovery* (the default) restores as above.
 
-## Bank Select on the percussion channel
+## Messages at the same moment
 
-On a drum channel FluidSynth adds its 128 drum offset on top of the Bank Select
-MSB, so the reported bank is `128 + MSB`. The XG drum convention CC0=127
-therefore reports bank **255**.
+In VST3 every controller is a separate parameter, so the host can deliver
+messages that share a timestamp in the wrong order. Juicy16 sorts each moment
+into resets first, then Bank Select, Program Change, ordinary messages, and RPN
+messages last. It also rebuilds RPN select → write → deselect order. A file
+that's already in order plays as written.
 
-SF2 2.04 section 7.2 limits a *file's* bank numbers to 0–127 melodic plus 128
-percussion, and every fixture used here obeys that; this is a runtime channel
-bank, not a malformed font.
+## Mixer and channel controls
 
-The engine, the saved channel state, the visible `bank` parameter, and the host
-automation value all carry that number: the parameter spans 0–255 as of
-`0.5.1-alpha.6`, and a drum-range bank is restored through Bank Select rather
-than program select, so reopening a project keeps the channel on the bank it was
-saved with. Until then the parameter stopped at 128 and the three surfaces
-disagreed, which shipped as a B2 until the owner declined it on 2026-08-23.
+| Control | Parameter | Range | Default |
+|---|---|---|---|
+| Volume (CC7) | `volCh1`–`volCh16` | 0–127 | 100 |
+| Pan (CC10) | `panCh1`–`panCh16` | 0 left, 64 centre, 127 right | 64 |
+| Mute / Solo | `muteCh1`–`muteCh16`, `soloCh1`–`soloCh16` | on/off | off |
+| Trim | `trimCh1`–`trimCh16` | -24 to +12 dB | 0 |
+| Master trim | `outputLevel` | -24 to +12 dB | +1.5 dB |
 
-No font defines a bank above 128, so what sounds on one is FluidSynth's
-substituted drum kit — measured at 1.0000 waveform correlation against CC0=0,
-which is why this was ever a state-only problem.
+- Volume and pan are just the channel's CC7 and CC10, so the file's next message
+  replaces what you set.
+- **Mute and solo** belong to the plugin. A silenced channel drops new notes but
+  still gets everything else, so unmuting mid-song just works. Mute always beats
+  solo.
+- **Trim** is a plain audio gain after the synth, including that channel's
+  reverb and chorus. MIDI doesn't touch it.
+- The master trim defaults to +1.5 dB, the most my test rips allow without
+  clipping.
 
-## Exposed mixer controls
+**Full pan on DLS banks:** many converted DLS banks play each note as a hard-left
+and hard-right sample pair and give CC10 only a small range. Juicy16 widens each
+DLS region's pan range so pan reaches both sides. SF2 banks are unchanged.
 
-Every channel row carries its own volume and pan knob — all 16 visible at once,
-with no row to select first. They are plain MIDI controllers handled by
-FluidSynth's own default modulators; Juicy16 adds no modulator of its own.
+## Reverb and chorus
 
-| CC | UI control | Parameter | Effect | Default |
-|---:|---|---|---|---|
-| 7 | row Vol knob | `volCh1`-`volCh16` | Channel volume | 100 |
-| 10 | row Pan knob | `panCh1`-`panCh16` | Channel pan; 0 hard left, 64 centre, 127 hard right | 64 |
+Both are FluidSynth's built-in effects, and both are **off by default** so old
+projects don't change. The file's CC91/CC93 decide how much of each channel goes
+in; GS/XG reverb SysEx can't change your settings.
 
-Each is a real host parameter, so a host can automate any channel and a
-right-click on a knob offers the host's own automation and controller-link menu.
-
-Setting a knob is a starting point only. Incoming CC7/CC10 on that channel
-replaces the value at the event's timestamp and moves that row's knob, exactly as
-an incoming Program Change overrides a manually picked instrument. CC121
-preserves both, as the MIDI spec requires, and Juicy16's GM/GS/XG reset handling
-reapplies the latest per-channel values so the editor, saved state, and engine
-stay converged.
-
-## Reverb
-
-Juicy16 has a reverb, and until 0.6.0-alpha.1 you could not hear it.
-
-FluidSynth's reverb was always running — `synth.reverb.active` defaults to on —
-but the plugin asked FluidSynth for audio in a way that **discarded the effects
-buses**. Measured against FluidSynth directly on 2026-08-23 with reverb on, level
-1.0, room 0.9 and CC91=127, the tail energy after note-off was 0.0000046 through
-the call Juicy16 used and 7.467 through one that mixes the effects in. The
-effects bus is now mixed into the output, so material that asks for reverb gets
-it.
-
-**The reverb is off by default.** Juicy16 never had an audible reverb before, so
-switching one on for everybody would change how every existing project sounds
-without being asked. Turn it on and it works immediately — every channel already
-carries the GM default send.
-
-| Control | Parameter | Range | Universal | Soft |
+| Reverb | Parameter | Range | Universal | Soft |
 |---|---|---|---|---|
-| Enable | `reverbOn` | on/off | **off by default** | — |
+| On | `reverbOn` | on/off | off | — |
 | Profile | `reverbProfile` | Universal / Soft / Custom | — | — |
 | Size | `reverbSize` | 0–1 | 0.45 | 0.20 |
-| Damp | `reverbDamp` | 0–1 | 0.35 | 0.60 |
+| Damping | `reverbDamp` | 0–1 | 0.35 | 0.60 |
 | Width | `reverbWidth` | 0–1 | 0.85 | 1.00 |
 | Level | `reverbLevel` | 0–1 | 0.55 | 0.55 |
 
-- **What the engine does.** FluidSynth 2.5.7's reverb is jjceresa's FDN late
-  reverb, which replaced Freeverb in 2.0. Juicy16 adds no DSP of its own; these
-  controls set that reverb.
-- **What you control, and what the MIDI file controls.** You set the reverb.
-  The file sets how much of each channel goes into it, through CC91, at that
-  event's own timestamp. **A MIDI file cannot change your reverb settings** —
-  GS and XG reverb macro SysEx is deliberately ignored, so a rip asking for a
-  hall gets whatever profile you selected. That is a scope decision, recorded in
-  the milestone plan; tell us if a rip sounds wrong in a way the manual controls
-  cannot fix.
-- **Every channel starts at the GM default reverb send.** General MIDI System
-  Level 1 specifies 40; GS and XG agree. FluidSynth initialises it to 0 instead,
-  which meant nothing reached the reverb until a file explicitly asked — so on
-  most material the reverb controls did nothing at all, however far you turned
-  them. Juicy16 seeds the documented default, exactly as it seeds volume 100 and
-  pan 64, and a GM/GS/XG reset returns it to 40 rather than to zero.
+Choosing a profile sets the four knobs; moving a knob switches to Custom.
 
-  A file that sends its own CC91 still overrides it, per channel, at the event's
-  own timestamp. `SEQ_BGM_C_03`, a real VGMTrans rip in the test corpus, sends no
-  CC91 at all — that file now gets the default send rather than silence.
-- **Bypass is genuine.** Turning the reverb off removes the unit rather than
-  turning its level down, so nothing keeps computing a tail. Bypassed output is
-  bit-identical to a signal that was never sent to the reverb, which is asserted
-  rather than assumed.
-- **Profiles move the controls.** Selecting one sets all four visible values;
-  editing any of them selects Custom. Nothing is hidden from you or from host
-  automation.
-- **Width is narrowed on purpose.** FluidSynth accepts 0–100 there, but its own
-  default is 0.8 and everything useful lives below 1. The full range would put
-  the entire useful span inside the first one percent of the knob.
-
-### Where the defaults came from
-
-Measured on a real VGMTrans rip at CC91 = 80, against the same material dry:
-FluidSynth's inherited `0.50/0.30/0.80/0.70` adds **+1.64 dB** RMS, Universal
-adds **+0.92 dB**, and Soft adds **+0.47 dB**. Universal is a present but not
-dominant space; Soft is a much smaller room at full width — width without a long
-tail. Neither clips, and neither raises the peak above the dry material's.
-
-### Global chorus (unreleased)
-
-The **Reverb / Chorus** tabs share the same effects panel; switching tabs does not enable or bypass either effect. Chorus is off by default, including when older projects are reopened. Enable it with the switch on the Chorus tab.
-
-| Control | Parameter | Range | Default |
-| --- | --- | --- | --- |
-| Enable | `chorusOn` | off/on | off |
+| Chorus | Parameter | Range | Default |
+|---|---|---|---|
+| On | `chorusOn` | on/off | off |
 | Voices | `chorusVoices` | 1–8 | 3 |
 | Level | `chorusLevel` | 0–1 | 0.6 |
 | Rate | `chorusRate` | 0.1–5 Hz | 0.2 Hz |
 | Depth | `chorusDepth` | 0–21 ms | 4.25 ms |
 | Waveform | `chorusWaveform` | Sine / Triangle | Sine |
 
-The Level readout uses percent (60% means parameter value 0.6); Rate and Depth show Hz and ms. Reverb knob readouts also use percent. These fields are editable, and percentage input is converted back to the unchanged normalized parameter range.
+## Settings
 
-These control FluidSynth's built-in chorus on all 16 internal effect groups. Level, rate and depth use 20 ms parameter smoothing, applied once per audio block; voices and waveform are discrete. Bypass switches off processing. The depth range is limited to the engine's safe range through 96 kHz; higher host rates use the existing resampling path. See the [FluidSynth chorus API](https://www.fluidsynth.org/api/group__chorus__effect.html).
+| Setting | Parameter | Range | Default |
+|---|---|---|---|
+| Interpolation | `interpolation` | 7th-order / Linear / None | Linear |
+| Bend range | `bendRange` | follow file, or 1–24 semitones | follow file |
+| Bend scale | `bendScale` | ×1–×24 | ×1 |
+| CC1 vibrato strength | `vibratoScaleCh1`–`vibratoScaleCh16` | ×1–×24 | ×1 |
+| Reset policy | `resetPolicy` | DAW recovery / Standard MIDI | DAW recovery |
 
-Chorus input follows the bank's generators/modulators and per-channel **MIDI CC93**, which starts at **0**. For an ordinary SoundFont, send CC93 above zero to hear the enabled effect. Turning the effect on does not overwrite a rip's sends. The selected-channel readout displays the current CC93 value; CC121 preserves it while a GM/GS/XG reset returns it to zero. No manual per-channel send controls are added. Each channel's Trim scales its dry, reverb and chorus contribution together.
-
-All six chorus parameters automate and save with the project and survive synth rebuilds and MIDI resets. Chorus settings do not claim hardware/VGMTrans sound parity; listening and actual-host validation remain open.
-
-## Mute and solo are not MIDI controllers
-
-Each row also carries mute and solo (`muteCh1`-`muteCh16`, `soloCh1`-`soloCh16`).
-These are the plugin's own controls: **nothing in a MIDI file changes them**, and
-no controller reset or GM/GS/XG reset SysEx clears them.
-
-- A silenced channel drops incoming note-ons. It is not turned down, so the
-  file's own CC7 value survives being muted.
-- Everything else still reaches the engine while a channel is silenced —
-  note-offs, controllers, program changes, pitch bend — so unmuting mid-song
-  needs no resync.
-- Muting a channel that is already sounding sends it All Notes Off, so held notes
-  release naturally rather than ringing on or cutting off with a click.
-- **A channel sounds if it is not muted, and either nothing is soloed or it is
-  one of the soloed ones.** Mute always wins; solo only restricts which channels
-  are candidates. So:
-  - Muting the only soloed channel produces silence. Pressing M always does what
-    it says — under the obvious alternative, "solo overrides mute", that press
-    would have done nothing at all.
-  - Soloing a channel that is muted also produces silence, which is the same
-    statement in the other order.
-  - Soloing every channel is the same as soloing none: the solo set stops
-    excluding anything and only the mutes remain.
-  - Clearing the last solo restores exactly the mute picture that was there
-    before, because solo never altered it.
-- **You can always see why a channel is quiet.** A silenced row recedes, and a
-  lit mute is red while a lit solo is the accent colour, so a muted channel and a
-  not-soloed channel never look alike.
-
-### CC71-79 are forwarded but do nothing
-
-Juicy16 used to add its own modulators mapping CC71/72/73/74/75/79 onto filter
-and volume-envelope generators. **They were removed in 0.5.1-alpha.5.** No other
-SoundFont player applies those controllers — stock FluidSynth ignores them
-entirely — and the amounts were wildly out of scale: measured against a real SF2,
-CC73=127 stretched attack from 50 ms to 868 ms, CC75=127 raised a note's tail by
-43 dB, CC72=127 left a note ringing 48 dB above neutral a second after note-off,
-and CC71=127 attenuated the signal by 46 dB. On DLS banks they did nothing at all,
-because FluidSynth's native DLS loader does not apply the default modulator list.
-Game rips commonly send these controllers, so material sounded flat and
-compressed only in this plugin.
-
-They are still delivered to FluidSynth like every other controller, and the
-engine still stores and reports them; there is simply no Juicy16-specific
-modulator listening for them.
-
-## Master output level
-
-`outputLevel` is not a MIDI controller and is not per channel. It is a master
-trim in decibels, spanning -24 to +12, applied to the rendered output with 20 ms
-smoothing so host automation cannot step the gain mid-block. Nothing in a MIDI
-file changes it. FluidSynth's own `synth.gain` stays at its documented default of
-0.2.
-
-The trim **defaults to +1.5 dB**, not 0, and from `0.6.1-beta.3` that default is
-actually applied — before it, the gain was seeded at unity and the default only
-took effect once the knob was moved. Juicy16 renders about 8.6 dB quieter than
-VGMTrans plays the same material, and +1.5 dB is the most that can be given back
-without pushing anything past full scale — across a 24-file corpus the loudest
-rip peaks at -1.61 dBFS. It does not close the gap; that would need a limiter,
-which Beta 1 deliberately does not have, because VGMTrans reaches its own level
-by clipping (over 0 dBFS on six of ten measured rips, up to +7.61 dBFS). Raise
-the trim per project if you want more.
-
-## Bend range override and bend scale
-
-Two compensations for hosts that damage pitch bend on the way in, both in the
-settings popover, both real parameters, both off by default. Neither is a MIDI
-controller; nothing in a file changes them.
-
-| Control | Parameter | Range | Default | What it does |
-|---|---|---|---|---|
-| Bend range | `bendRange` | Follow the MIDI file, or 1–24 semitones | follow | Forces one bend range on all 16 channels. Outranks the file's RPN, survives a reset SysEx and a synth rebuild. Clearing it restores each channel's own range. |
-| Bend scale | `bendScale` | ×1–×24 | ×1 | Multiplies every incoming bend about centre (8192) and clamps to 0–16383 before it reaches the engine. |
-
-**FL Studio** is the reason they exist. FL imports every MIDI pitch bend as
-plus or minus two semitones whatever the file's RPN said, so a rip written for
-12 semitones plays its bends six times too small; its wrapper's *Send pitch bend
-range* is off by default and sends one range on one channel. For a 12-semitone
-rip start with bend scale ×6. If FL never delivers the RPN to the plugin at all,
-bend range override 12 is the fix instead — a ×6 on full-size bends would clamp.
-Which of the two FL actually needs has not been established in FL.
-
-
-## Per-channel CC1 vibrato strength
-
-Open **Settings → MIDI** for **CC1 channel** and **CC1 scale**, ×1–×24, beside Bend scale. The channel picker also selects the rack channel; selecting a rack channel selects its CC1 setting. ×1 (off) preserves bank playback. Each channel has its own saved, automatable setting; changing channel immediately displays its value. MIDI resets do not alter this plugin setting.
-
-The engine scales CC1-driven pitch-LFO modulation after the bank's mapping, preserving controller values, source curves, secondary sources and bank overrides. It does not multiply/clamp CC1 to 127 or scale unrelated pressure, volume or filter modulation. It affects held and future notes. Bank vibrato speed and delay remain unchanged. This is compensation for weak exported vibrato, not a validated Nintendo DS emulation preset.
-
-**CC1 received** shows the selected channel’s current raw modulation value, updated from audio-thread diagnostics. Zero displays “0 (inactive)”: a strength multiplier does not create vibrato when CC1 is zero. CC121 and synth/reset initialization clear this readout. The readout helps distinguish a quiet passage from controller messages missing from the host.
-
-Parameters: `vibratoScaleCh1`–`vibratoScaleCh16`, integer 1–24, default 1. Requires the repository's patched FluidSynth 2.5.7 dependency; see [dependency patch](../vendor/fluidsynth_patched/README.md).
+- **Interpolation** is how samples are stretched to other pitches. Linear is what
+  Fruity LSD uses and keeps the bright grit of low-rate GBA samples. 7th-order is
+  cleaner, None is rawest. Projects saved before this setting existed open on
+  7th-order.
+- **Bend range** forces one bend range on every channel, for hosts that drop the
+  file's RPN.
+- **Bend scale** multiplies incoming bends. FL Studio imports every bend as ±2
+  semitones, so a rip written for 12 semitones needs ×6.
+- **CC1 vibrato strength** boosts weak CC1 vibrato per channel without changing
+  the CC1 value. It can't create vibrato when CC1 is 0; *CC1 received* shows what
+  the host is sending.

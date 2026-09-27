@@ -1,26 +1,23 @@
-# Compatibility contract
+# Compatibility
 
-What must not change without breaking saved projects and host automation.
+These are the things I keep fixed so saved projects and automation keep working
+across updates. Changing any of them would break existing sessions.
 
-This file records the host-facing identifiers frozen by Beta 1, which is the compatibility baseline. `0.6.0-beta.1` ships them, and they are now frozen: pre-Beta sessions are outside this contract. Beta 1 and later releases must retain these values unless an explicitly approved stop-ship migration changes the contract and adds host save/reopen coverage.
+## Plugin identity
 
-## Product and plugin identity
-
-| Surface | Frozen value |
+| | Value |
 | --- | --- |
-| Product and executable | `Juicy16` |
+| Product | `Juicy16` |
 | Vendor | `Pokestir` |
 | Bundle ID | `com.pokestir.juicy16` |
-| AU manufacturer | `Pkst` |
-| AU subtype | `Jc16` |
-| VST3 audio class CID | `ABCDEF019182FAEB506B73744A633136` |
-| VST3 controller class CID | `ABCDEF011234ABCD506B73744A633136` |
+| AU manufacturer / subtype | `Pkst` / `Jc16` |
+| VST3 processor CID | `ABCDEF019182FAEB506B73744A633136` |
+| VST3 controller CID | `ABCDEF011234ABCD506B73744A633136` |
 
-## Parameters and state
+## Parameters
 
-The original 91 parameters retain version hint `1`. The 17 playback parameters use hint `2`; the six chorus parameters use hint `3`; the sixteen vibrato parameters use hint `4`. This avoids JUCE's Audio Unit assertion for
-unversioned parameters and establishes the first public ordering baseline. The
-parameter order and string IDs are:
+New parameters are only ever added at the end, so existing indices never move.
+There are 131, in this order:
 
 ```text
 bank, preset, outputLevel,
@@ -32,25 +29,25 @@ soloCh1 .. soloCh16,
 progCh1 .. progCh16,
 bendRange, bendScale,
 resetPolicy, trimCh1 .. trimCh16,
-chorusOn, chorusVoices, chorusLevel, chorusRate, chorusDepth, chorusWaveform
+chorusOn, chorusVoices, chorusLevel, chorusRate, chorusDepth, chorusWaveform,
+vibratoScaleCh1 .. vibratoScaleCh16,
+interpolation
 ```
 
-That is 89 parameters at Beta 1. `0.6.1` appends `bendRange` and `bendScale`
-after them, 91 in total, so no Beta 1 index moves: a Beta 1 host that never saw
-them ignores them, and a Beta 1 save opens with both at their off defaults. The selected-channel `volume` and `pan` parameters that
-schema 4 carried are **retired**: volume and pan are per channel now, so every
-channel is automatable rather than only whichever row the editor had selected.
+AU version hints: the first 91 use `1`, the playback group (`resetPolicy`, trims)
+`2`, chorus `3`, vibrato `4`, and `interpolation` `5`.
 
-Neither the six reverb parameters nor the 64 mixer parameters belongs to a
-parameter group. JUCE derives a
-VST3 parameter's `unitId` from its group, and the vendored wrapper serves a fixed
-17-unit structure that hosts cache before the component connection exists — a
-group here would publish parameters pointing at an 18th unit the host was never
-told about. Ungrouped, they report the root unit alongside `bank`, `preset`, and
-`outputLevel`, and the 16 `chUnit` groups still hold exactly one `progChN` each.
-`vst3_smoke` asserts both halves of that.
+Hosts store automation as 0–1, so ranges are fixed too: `bank` 0–255, `preset`,
+volume, pan and `progChN` 0–127, master trim -24 to +12 dB, reverb values 0–1,
+`bendRange` 0–24 (0 follows the file), `bendScale` 1–24. Choice parameters keep
+their order: `reverbProfile` is Universal / Soft / Custom and `interpolation` is
+7th-order / Linear / None.
 
-The corresponding VST3 `ParamID` values are:
+The mixer and reverb parameters are deliberately ungrouped. In VST3 a group
+becomes a unit, and the plugin serves a fixed set of 17 units that Cubase caches
+early. Only the 16 `progChN` parameters sit in groups (`chUnit1`–`chUnit16`).
+
+VST3 ParamIDs:
 
 ```text
 bank             0x002E063C    preset          0x4594E2DF
@@ -106,36 +103,13 @@ progCh13         0x443F67C1    progCh14        0x443F67C2
 progCh15         0x443F67C3    progCh16        0x443F67C4
 
 bendRange        0x284C8F84    bendScale       0x285B5F91
+interpolation    0x2156B9A4
 ```
 
-The 16 `progChN` IDs and all 16 channel unit IDs are **unchanged** from schema 4.
-Adding the mixer parameters did not disturb them, which is what keeps existing
-Cubase and FL Studio sessions' program automation intact.
+## VST3 units
 
-A parameter's range is part of this contract too, because hosts store automation
-normalised: `bank` spans 0-255; `preset`, every `volChN`, every `panChN`, and
-every `progChN` span 0-127; every `muteChN` and `soloChN` is a two-state boolean;
-and `outputLevel` spans -24 to +12 dB. `reverbOn` is a two-state boolean,
-`reverbProfile` is a 3-entry choice (`Universal`, `Soft`, `Custom`, in that
-order — the index is what a host stores, so the order is frozen), and
-`reverbSize`, `reverbDamp`, `reverbWidth` and `reverbLevel` each span 0 to 1.
-`bendRange` spans 0-24 semitones, 0 meaning "follow the MIDI file", and
-`bendScale` spans ×1 to ×24.
-`reverbWidth` is deliberately narrowed from FluidSynth's own 0-100: everything
-musically useful lives below 1, and the full range would put it all inside the
-first one percent of a knob's travel. `bank` reaches 255 rather than 128 because
-a channel's runtime bank is FluidSynth's 128 drum offset plus the Bank Select
-MSB; it was widened on 2026-08-23, before the freeze, and moves no further.
-
-The state root is `MYPLUGINSETTINGS`, the Beta 1 schema is version `6`, and the
-current writer uses schema `9` and persists all 130 parameter values, 16 channel records (each carrying
-`bank`, `preset`, `volume`, `pan`, `mute`, `solo`, `expression`, and `bendRange`), UI state, and the
-SoundFont path/bookmark record. See
-this document for migration policy.
-
-## VST3 multitimbral identity
-
-The shared program-list ID is `0x50524F47` (`PROG`) and it contains 128 entries. Channel units 1 through 16 use these IDs in order:
+The shared program list is `0x50524F47` (`PROG`) with 128 entries. Channel units
+1–16 use these IDs:
 
 ```text
 0x2B6251C8 0x2B6251C9 0x2B6251CA 0x2B6251CB
@@ -144,61 +118,27 @@ The shared program-list ID is `0x50524F47` (`PROG`) and it contains 128 entries.
 0x40E7E76B 0x40E7E76C 0x40E7E76D 0x40E7E76E
 ```
 
-Automated metadata, engine, and VST3 smoke tests enforce this manifest. Host session save/reopen remains required for the exact packaged candidate in FL Studio and Cubase.
+The tests check these IDs and the parameter manifest.
 
----
+## Saved state
 
-## State schema policy
+The state root is `MYPLUGINSETTINGS`, currently schema **10**. It stores every
+parameter, one record per channel (`bank`, `preset`, `volume`, `pan`, `mute`,
+`solo`, `expression`, `bendRange`), the window and the bank's path and bookmark.
 
-Version 9 appends `vibratoScaleCh1`–`vibratoScaleCh16`, integers 1–24, default 1, ungrouped with AU hint 4. Existing 114 indices/hints and program-unit identities stay fixed. Schemas 1–8 restore unity for the new controls, including when loaded into a used instance. Older builds reject schema 9. Keep an older project copy when rollback is needed.
+Newer builds read older projects; older builds refuse newer ones with an error
+rather than guessing. Keep a project backup if you might roll back.
 
-Version 8 appends six ungrouped chorus parameters after the existing 108, using AU version hint 3. Their IDs, ranges and defaults are recorded in CONTROLLER_SUPPORT.md. Schema 1–7 loads reset chorus to its off defaults even in a used processor. Older schema 7 builds reject schema 8 rather than silently losing the effect. The original parameter IDs/order and 16 program units remain unchanged. Regression tests verify all-group settings, project recall, reset survival, sample-rate rebuild and legacy migration.
+| Schema | Added | Older projects open with |
+| --- | --- | --- |
+| 10 | `interpolation` | 7th-order, the sound they were made with (new instances default to Linear) |
+| 9 | CC1 vibrato strength | ×1 |
+| 8 | chorus | chorus off |
+| 7 | reset policy, channel trims, remembered expression and bend range | DAW recovery, 0 dB trims |
+| 6 | reverb controls (the Beta 1 schema) | reverb off, Universal profile |
+| 5 | per-channel volume, pan, mute, solo | values taken from the channel records |
+| 4 | `bank` widened to 0–255 | bank rescaled so the same bank loads |
+| 3 | volume and pan replaced the old CC71–79 values | GM defaults for volume and pan |
 
-Version 7 appends `resetPolicy` (DAW recovery=0, Standard MIDI=1) and `trimCh1`–`trimCh16` (-24 to +12 dB, default 0), all ungrouped with AU hint 2. The original 91 parameter indices and hints, program list and 16 channel units are unchanged. Channel records add remembered `expression` (-1 means unset) and `bendRange` (-1 unset, otherwise semitones in the upper 7 bits and cents in the lower 7). Reading schema 1–6 resets the new trims/policy and clears controller memory even in a used processor. Schema 7 recall restores that memory after bank/parameter restoration; pending UI updates from the previous state are discarded. Tests cover immediate save before UI synchronization, old-state loading into a used instance and newer-schema rejection.
-
-Juicy16 Beta 1 writes state schema version 6. Beta 2 and the first stable release must continue to read version 6 unless a stop-ship defect makes that unsafe. The automated suite must retain the older-version migration and version 6 round-trip cases for as long as those versions are supported.
-
-Version 6 added the reverb control surface: `reverbOn`, `reverbProfile`, and the
-four engine parameters. A version 5 save has none of them, so it opens with the
-reverb enabled on the Universal profile — a deliberate default, recorded in
-[CONTROLLER_SUPPORT.md](CONTROLLER_SUPPORT.md), rather than FluidSynth's
-inherited one. Pinned by a regression that writes a version 5 envelope and
-asserts the profile reaches the engine on reload.
-
-Version 5 made volume and pan per channel. Where version 4 had a single
-`volume`/`pan` parameter pair describing whichever channel the editor had
-selected, version 5 has `volCh1`-`volCh16` and `panCh1`-`panCh16`, and adds
-`muteCh1`-`muteCh16` and `soloCh1`-`soloCh16`. The retired `volume` and `pan`
-parameters are gone.
-
-A version 4 save is migrated from its per-channel records, not from those two
-parameters: `channelPrograms` already stored every channel's volume and pan, so
-each channel's saved values become that channel's own parameter and reach the
-engine as before. Mute and solo do not exist in a version 4 save and arrive off.
-Loading a version 4 project and re-saving it writes version 5. Pinned by a
-regression that writes a version 4 envelope, reads it back, and asserts all 16
-channels on both the parameters and the engine.
-
-Version 4 widened the `bank` parameter from 0-128 to 0-255, so that a drum
-channel's runtime bank — FluidSynth's 128 drum offset plus the Bank Select MSB,
-up to 255 — is representable on every surface instead of only in the engine.
-Parameters are stored normalised, so the same stored value means a different bank
-number under the new range: a version 3 save's `bank` is rescaled through the
-bank number on the way in, and a channel saved on bank 128 restores on bank 128.
-Per-channel bank values are stored as plain integers and need no rescaling.
-
-Version 3 replaced the six per-channel CC71-79 sound-controller values with the mixer controls `volume` (CC7) and `pan` (CC10), and added the global `outputLevel` trim. A version 1 or 2 save has no volume/pan attributes, so those channels keep the GM defaults (volume 100, pan centre); the retired attributes are ignored rather than migrated, because an envelope control has no meaningful mapping onto a mixer control. Bank and preset assignments still restore from those older saves.
-
-Compatibility is forward-reading, not backward-reading: a newer build should migrate an older supported state, but an older beta is not expected to understand state written by a newer beta. The processor rejects a state whose schema number is newer than it supports, leaves its current engine state untouched, and shows a visible error. Testers must keep matching project and plugin backups when moving between candidates.
-
-Any future incompatible state change must:
-
-1. increment the schema version;
-2. add an explicit migration or safe-rejection test before the writer ships;
-3. preserve channel, bank, preset, controller, bookmark/path, and parameter semantics unless the release notes identify the exact intentional change;
-4. add a migration entry to `CHANGELOG.md`; and
-5. update this document and the Beta tester guide.
-
-Beta 1 establishes a new host identity: product `Juicy16`, bundle ID `com.pokestir.juicy16`, manufacturer code `Pkst`, and plugin code `Jc16`. Pre-Beta JuicySF/Juicy16 sessions are not guaranteed to locate or migrate to this identity; that intentional break was approved before Beta 1 because of the larger architectural changes.
-
-Beginning with Beta 1, the AU/VST3 identifiers, VST3 unit IDs, parameter IDs, and parameter versions are frozen compatibility surfaces. The exact values are recorded in this document. They remain stable throughout the Beta line unless an approved B0/B1 correction requires a change. Any such change needs a candidate migration note and host save/reopen validation.
+Any future state change needs a new schema number, a migration test, a
+changelog entry and an update here.

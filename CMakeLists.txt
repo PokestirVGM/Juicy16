@@ -15,7 +15,7 @@ cmake_minimum_required(VERSION 3.15)
 # `project()` command. `project()` sets up some helpful variables that describe source/binary
 # directories, and the current project version. This is a standard CMake command.
 
-project(JUICY16 VERSION 0.6.1)
+project(JUICY16 VERSION 1.0.0)
 # Deliberately NOT a plain CACHE default. A cached default is written once and
 # then ignored, so bumping the label here left every existing build directory
 # building - and displaying - the label it was first configured with. The version
@@ -23,7 +23,7 @@ project(JUICY16 VERSION 0.6.1)
 # copy, so a stale one is worse than none. Editing this line now wins everywhere;
 # -DJUICYSF_PRERELEASE_LABEL=... on the command line still overrides it, and keeps
 # overriding it for that build directory until the cache entry is removed.
-set(JUICYSF_PRERELEASE_LABEL_DEFAULT "beta.4")
+set(JUICYSF_PRERELEASE_LABEL_DEFAULT "beta.1")
 # A build directory configured once with -DJUICYSF_PRERELEASE_LABEL=... keeps that
 # label forever, silently, and goes on displaying it in the status bar after the
 # line above has moved on. That is precisely the case the status bar exists to

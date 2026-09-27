@@ -1,10 +1,21 @@
-# Juicy16 CC1 vibrato extension — FluidSynth 2.5.7
+# FluidSynth 2.5.7 patches
 
-`cc1-vibrato-scale.patch` is a local LGPL-compatible modification to FluidSynth, not an upstream API. It adds `fluid_synth_set_cc1_vibrato_scale(synth, channel, scale)` (1–24). Only modulator contributions with CC1 as either source and pitch LFO depth as destination are multiplied, once, after source curves and transforms. CC1 remains unchanged. Constant depth, pressure-only vibrato, filter/volume destinations and explicit bank zero overrides remain intact. The setting survives MIDI resets and the API updates held voices under FluidSynth's normal lock.
+Juicy16 builds FluidSynth 2.5.7 with two small changes. They're LGPL-2.1 like
+FluidSynth itself.
 
-`apply.cmake` applies the same exact edits on macOS and Windows, verifying every source file's SHA-256 before and after. It accepts an already-patched tree but rejects unexpected bases/results. The unified diff is the reviewable equivalent. Both dependency recipes invoke this script before compiling. Rebuild the dependency prefix; stock FluidSynth cannot supply this API. The plugin deliberately fails to compile against an unpatched header.
+- **`cc1-vibrato-scale.patch`** adds `fluid_synth_set_cc1_vibrato_scale()`,
+  which multiplies only the CC1-driven part of pitch vibrato (×1–×24) on one
+  channel. The CC1 value itself, other modulators and the bank's own settings
+  stay the same, and it survives MIDI resets.
+- **`dls-full-range-pan.patch`** gives every DLS region a CC10 pan range of the
+  normal amount plus that region's own pan. Banks built from hard-left/hard-right
+  sample pairs can then pan fully, and CC10=64 still leaves each region where the
+  bank put it. SF2 playback is unchanged.
 
-Upstream source: https://github.com/FluidSynth/fluidsynth/tree/v2.5.7
-Upstream archive SHA-256: `ce27840221ab00dd59bf27e85ecbba480c6c2a7c9fbec4243658f68f59c07f4a`.
+`apply.cmake` makes the same edits on macOS and Windows, checking every file's
+SHA-256 before and after. Both dependency scripts run it, and the plugin won't
+compile against a FluidSynth that doesn't have these patches. The `.patch`
+files are the readable version of the same changes.
 
-This changes depth only. It does not reconstruct modulation rate, delay, type, or other DS sequence data omitted by an exporter. Windows runtime and hardware/game-reference comparisons remain unverified.
+Upstream: https://github.com/FluidSynth/fluidsynth/tree/v2.5.7
+(archive SHA-256 `ce27840221ab00dd59bf27e85ecbba480c6c2a7c9fbec4243658f68f59c07f4a`)

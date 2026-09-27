@@ -1,5 +1,7 @@
+#include <array>
 #include "PluginProcessor.h"
 #include "SyntheticSf2.h"
+#include "SyntheticDls.h"
 #include "GuiConstants.h"
 #include <cmath>
 #include <cstdio>
@@ -222,6 +224,18 @@ int main(int argc, char** argv) {
                 "selected channel dropdown edits only that channel");
             p.getFluidSynthModel().selectChannelForEditing(0);
             check(vibrato->getSelectedId() == 1, "returning to channel 1 shows its independent unity multiplier");
+        }
+        auto* interpolation = dynamic_cast<juce::ComboBox*>(namedChild(*editor, "Sample interpolation"));
+        check(interpolation != nullptr && interpolation->getNumItems() == 3
+            && editor->getLocalBounds().contains(
+                editor->getLocalArea(interpolation, interpolation->getLocalBounds())),
+            "interpolation selector fits in settings with three choices");
+        if (interpolation != nullptr) {
+            interpolation->setSelectedId(2, juce::sendNotificationSync);
+            check(std::abs(findParameter(p, "interpolation")->convertFrom0to1(
+                      findParameter(p, "interpolation")->getValue()) - 1.0f) < 0.0001f,
+                "choosing Linear sets the interpolation parameter");
+            interpolation->setSelectedId(1, juce::sendNotificationSync);
         }
         auto* channelChoice = dynamic_cast<juce::ComboBox*>(namedChild(*editor, "CC1 MIDI channel"));
         if (channelChoice != nullptr && vibrato != nullptr) {
@@ -564,6 +578,57 @@ int main(int argc, char** argv) {
         bounded = bounded && onset >= 0 && extra >= 0 && extra <= 63;
     }
     check(bounded, "measured engine onset quantization stays within its documented 63-sample bound");
+    {
+        // A bank with no percussion-flagged kit must not go silent on channel 10
+        // after Bank Select: the drum channel falls back to the melodic bank.
+        juce::TemporaryFile noKitFile{".sf2"};
+        const auto noKit = SyntheticSf2::build({{0, 0, 441.0, "Kit in melodic bank"}});
+        check(noKitFile.getFile().replaceWithData(noKit.getData(), noKit.getSize()), "kit-less bank written");
+        JuicySFAudioProcessor p; load(p, noKitFile.getFile());
+        juce::MidiBuffer events;
+        events.addEvent(juce::MidiMessage::controllerEvent(10, 0, 0), 0);
+        events.addEvent(juce::MidiMessage::programChange(10, 0), 1);
+        events.addEvent(juce::MidiMessage::noteOn(10, 60, static_cast<juce::uint8>(100)), 2);
+        render(p, block, events);
+        events.clear();
+        render(p, block, events);
+        int kitBank{-1}, kitPreset{-1};
+        check(energy(block) > 0.0 && p.getFluidSynthModel().getChannelProgram(9, kitBank, kitPreset) && kitPreset == 0,
+            "channel 10 Bank Select plus Program Change plays a kit stored in the melodic bank");
+    }
+    {
+        // DLS pan extension: a hard-L/R stereo pair whose bank narrows CC10 to
+        // 25.4% used to reach only about 3.6 dB of L/R difference at CC10=0.
+        juce::TemporaryFile dlsFile{".dls"};
+        const auto dls = SyntheticDls::buildStereoPair(254);
+        check(dlsFile.getFile().replaceWithData(dls.getData(), dls.getSize()), "synthetic stereo-pair DLS written");
+        JuicySFAudioProcessor p; load(p, dlsFile.getFile());
+        auto sides = [&](int pan) {
+            juce::MidiBuffer events;
+            events.addEvent(juce::MidiMessage::controllerEvent(1, 120, 0), 0);
+            render(p, block, events);
+            events.clear();
+            events.addEvent(juce::MidiMessage::controllerEvent(1, 10, pan), 0);
+            events.addEvent(juce::MidiMessage::noteOn(1, 69, static_cast<juce::uint8>(100)), 0);
+            std::array<double, 2> level{};
+            for (int i = 0; i < 4; ++i) {
+                render(p, block, events);
+                events.clear();
+                for (int ch = 0; ch < 2; ++ch)
+                    level[static_cast<size_t>(ch)] += block.getRMSLevel(ch, 0, block.getNumSamples());
+            }
+            return level;
+        };
+        const auto left = sides(0), centre = sides(64), right = sides(127);
+        std::printf("DLS PAN left=%.6f/%.6f centre=%.6f/%.6f right=%.6f/%.6f\n",
+            left[0], left[1], centre[0], centre[1], right[0], right[1]);
+        check(centre[0] > 0.0 && std::abs(centre[0] - centre[1]) < 0.01 * centre[0],
+            "stereo-pair DLS region stays centred at CC10=64");
+        // CC10=127 is +0.984 bipolar in FluidSynth, so "right" leaves a trace on
+        // the left (about -39 dB), exactly as it does for a mono region.
+        check(left[1] < 0.001 * left[0] && right[0] < 0.02 * right[1],
+            "CC10 moves a hard-panned DLS stereo pair fully left and fully right");
+    }
     check(logger.assertionCount.load() == 0, "processing, editor construction and painting produce no JUCE assertions");
     juce::Logger::setCurrentLogger(nullptr);
     return failures == 0 ? 0 : 1;
