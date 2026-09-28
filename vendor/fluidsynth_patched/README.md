@@ -1,6 +1,6 @@
 # FluidSynth 2.5.7 patches
 
-Juicy16 builds FluidSynth 2.5.7 with two small changes. They're LGPL-2.1 like
+Juicy16 builds FluidSynth 2.5.7 with three small changes. They're LGPL-2.1 like
 FluidSynth itself.
 
 - **`cc1-vibrato-scale.patch`** adds `fluid_synth_set_cc1_vibrato_scale()`,
@@ -11,6 +11,9 @@ FluidSynth itself.
   normal amount plus that region's own pan. Banks built from hard-left/hard-right
   sample pairs can then pan fully, and CC10=64 still leaves each region where the
   bank put it. SF2 playback is unchanged.
+- **`timer-thread-lifetime.patch`** releases the C++11 thread object after a
+  lazy SoundFont unload timer is joined. The thread has already finished; this
+  closes the 16-byte allocation left by each such unload.
 
 `apply.cmake` makes the same edits on macOS and Windows, checking every file's
 SHA-256 before and after. Both dependency scripts run it, and the plugin won't

@@ -1,0 +1,14 @@
+diff --git a/src/utils/fluid_sys.c b/src/utils/fluid_sys.c
+index 91d24e0..401405d 100644
+--- a/src/utils/fluid_sys.c
++++ b/src/utils/fluid_sys.c
+@@ -1104 +1104,4 @@ fluid_timer_join(fluid_timer_t *timer)
+-    if(timer->thread)
++    /* Joining finishes the work; the C++11 thread object still needs release.
++     * Capture it because an auto-destroying timer may free itself on exit. */
++    fluid_thread_t *thread = timer->thread;
++    if(thread)
+@@ -1107 +1110,2 @@ fluid_timer_join(fluid_timer_t *timer)
+-        fluid_thread_join(timer->thread);
++        fluid_thread_join(thread);
++        delete_fluid_thread(thread);

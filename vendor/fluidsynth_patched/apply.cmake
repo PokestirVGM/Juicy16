@@ -75,3 +75,28 @@ edit_file("src/sfloader/fluid_dls.cpp" "9bfb042b0170723d09403a7719fc0cd733c726a8
             }
 
             // See also https://github.com/FluidSynth/fluidsynth/pull/1626 conversation for "Key Number to Pitch" articulation implementation]==])
+edit_file("src/utils/fluid_sys.c" "6ac2120ae685b97cfa13ad42a2f8113ff9b88a2300f3b1237b0be1c575f2e2aa" "06f92bde0e24c4325083633f4eef710def75bc64fd7cb615e21a174b657c5b50"
+[==[    if(timer->thread)
+    {
+        auto_destroy = timer->auto_destroy;
+        fluid_thread_join(timer->thread);
+
+        if(!auto_destroy)
+        {
+            timer->thread = NULL;
+        }
+    }]==]
+[==[    /* Joining finishes the work; the C++11 thread object still needs release.
+     * Capture it because an auto-destroying timer may free itself on exit. */
+    fluid_thread_t *thread = timer->thread;
+    if(thread)
+    {
+        auto_destroy = timer->auto_destroy;
+        fluid_thread_join(thread);
+        delete_fluid_thread(thread);
+
+        if(!auto_destroy)
+        {
+            timer->thread = NULL;
+        }
+    }]==])

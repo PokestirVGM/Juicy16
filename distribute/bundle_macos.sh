@@ -113,11 +113,13 @@ done
 mkdir -p "$staging_dir/vendor/juce_patched"
 cp "$repo_dir/vendor/juce_patched/README.md" \
    "$repo_dir/vendor/juce_patched/juce-8.0.14-vst3-multitimbral.patch" \
+   "$repo_dir/vendor/juce_patched/juce-8.0.14-au-cfstring-lifetime.patch" \
    "$staging_dir/vendor/juce_patched/"
 mkdir -p "$staging_dir/vendor/fluidsynth_patched"
 cp "$repo_dir/vendor/fluidsynth_patched/README.md" \
    "$repo_dir/vendor/fluidsynth_patched/cc1-vibrato-scale.patch" \
    "$repo_dir/vendor/fluidsynth_patched/dls-full-range-pan.patch" \
+   "$repo_dir/vendor/fluidsynth_patched/timer-thread-lifetime.patch" \
    "$repo_dir/vendor/fluidsynth_patched/apply.cmake" \
    "$staging_dir/vendor/fluidsynth_patched/"
 for notice in JUCE-framework_AGPL3.txt JUCE-AudioUnitSDK.txt JUCE-HarfBuzz.txt \

@@ -1,0 +1,11 @@
+diff --git a/modules/juce_audio_plugin_client/juce_audio_plugin_client_AU_1.mm b/modules/juce_audio_plugin_client/juce_audio_plugin_client_AU_1.mm
+--- a/modules/juce_audio_plugin_client/juce_audio_plugin_client_AU_1.mm
++++ b/modules/juce_audio_plugin_client/juce_audio_plugin_client_AU_1.mm
+@@ -2423,6 +2423,6 @@
+                 for (int i = 0; i < numSteps; ++i)
+                 {
+                     auto value = (float) i / maxValue;
+-                    stringValues->add (CFStringCreateCopy (nullptr, (getTextValue (value).toCFString())));
++                    stringValues->add (getTextValue (value).toCFString());
+                 }
+             }

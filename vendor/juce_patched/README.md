@@ -1,7 +1,7 @@
-# JUCE 8.0.14 VST3 wrapper patch
+# JUCE 8.0.14 wrapper patches
 
-Juicy16 replaces JUCE's VST3 wrapper with a patched copy; AU and Standalone use
-stock JUCE. The patch lets VST3 hosts change instruments per MIDI channel:
+Juicy16 replaces JUCE's VST3 wrapper with a patched copy. The VST3 patch lets
+hosts change instruments per MIDI channel:
 
 - It answers Cubase's early unit and program-list queries with the full
   16-channel structure, so all channels work, not just channel 1.
@@ -29,5 +29,18 @@ CMake checks all five hashes before building. JUCE ships the files with CRLF
 line endings; the diff uses LF. To reproduce it, copy the stock files somewhere,
 convert them to LF, and run `patch -p1 < juce-8.0.14-vst3-multitimbral.patch`.
 
-Updating JUCE means regenerating the patch and hashes, then re-running
-`vst3_smoke` and testing in real hosts.
+The AU target compiles a one-line patched copy of `juce_audio_plugin_client_AU_1.mm`.
+JUCE 8.0.14 copies the temporary result of `toCFString()` without releasing it;
+the patched `OwnedArray` takes ownership of that result directly. This preserves
+the parameter text while releasing it on AU destruction. The installed JUCE and
+Standalone source stay untouched. CMake checks the stock, generated, and diff
+hashes before building:
+
+```text
+d6b4d9016335df4d92b829bba4d7ca99f60588a0a00b145033befeb66956d095  stock juce_audio_plugin_client_AU_1.mm (CRLF)
+161911f3e5d6a2aa9e498cf700324943fc16626751c0d84098a778d99b1e7291  patched juce_audio_plugin_client_AU_1.mm (LF)
+ed03eede36380a7db4cc2b0334ac78f553a4604275b1ceb853364d14b03d2a11  juce-8.0.14-au-cfstring-lifetime.patch
+```
+
+Updating JUCE means regenerating both patches and their hashes, then re-running
+the AU/VST3 smoke tests and testing the wrappers in real hosts.

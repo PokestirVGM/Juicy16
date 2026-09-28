@@ -142,11 +142,15 @@ foreach (BINARY IN LISTS BINARIES)
     message(FATAL_ERROR
       "Could not scan embedded strings in ${BINARY}: ${STRINGS_ERROR}")
   endif ()
-  if (STRINGS_OUTPUT MATCHES
-      "(/opt/homebrew|/usr/local|/Users/[A-Za-z0-9._-]+/|/private/tmp|/var/folders/)")
-    message(FATAL_ERROR
-      "Release artifact embeds a developer/build path: ${BINARY}")
-  endif ()
+  string(REPLACE "\n" ";" STRINGS_LINES "${STRINGS_OUTPUT}")
+  foreach (EMBEDDED_STRING IN LISTS STRINGS_LINES)
+    if (EMBEDDED_STRING MATCHES
+        "(/opt/homebrew|/usr/local|/Users/[A-Za-z0-9._-]+/|/private/tmp|/var/folders/)")
+      message(FATAL_ERROR
+        "Release artifact embeds a developer/build path: ${BINARY}\n"
+        "  ${EMBEDDED_STRING}")
+    endif ()
+  endforeach ()
 endforeach ()
 
 message(STATUS

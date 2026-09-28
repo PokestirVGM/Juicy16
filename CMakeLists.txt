@@ -153,6 +153,19 @@ if (JUICYSF_RELEASE_VALIDATION)
   endif ()
 endif ()
 
+# Release binaries must not retain __FILE__ paths from project or JUCE sources.
+# Older runner Clang keeps some of these strings that newer local Clang removes.
+# The dependency recipe applies the same mapping to its static archives.
+if (JUICYSF_RELEASE_VALIDATION AND APPLE)
+  foreach (_juicysf_path IN ITEMS
+      "${CMAKE_SOURCE_DIR}" "${CMAKE_BINARY_DIR}" "${JUCE_MODULES_DIR}"
+      "$ENV{HOME}" ${CMAKE_PREFIX_PATH})
+    if (IS_ABSOLUTE "${_juicysf_path}")
+      add_compile_options("-ffile-prefix-map=${_juicysf_path}=.")
+    endif ()
+  endforeach ()
+endif ()
+
 
 
 # How FluidSynth is found. pkg-config is the macOS path and produced every
@@ -592,6 +605,67 @@ if (TARGET juce_audio_plugin_client_VST3)
   endif ()
   set_target_properties(juce_audio_plugin_client_VST3 PROPERTIES INTERFACE_SOURCES "${_vst3_client_new_sources}")
   message(STATUS "VST3 wrapper source swapped for vendored kIsProgramChange patch")
+endif ()
+
+# JUCE 8.0.14's AU wrapper copies a newly created CFString without releasing
+# the original. OwnedArray already owns and releases the result of toCFString(),
+# so compile a one-line patched copy for AU only. Never mutate installed JUCE.
+if (APPLE)
+  if (NOT TARGET juce_audio_plugin_client_AU)
+    message(FATAL_ERROR "JUCE AU client target is missing")
+  endif ()
+  set(_juicysf_stock_au
+      "${JUCE_MODULES_DIR}/juce_audio_plugin_client/juce_audio_plugin_client_AU_1.mm")
+  file(SHA256 "${_juicysf_stock_au}" _juicysf_stock_au_sha256)
+  if (NOT _juicysf_stock_au_sha256 STREQUAL
+          "d6b4d9016335df4d92b829bba4d7ca99f60588a0a00b145033befeb66956d095")
+    message(FATAL_ERROR "JUCE 8.0.14 AU wrapper differs from the reviewed leak-fix base")
+  endif ()
+  file(SHA256
+    "${CMAKE_SOURCE_DIR}/vendor/juce_patched/juce-8.0.14-au-cfstring-lifetime.patch"
+    _juicysf_au_patch_sha256)
+  if (NOT _juicysf_au_patch_sha256 STREQUAL
+          "ed03eede36380a7db4cc2b0334ac78f553a4604275b1ceb853364d14b03d2a11")
+    message(FATAL_ERROR "JUCE AU leak-fix diff changed without review")
+  endif ()
+  file(READ "${_juicysf_stock_au}" _juicysf_au_source)
+  string(REPLACE
+    "stringValues->add (CFStringCreateCopy (nullptr, (getTextValue (value).toCFString())));"
+    "stringValues->add (getTextValue (value).toCFString());"
+    _juicysf_au_source "${_juicysf_au_source}")
+  set(_juicysf_patched_au
+      "${CMAKE_CURRENT_BINARY_DIR}/juce_audio_plugin_client_AU_1.mm")
+  set(_juicysf_write_au TRUE)
+  if (EXISTS "${_juicysf_patched_au}")
+    file(SHA256 "${_juicysf_patched_au}" _juicysf_existing_au_sha256)
+    if (_juicysf_existing_au_sha256 STREQUAL
+            "161911f3e5d6a2aa9e498cf700324943fc16626751c0d84098a778d99b1e7291")
+      set(_juicysf_write_au FALSE)
+    endif ()
+  endif ()
+  if (_juicysf_write_au)
+    file(WRITE "${_juicysf_patched_au}" "${_juicysf_au_source}")
+  endif ()
+  file(SHA256 "${_juicysf_patched_au}" _juicysf_patched_au_sha256)
+  if (NOT _juicysf_patched_au_sha256 STREQUAL
+          "161911f3e5d6a2aa9e498cf700324943fc16626751c0d84098a778d99b1e7291")
+    message(FATAL_ERROR "Unexpected JUCE AU leak-fix result")
+  endif ()
+  get_target_property(_juicysf_au_sources juce_audio_plugin_client_AU INTERFACE_SOURCES)
+  set(_juicysf_au_swapped FALSE)
+  set(_juicysf_au_new_sources "")
+  foreach (_src IN LISTS _juicysf_au_sources)
+    if (_src MATCHES "juce_audio_plugin_client_AU_1\\.mm")
+      string(REPLACE "${_juicysf_stock_au}" "${_juicysf_patched_au}" _src "${_src}")
+      set(_juicysf_au_swapped TRUE)
+    endif ()
+    list(APPEND _juicysf_au_new_sources "${_src}")
+  endforeach ()
+  if (NOT _juicysf_au_swapped)
+    message(FATAL_ERROR "Could not find JUCE AU wrapper source in its client target")
+  endif ()
+  set_target_properties(juce_audio_plugin_client_AU PROPERTIES
+    INTERFACE_SOURCES "${_juicysf_au_new_sources}")
 endif ()
 
 # Source/VST3Multitimbral.cpp includes VST3 SDK interface headers (header-only —

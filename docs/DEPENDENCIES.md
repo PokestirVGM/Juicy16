@@ -24,7 +24,10 @@ Everything is linked statically, so the plugin only depends on system frameworks
 
 ## Patches
 
-- **FluidSynth:** CC1 vibrato strength and full-range DLS pan. See
+- **JUCE:** the pinned VST3 multichannel wrapper and an AU CFString lifetime fix.
+  See [vendor/juce_patched](../vendor/juce_patched/README.md).
+- **FluidSynth:** CC1 vibrato strength, full-range DLS pan, and timer-thread
+  cleanup after a lazy SoundFont unload. See
   [vendor/fluidsynth_patched](../vendor/fluidsynth_patched/README.md).
 - **libsndfile:** a backported fix for CVE-2025-52194, a buffer overflow a crafted
   `.sf3` file could reach. The build checks the patched file's hash.
