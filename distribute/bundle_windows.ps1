@@ -25,6 +25,8 @@ if ($dirty) {
     if (-not $AllowDirty) { throw 'Commit the candidate first, or use -AllowDirty for local validation only.' }
     $name += '-LOCAL-DIRTY'
 }
+$verification = Join-Path $BuildDir "package-verification-$name"
+if (Test-Path -LiteralPath $verification) { throw "Package verification directory already exists: $verification" }
 $cache = Get-Content -LiteralPath "$BuildDir/CMakeCache.txt" -Raw
 $dlsInput = [regex]::Match($cache, '(?m)^JUICYSF_WINDOWS_SYSTEM_DLS:FILEPATH=([^\r\n]+)').Groups[1].Value
 if (-not $dlsInput -or -not (Test-Path -LiteralPath $dlsInput -PathType Leaf)) {
@@ -53,8 +55,6 @@ $installer = Join-Path $PSScriptRoot "out/$name-Setup.exe"
 "$((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant())  $name-Setup.exe" |
     Set-Content -LiteralPath "$installer.sha256" -Encoding utf8
 
-$verification = Join-Path $BuildDir "package-verification-$Candidate"
-if (Test-Path -LiteralPath $verification) { throw "Package verification directory already exists: $verification" }
 Expand-Archive -LiteralPath "$stage.zip" -DestinationPath $verification
 $extracted = Join-Path $verification "$name-Portable"
 foreach ($line in Get-Content -LiteralPath "$extracted/SHA256SUMS") {
