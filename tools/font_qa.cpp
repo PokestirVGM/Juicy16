@@ -20,6 +20,7 @@
 #include <filesystem>
 #include <fstream>
 #include <random>
+#include <sstream>
 
 namespace fs = std::filesystem;
 using juicysf::repairDlsImage;
@@ -120,6 +121,91 @@ static void unitTests() {
         }
         CHECK(stable, "5000 malformed DLS images: memory-safe and idempotent");
     }
+    { // Preflight and repair must agree without modifying the inspected bytes.
+        bool exact{true};
+        for (const bool inner : {false, true})
+            for (const bool outer : {false, true}) {
+                auto bytes = makeDls(inner, outer);
+                const auto before = bytes;
+                const std::string data(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+                std::istringstream stream{data, std::ios::binary};
+                const auto decision = juicysf::dlsRepairNeeded(bytes.size(),
+                    [&stream](size_t offset, uint8_t* destination, size_t count) {
+                        stream.clear();
+                        stream.seekg(static_cast<std::streamoff>(offset));
+                        return static_cast<bool>(stream.read(reinterpret_cast<char*>(destination),
+                                                             static_cast<std::streamsize>(count)));
+                    });
+                const bool modified = repairDlsImage(bytes.data(), bytes.size());
+                exact = exact && decision != juicysf::DlsRepairScan::readFailed
+                    && (decision == juicysf::DlsRepairScan::needed) == modified
+                    && modified == (inner || outer);
+                if (!modified)
+                    exact = exact && bytes == before;
+            }
+        CHECK(exact, "stream preflight agrees with exact healthy/inner/outer DLS repairs");
+    }
+    { // A large healthy sample chunk is skipped, rather than read into memory.
+        constexpr size_t logicalSize{128u * 1024u * 1024u};
+        std::vector<uint8_t> header(20, 0);
+        memcpy(header.data(), "RIFF", 4);
+        memcpy(header.data() + 8, "DLS ", 4);
+        memcpy(header.data() + 12, "LIST", 4);
+        put32(header, 4, static_cast<uint32_t>(logicalSize - 8));
+        put32(header, 16, static_cast<uint32_t>(logicalSize - 20));
+        size_t bytesRead{0};
+        const auto decision = juicysf::dlsRepairNeeded(logicalSize,
+            [&header, &bytesRead](size_t offset, uint8_t* destination, size_t count) {
+                if (offset > header.size() || count > header.size() - offset)
+                    return false;
+                memcpy(destination, header.data() + offset, count);
+                bytesRead += count;
+                return true;
+            });
+        CHECK(decision == juicysf::DlsRepairScan::notNeeded && bytesRead == 16,
+              "128 MB healthy DLS preflight reads only 16 header bytes");
+    }
+    { // Failed header reads are indeterminate, never a healthy-file verdict.
+        auto bytes = makeDls(false, false);
+        const auto before = bytes;
+        const auto unreadable = juicysf::dlsRepairNeeded(bytes.size(),
+            [](size_t, uint8_t*, size_t) { return false; });
+        const auto truncatedRead = juicysf::dlsRepairNeeded(bytes.size(),
+            [&bytes](size_t offset, uint8_t* destination, size_t count) {
+                if (offset != 0)
+                    return false;
+                memcpy(destination, bytes.data(), count);
+                return true;
+            });
+        CHECK(unreadable == juicysf::DlsRepairScan::readFailed
+                  && truncatedRead == juicysf::DlsRepairScan::readFailed && bytes == before,
+              "short/failed stream reads require bounded full-buffer fallback");
+    }
+    { // Dense zero-size chunks, odd alignment and extreme sizes share decisions.
+        std::mt19937 rng{0x44534c53u};
+        bool consistent{true};
+        for (int iteration = 0; iteration < 5000 && consistent; ++iteration) {
+            std::vector<uint8_t> bytes(12u + (rng() % 500u));
+            for (auto& byte : bytes)
+                byte = static_cast<uint8_t>(rng());
+            memcpy(bytes.data(), "RIFF", 4);
+            memcpy(bytes.data() + 8, "DLS ", 4);
+            const auto inspected = bytes;
+            const auto decision = juicysf::dlsRepairNeeded(bytes.size(),
+                [&bytes](size_t offset, uint8_t* destination, size_t count) {
+                    if (offset > bytes.size() || count > bytes.size() - offset)
+                        return false;
+                    memcpy(destination, bytes.data() + offset, count);
+                    return true;
+                });
+            consistent = bytes == inspected
+                && decision != juicysf::DlsRepairScan::readFailed
+                && (decision == juicysf::DlsRepairScan::needed)
+                    == repairDlsImage(bytes.data(), bytes.size());
+        }
+        CHECK(consistent, "5000 malformed DLS preflights agree with repair and never mutate input");
+    }
+
     { // the same stress must never touch non-DLS data
         std::mt19937 rng{0x53463233u};
         bool untouched = true;

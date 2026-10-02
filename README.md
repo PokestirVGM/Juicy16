@@ -8,11 +8,13 @@ mixes to one stereo output.
 
 ## Download
 
-The latest release is [1.0.0-beta.1](https://github.com/PokestirVGM/Juicy16/releases/tag/v1.0.0-beta.1).
+The latest macOS release is [1.0.0-beta.2](https://github.com/PokestirVGM/Juicy16/releases/tag/v1.0.0-beta.2).
 
-- **macOS 11+ on Apple Silicon:** AU and VST3. Unzip, double-click
-  `install_macos.command`, then rescan plug-ins in your DAW.
-- **Windows 10+ x64:** VST3. Run the Setup EXE, or extract the portable ZIP and
+- **Apple Silicon macOS:** Standalone, AU and VST3. The build targets macOS 11;
+  current checks run on macOS 26.6.2. Unzip and run `install_macos.command`.
+  Open Juicy16 from your Applications folder, or rescan plug-ins in your DAW.
+- **Windows 10+ x64:** VST3 remains on [1.0.0-beta.1](https://github.com/PokestirVGM/Juicy16/releases/tag/v1.0.0-beta.1).
+  Run the Setup EXE, or extract the portable ZIP and
   copy the complete `Juicy16.vst3` folder into your DAW's VST3 folder, then rescan.
   Unsigned; includes matching source and checksums. [Windows validation](docs/WINDOWS_RELEASE.md).
 
@@ -20,7 +22,22 @@ Nothing else needs installing. The macOS builds are ad-hoc signed, so macOS will
 them until you clear quarantine; the [beta tester guide](docs/BETA_TESTER_GUIDE.md)
 shows how.
 
-## What's new in 1.0.0-beta.1
+## What's new in 1.0.0-beta.2
+
+- **Standalone MIDI playback:** select a sound bank and MIDI together, then
+  play, pause, seek and change speed. The timeline shows elapsed/total time
+  and current BPM. Loop the whole song or drag a section's Start/End handles.
+- **The same sixteen-channel rack:** automatic instruments, live activity,
+  mute/solo and the existing controls. [Standalone playback](docs/STANDALONE.md).
+- **Recall and playback fixes:** saved channel settings, pedal-held mute,
+  high-rate rendering, accent persistence and timer-thread cleanup.
+- **Less rendering and UI work:** audio settings, voices and effect tails
+  stay intact. Offline measurements are in the [audit](docs/AUDIT.md).
+
+Current FL Studio/Cubase, minimum-OS and Windows checks remain pending;
+see [known issues](docs/KNOWN_ISSUES.md).
+
+## From 1.0.0-beta.1
 
 - **Interpolation setting** (Settings → Sound): Linear by default, which is what
   Fruity LSD uses, plus 7th-order and None. Linear keeps the bright grit of

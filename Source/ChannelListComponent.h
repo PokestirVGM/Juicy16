@@ -8,6 +8,7 @@
 #include "FluidSynthModel.h"
 #include "PatchList.h"
 #include "GuiConstants.h"
+#include "Theme.h"
 #include <memory>
 #include <vector>
 
@@ -16,6 +17,7 @@ using namespace std;
 class ChannelListComponent : public Component,
                              public TableListBoxModel,
                              public ValueTree::Listener,
+                             public juce::AsyncUpdater,
                              private juce::Timer {
 public:
     // Column ids, in the row's left-to-right order.
@@ -83,9 +85,14 @@ public:
     void valueTreeRedirected(ValueTree&) override {}
 
 private:
+#if JUICYSF_UI_WORK_COUNTERS
+    friend struct Juicy16::UIWorkBenchmark;
+#endif
+    void handleAsyncUpdate() override;
     void timerCallback() override;
     std::array<unsigned int, 16> lastMidiEvents{};
     std::array<int, 16> midiLampTicks{};
+    std::array<float, 16> lastPaintedPeak{};
     // A cell's controls are built before it is parented and cache the default
     // LookAndFeel's colours; resending on reparent applies the theme.
     class ThemedCell : public Component {
@@ -98,6 +105,7 @@ private:
     public:
         explicit PatchCell(ChannelListComponent& owner);
         void setRow(int newRow);
+        void updateDiagnosticTooltip(int bank, int program, int soundingBank, int soundingPreset);
         void resized() override;
         juce::ComboBox& getCombo() { return combo; }
     private:
@@ -105,6 +113,9 @@ private:
         juce::ComboBox combo;
         int row{-1};
         int cellListVersion{-1};
+        int displayedBank{-1}, displayedPreset{-1};
+        bool displayedNodeValid{false};
+        std::array<int, 6> tooltipInputs{{-1, -1, -1, -1, -1, -1}};
     };
 
     class MuteSoloCell : public ThemedCell {

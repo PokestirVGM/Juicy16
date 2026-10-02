@@ -5,11 +5,14 @@
 
 #include "../JuceLibraryCode/JuceHeader.h"
 #include "FluidSynthModel.h"
+#include "Theme.h"
+#include <array>
 
 using namespace std;
 using SliderAttachment = AudioProcessorValueTreeState::SliderAttachment;
 
 class MixerPanelComponent : public Component,
+                            public juce::AsyncUpdater,
                             private ValueTree::Listener, private juce::Timer
 {
 public:
@@ -23,6 +26,10 @@ public:
     void lookAndFeelChanged() override;
 
 private:
+#if JUICYSF_UI_WORK_COUNTERS
+    friend struct Juicy16::UIWorkBenchmark;
+#endif
+    void handleAsyncUpdate() override;
     void valueTreePropertyChanged(ValueTree&, const Identifier&) override;
     void valueTreeChildAdded(ValueTree&, ValueTree&) override {}
     void valueTreeChildRemoved(ValueTree&, ValueTree&, int) override {}
@@ -34,6 +41,10 @@ private:
     void syncOutputLevelReadout();
     FluidSynthModel& fluidSynthModel;
     Label channelInfo, channelState, channelPatch, channelPatchDetail;
+    int displayedChannel{-1}, displayedSilenced{-1};
+    std::array<int, 5> displayedPatchInputs{{-1, -1, -1, -1, -1}};
+    std::array<int, 5> displayedDiagnosticInputs{{-1, -1, -1, -1, -1}};
+    bool patchDisplayInvalid{true};
     juce::OwnedArray<Label> diagnosticLabels, diagnosticValues;
     class PeakReadout : public juce::TextButton {
     public:
@@ -42,6 +53,7 @@ private:
     private:
         float peak{0.0f};
         bool overload{false};
+        bool initialised{false};
     };
     PeakReadout peakReadout;
     float displayPeak{0.0f};

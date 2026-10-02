@@ -7,7 +7,34 @@
 
 #include "../JuceLibraryCode/JuceHeader.h"
 
+#ifndef JUICYSF_UI_WORK_COUNTERS
+ #define JUICYSF_UI_WORK_COUNTERS 0
+#endif
+
+#if JUICYSF_UI_WORK_COUNTERS
+class ChannelListComponent;
+class MixerPanelComponent;
+#endif
+
 namespace Juicy16 {
+
+#if JUICYSF_UI_WORK_COUNTERS
+// Opt-in harness measurements; absent from ordinary product builds.
+struct UIWorkCounters {
+    juce::uint64 rackPatchLookups{}, rackTooltipFormats{}, rackActivityRepaints{};
+    juce::uint64 mixerPatchFormats{}, mixerControllerFormats{}, mixerPeakFormats{};
+    juce::uint64 settingsCC1Formats{}, accentTreeRefreshes{}, keyboardKeyDraws{};
+};
+inline UIWorkCounters uiWorkCounters;
+struct UIWorkBenchmark {
+    static void tickRack(ChannelListComponent&);
+    static void tickMixer(MixerPanelComponent&);
+    static void tickSettings(juce::Component&);
+};
+#define JUICY16_COUNT_UI_WORK(field) (++Juicy16::uiWorkCounters.field)
+#else
+#define JUICY16_COUNT_UI_WORK(field) ((void) 0)
+#endif
 
 // Custom ColourIds resolved through findColour(). The base is outside JUCE's
 // ranges.

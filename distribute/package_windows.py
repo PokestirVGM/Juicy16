@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import json
 import pathlib
+import re
 import shutil
 import subprocess
 import zipfile
@@ -12,14 +13,40 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def archive_tree(root, output):
+def validated_dependency_archives(recipe, directory):
+    text = recipe.read_text(encoding="utf-8")
+    pins = re.findall(
+        r"Get-PinnedSource\s+-Name\s+'([^']+)'\s+`\s*\n"
+        r"\s*-Url\s+'[^']+'\s+`\s*\n"
+        r"\s*-ExpectedSha256\s+'([0-9a-fA-F]{64})'", text)
+    declarations = re.findall(r"\bGet-PinnedSource\s+-Name\b", text)
+    if not pins or len(pins) != len(declarations) or len({name for name, _ in pins}) != len(pins):
+        raise RuntimeError("Cannot read every pinned dependency archive from the Windows recipe")
+    archives = []
+    for name, expected in pins:
+        archive = directory / (name + ".tar.gz")
+        if not archive.is_file():
+            raise RuntimeError(f"Missing corresponding-source archive: {archive}")
+        if sha(archive) != expected.lower():
+            raise RuntimeError(f"Pinned source checksum mismatch: {archive}")
+        archives.append(archive)
+    return archives
+
+
+def archive_tree(root, output, executable_files=()):
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         for path in sorted(root.rglob("*")):
             if path.is_file():
                 info = zipfile.ZipInfo(root.name + "/" + path.relative_to(root).as_posix(),
                                        (2026, 1, 1, 0, 0, 0))
                 info.compress_type = zipfile.ZIP_DEFLATED
-                info.external_attr = 0o100644 << 16
+                # The source archive must still be runnable after extraction on
+                # macOS. Windows checkouts do not expose Git's executable bit,
+                # so accept the indexed paths as well as native file modes.
+                executable = (path.relative_to(root).as_posix() in executable_files
+                              or bool(path.stat().st_mode & 0o111))
+                info.create_system = 3  # Unix permission bits, even on Windows.
+                info.external_attr = (0o100755 if executable else 0o100644) << 16
                 archive.writestr(info, path.read_bytes())
     output.with_suffix(output.suffix + ".sha256").write_text(
         sha(output) + "  " + output.name + "\n", encoding="utf-8")
@@ -41,6 +68,8 @@ def main():
     parser.add_argument("--name", required=True)
     args = parser.parse_args()
     root = args.root.resolve()
+    dependency_archives = validated_dependency_archives(
+        root / "tools/build_windows_dependencies.ps1", args.dependency_sources)
     output = root / "distribute/out"
     stage = output / (args.name + "-Portable")
     source = output / (args.name + "-Source")
@@ -78,6 +107,10 @@ def main():
     (stage / "BUILD_INFO.json").write_text(json.dumps(info, indent=2) + "\n", encoding="utf-8")
     files = subprocess.check_output(["git", "ls-files", "--cached", "--others", "--exclude-standard"],
                                     cwd=root, text=True).splitlines()
+    indexed = subprocess.check_output(["git", "ls-files", "--stage", "-z"], cwd=root,
+                                      text=True).split("\0")
+    source_executables = {entry.split("\t", 1)[1] for entry in indexed
+                          if entry.startswith("100755 ")}
     for name in sorted(set(files)):
         path = root / name
         if not path.is_file():
@@ -87,7 +120,7 @@ def main():
         shutil.copy2(path, destination)
     upstream = source / "upstream"
     upstream.mkdir()
-    for path in sorted(args.dependency_sources.glob("*.tar.gz")):
+    for path in sorted(dependency_archives):
         shutil.copy2(path, upstream / path.name)
     subprocess.run(["git", "-C", str(args.juce_source), "archive", "--format=tar.gz",
                     "--prefix=JUCE-8.0.14/", "-o", str(upstream / "JUCE-8.0.14.tar.gz"),
@@ -97,7 +130,8 @@ def main():
         manifest = "".join(sha(p) + "  " + p.relative_to(directory).as_posix() + "\n"
                            for p in sorted(directory.rglob("*")) if p.is_file())
         (directory / "SHA256SUMS").write_text(manifest, encoding="utf-8")
-        archive_tree(directory, output / (directory.name + ".zip"))
+        archive_tree(directory, output / (directory.name + ".zip"),
+                     source_executables if directory == source else ())
     print(stage)
 
 

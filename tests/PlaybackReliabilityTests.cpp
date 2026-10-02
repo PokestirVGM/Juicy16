@@ -3,9 +3,11 @@
 #include "SyntheticSf2.h"
 #include "SyntheticDls.h"
 #include "GuiConstants.h"
+#include "Theme.h"
 #include <cmath>
 #include <cstdio>
 #include <memory>
+#include <limits>
 
 namespace {
 int failures{0};
@@ -133,6 +135,211 @@ int main(int argc, char** argv) {
             && m.rememberedExpression(2) == -1 && m.rememberedBendRange(2) == -1,
             "older project loaded into used instance gets unity trim and recovery defaults");
         check(std::isinf(restored.getTailLengthSeconds()), "host is told instrument tails are unbounded");
+    }
+    {
+        // Restore into the SAME instance before the message-thread mirrors catch
+        // up. The parameter values still match the save, but the synth does not.
+        JuicySFAudioProcessor p; load(p, bank);
+        auto& model = p.getFluidSynthModel();
+        juce::MidiBuffer events;
+        for (int ch = 1; ch <= 16; ++ch) {
+            events.addEvent(juce::MidiMessage::programChange(ch, ch == 10 ? 0 : 1), 0);
+            events.addEvent(juce::MidiMessage::controllerEvent(ch, 7, 40 + ch), 1);
+            events.addEvent(juce::MidiMessage::controllerEvent(ch, 10, 20 + ch), 2);
+        }
+        render(p, block, events);
+        model.handleUpdateNowIfNeeded();
+        juce::MemoryBlock saved; p.getStateInformation(saved);
+        for (int ch = 1; ch <= 16; ++ch) {
+            events.addEvent(juce::MidiMessage::programChange(ch, 0), 0);
+            events.addEvent(juce::MidiMessage::controllerEvent(ch, 7, 110), 1);
+            events.addEvent(juce::MidiMessage::controllerEvent(ch, 10, 99), 2);
+        }
+        render(p, block, events);
+        p.setStateInformation(saved.getData(), static_cast<int>(saved.getSize()));
+        model.handleUpdateNowIfNeeded();
+        bool restored{true};
+        for (int ch = 0; ch < 16; ++ch) {
+            int b{-1}, program{-1}, volume{-1}, pan{-1};
+            restored = model.getChannelProgram(ch, b, program)
+                && program == (ch == 9 ? 0 : 1)
+                && model.getControllerValue(ch, 7, volume) && volume == 41 + ch
+                && model.getControllerValue(ch, 10, pan) && pan == 21 + ch
+                && restored;
+        }
+        check(restored, "same-bank recall restores all sixteen synth programs and mixer values before pending UI updates");
+    }
+    {
+        JuicySFAudioProcessor p; load(p, bank);
+        parameter(p, "reverbProfile", 1.0f);
+        p.getFluidSynthModel().handleUpdateNowIfNeeded();
+        parameter(p, "reverbSize", 0.77f);
+        // Save before the deferred switch to Custom, then pump after recall.
+        juce::MemoryBlock saved; p.getStateInformation(saved);
+        JuicySFAudioProcessor restored; load(restored, bank);
+        restored.setStateInformation(saved.getData(), static_cast<int>(saved.getSize()));
+        restored.getFluidSynthModel().handleUpdateNowIfNeeded();
+        auto* size = findParameter(restored, "reverbSize");
+        auto* profile = findParameter(restored, "reverbProfile");
+        check(size != nullptr && profile != nullptr
+            && std::abs(size->convertFrom0to1(size->getValue()) - 0.77f) < 0.001f
+            && juce::roundToInt(profile->convertFrom0to1(profile->getValue()))
+                == FluidSynthModel::customReverbProfileIndex(),
+            "recall preserves custom reverb values saved before profile reconciliation");
+    }
+    {
+        JuicySFAudioProcessor p; load(p, bank);
+        const auto value = [&](const char* id) {
+            const auto* control = findParameter(p, id);
+            return control->convertFrom0to1(control->getValue());
+        };
+        parameter(p, "reverbProfile", 1.0f);
+        parameter(p, "reverbSize", 0.73f);
+        p.getFluidSynthModel().handleUpdateNowIfNeeded();
+        check(std::abs(value("reverbSize") - 0.73f) < 0.001f
+            && juce::roundToInt(value("reverbProfile")) == 2,
+            "a later reverb knob edit cancels the pending profile and selects Custom");
+        parameter(p, "reverbSize", 0.62f);
+        parameter(p, "reverbProfile", 1.0f);
+        p.getFluidSynthModel().handleUpdateNowIfNeeded();
+        check(std::abs(value("reverbSize") - FluidSynthModel::reverbProfiles[1].values[0]) < 0.001f
+            && juce::roundToInt(value("reverbProfile")) == 1,
+            "a later reverb profile selection supersedes the pending knob edit");
+        parameter(p, "reverbProfile", 0.0f);
+        parameter(p, "reverbProfile", 2.0f);
+        p.getFluidSynthModel().handleUpdateNowIfNeeded();
+        check(std::abs(value("reverbSize") - FluidSynthModel::reverbProfiles[1].values[0]) < 0.001f
+            && juce::roundToInt(value("reverbProfile")) == 2,
+            "choosing Custom cancels a pending profile without changing its controls");
+    }
+    {
+        JuicySFAudioProcessor p; load(p, bank);
+        parameter(p, "reverbOn", 1.0f);
+        parameter(p, "reverbProfile", 2.0f);
+        parameter(p, "reverbSize", 0.9f);
+        parameter(p, "reverbLevel", 0.1f);
+        parameter(p, "muteCh16", 1.0f);
+        parameter(p, "soloCh2", 1.0f);
+        parameter(p, "volCh16", 12.0f);
+        parameter(p, "panCh16", 9.0f);
+        p.getFluidSynthModel().handleUpdateNowIfNeeded();
+        juce::MemoryBlock saved; p.getStateInformation(saved);
+        auto xml = juce::AudioProcessor::getXmlFromBinary(saved.getData(), static_cast<int>(saved.getSize()));
+        xml->setAttribute("stateVersion", 2);
+        auto* params = xml->getChildByName("params");
+        for (const char* id : {"reverbOn", "reverbProfile", "reverbSize", "reverbDamp", "reverbWidth", "reverbLevel"})
+            params->removeAttribute(id);
+        for (int ch = 1; ch <= 16; ++ch)
+            for (const char* prefix : {"volCh", "panCh", "muteCh", "soloCh"})
+                params->removeAttribute(juce::String{prefix} + juce::String{ch});
+        for (auto* channel : xml->getChildByName("channelPrograms")->getChildIterator())
+            for (const char* id : {"volume", "pan", "mute", "solo"})
+                channel->removeAttribute(id);
+        juce::AudioProcessor::copyXmlToBinary(*xml, saved);
+        p.setStateInformation(saved.getData(), static_cast<int>(saved.getSize()));
+        p.getFluidSynthModel().handleUpdateNowIfNeeded();
+        const auto value = [&](const juce::String& id) {
+            const auto* control = findParameter(p, id);
+            return control->convertFrom0to1(control->getValue());
+        };
+        bool defaults = value("reverbOn") < 0.5f
+            && juce::roundToInt(value("reverbProfile")) == 0
+            && p.getFluidSynthModel().getSilencedMask() == 0;
+        for (int i = 0; i < FluidSynthModel::numReverbParams; ++i)
+            defaults = std::abs(value(FluidSynthModel::reverbParamId(i))
+                - FluidSynthModel::reverbProfiles[0].values[i]) < 0.001f && defaults;
+        for (int ch = 1; ch <= 16; ++ch) {
+            int volume{-1}, pan{-1};
+            defaults = p.getFluidSynthModel().getControllerValue(ch - 1, 7, volume) && volume == 100
+                && p.getFluidSynthModel().getControllerValue(ch - 1, 10, pan) && pan == 64
+                && defaults;
+        }
+        check(defaults, "pre-mixer and pre-reverb projects reset absent controls in an already-used instance");
+    }
+    {
+        JuicySFAudioProcessor p; load(p, bank);
+        std::unique_ptr<juce::AudioProcessorEditor> editor{p.createEditor()};
+        auto* settings = dynamic_cast<juce::Button*>(namedChild(*editor, "Settings"));
+        if (settings != nullptr && settings->onClick != nullptr)
+            settings->onClick();
+        auto* choice = dynamic_cast<juce::ComboBox*>(namedChild(*editor, "Accent colour"));
+        check(choice != nullptr, "settings provides the accent picker for recall coverage");
+        bool roundTrip{choice != nullptr};
+        int index{1};
+        for (const auto accent : Juicy16::allAccents()) {
+            if (choice == nullptr) break;
+            const auto name = Juicy16::accentName(accent);
+            choice->setSelectedId(index++, juce::sendNotificationSync);
+            juce::MemoryBlock saved; p.getStateInformation(saved);
+            auto xml = juce::AudioProcessor::getXmlFromBinary(saved.getData(), static_cast<int>(saved.getSize()));
+            roundTrip = xml->getIntAttribute("stateVersion") == 11
+                && xml->getChildByName("uiState")->getStringAttribute("accent") == name && roundTrip;
+            choice->setSelectedId(1, juce::sendNotificationSync);
+            p.setStateInformation(saved.getData(), static_cast<int>(saved.getSize()));
+            roundTrip = choice->getSelectedId() == index - 1 && roundTrip;
+        }
+        juce::MemoryBlock legacy; p.getStateInformation(legacy);
+        auto xml = juce::AudioProcessor::getXmlFromBinary(legacy.getData(), static_cast<int>(legacy.getSize()));
+        xml->setAttribute("stateVersion", 10);
+        xml->getChildByName("uiState")->removeAttribute("accent");
+        juce::AudioProcessor::copyXmlToBinary(*xml, legacy);
+        p.setStateInformation(legacy.getData(), static_cast<int>(legacy.getSize()));
+        check(roundTrip && choice != nullptr && choice->getSelectedId() == 1,
+            "all twelve accents survive project recall and pre-v11 projects use Sage");
+    }
+    {
+        JuicySFAudioProcessor p; load(p, bank);
+        p.prepareToPlay(192000.0, 1024);
+        juce::AudioBuffer<float> empty{2, 0};
+        juce::MidiBuffer events;
+        events.addEvent(juce::MidiMessage::controllerEvent(16, 7, 39), 0);
+        events.addEvent(juce::MidiMessage::programChange(16, 1), 0);
+        render(p, empty, events);
+        int b{-1}, program{-1}, volume{-1};
+        check(p.getFluidSynthModel().getChannelProgram(15, b, program) && program == 1
+            && p.getFluidSynthModel().getControllerValue(15, 7, volume) && volume == 39,
+            "zero-sample blocks dispatch MIDI at high host sample rates");
+    }
+    {
+        JuicySFAudioProcessor p; load(p, bank);
+        const double rejected[]{std::numeric_limits<double>::quiet_NaN(),
+            std::numeric_limits<double>::infinity(), -1.0, 0.0, 1.0e12, 1.0e30};
+        bool safe{true};
+        for (double rate : rejected) {
+            p.prepareToPlay(rate, 1024);
+            block.clear();
+            block.addSample(0, 0, 1.0f);
+            juce::MidiBuffer events;
+            p.processBlock(block, events);
+            safe = !p.getFluidSynthModel().isSampleRateSupported()
+                && block.getMagnitude(0, block.getNumSamples()) < 1.0e-10f && safe;
+        }
+        p.prepareToPlay(48000.0, 1024);
+        juce::MidiBuffer events;
+        events.addEvent(juce::MidiMessage::noteOn(1, 60, static_cast<juce::uint8>(100)), 0);
+        render(p, block, events);
+        check(safe && p.getFluidSynthModel().isSampleRateSupported() && energy(block) > 0.0,
+            "nonfinite and excessive host rates safely mute and recover at a supported rate");
+    }
+    {
+        JuicySFAudioProcessor p; load(p, bank);
+        parameter(p, "outputLevel", -6.0f);
+        parameter(p, "trimCh16", -3.0f);
+        juce::MemoryBlock saved; p.getStateInformation(saved);
+        auto xml = juce::AudioProcessor::getXmlFromBinary(saved.getData(), static_cast<int>(saved.getSize()));
+        xml->getChildByName("params")->setAttribute("outputLevel", "nan");
+        xml->getChildByName("params")->setAttribute("trimCh16", "inf");
+        xml->getChildByName("params")->setAttribute("panCh16", "1e300");
+        juce::AudioProcessor::copyXmlToBinary(*xml, saved);
+        p.setStateInformation(saved.getData(), static_cast<int>(saved.getSize()));
+        const auto value = [&](const char* id) {
+            const auto* control = findParameter(p, id);
+            return control->convertFrom0to1(control->getValue());
+        };
+        check(std::abs(value("outputLevel") + 6.0f) < 0.001f
+            && std::abs(value("trimCh16") + 3.0f) < 0.001f
+            && std::abs(value("panCh16") - 127.0f) < 0.001f,
+            "corrupt normalized parameters reject NaN/Inf and clamp finite overflow before conversion");
     }
     // Audio ratios prove the trim is a real post-synthesis gain, independent of
     // CC7, with the SAME gain on the channel's reverb and no cross-channel leak.

@@ -31,7 +31,7 @@ $pinnedLabel = [regex]::Match($cache, '(?m)^JUICYSF_PRERELEASE_LABEL:[^=]+=([^\r
 if ($pinnedLabel.Success -and $pinnedLabel.Groups[1].Value -ne $label) {
     throw 'The build cache pins a different prerelease label from the source.'
 }
-ctest --test-dir $BuildDir -C Release --output-on-failure
+ctest --test-dir $BuildDir -C Release --output-on-failure --no-tests=error
 Assert-NativeSuccess 'Release tests before packaging'
 & "$repo/tests/WindowsArtifactTests.ps1" -ArtifactsDir $artifacts
 $metadata = Get-Content "$artifacts/VST3/Juicy16.vst3/Contents/Resources/moduleinfo.json" -Raw | ConvertFrom-Json

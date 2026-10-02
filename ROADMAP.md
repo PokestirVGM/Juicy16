@@ -1,20 +1,24 @@
 # Roadmap
 
-## Now: 1.0.0-beta.1
+## Now: 1.0.0-beta.2 on macOS
 
-This release brings GBA-style DLS banks closer to Fruity LSD: an interpolation
-setting (Linear by default), balance ignored, full-range pan on stereo DLS banks,
-and channel 10 no longer going silent without a flagged drum kit. It's out for
-macOS; the Windows VST3 follows on the same release page.
+This macOS beta adds a Standalone MIDI player alongside AU and VST3. Load a
+bank and MIDI together, seek through the song, see its current BPM and repeat
+the whole song or a section. It also includes the recall, playback, leak and
+performance fixes described in the [changelog](CHANGELOG.md).
+
+Windows remains on 1.0.0-beta.1 while these changes are rebuilt and tested.
 
 ## Next
 
-- Rebuild and validate Windows VST3 for 1.0.0-beta.1, then complete host testing.
-  The native build and packaging pipeline is implemented; [Windows evidence](docs/WINDOWS_RELEASE.md)
-  covers the earlier 0.6.1-beta.4 candidate, not this merged version.
+- Rebuild the latest fixes on Windows and complete host testing. The
+  [Windows evidence](docs/WINDOWS_RELEASE.md) records local 1.0.0-beta.1
+  build, package and installed-plugin checks; itemized DAW and clean Windows 10
+  checks remain pending.
 - Test in FL Studio and Cubase, and compare side by side with Fruity LSD
 - Cut repeated same-key notes the way LSD does
-- Fix the two small leaks the leak check reports
+- Verify the existing leak and portability fixes in hosted CI. Local checks
+  pass; current real-host and minimum-OS checks remain open.
 - Get hosted CI green
 
 ## Later

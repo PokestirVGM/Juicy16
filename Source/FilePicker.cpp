@@ -1,6 +1,7 @@
 #include "FilePicker.h"
 #include "Theme.h"
 #include "Util.h"
+#include "MidiFilePlayer.h"
 
 #if JUCE_MAC || JUCE_IOS
   #include <juce_core/native/juce_CFHelpers_mac.h>
@@ -47,7 +48,7 @@ void FolderIconButton::paintButton(Graphics& g, bool isMouseOverButton, bool isB
 }
 
 FilePicker::FilePicker(
-    AudioProcessorValueTreeState& state
+    AudioProcessorValueTreeState& state, FluidSynthModel& synthModel
 )
 : fileChooser{
     "File",
@@ -59,12 +60,14 @@ FilePicker::FilePicker(
     String(),
     "Select a SoundFont or DLS file to load."}
 , valueTreeState{state}
+, model{synthModel}
 #if JUCE_MAC || JUCE_IOS
 , bookmarkCreationOptions{kCFURLBookmarkCreationWithSecurityScope}
 #endif
 {
     // Rounded edges would add transparency.
     setOpaque (true);
+    setName("Sound bank file picker");
 
     fileChooser.setName("Sound bank file");
     fileChooser.setTitle("Sound bank file");
@@ -84,8 +87,11 @@ FilePicker::FilePicker(
 #endif
 }
 FilePicker::~FilePicker() {
+    combinedChooser.reset();
     fileChooser.removeListener (this);
     valueTreeState.state.removeListener(this);
+    cancelPendingUpdate();
+    fileChooser.setLookAndFeel(nullptr);
 }
 
 void FilePicker::resized() {
@@ -99,14 +105,20 @@ void FilePicker::paint(Graphics& g)
     g.fillAll(getLookAndFeel().findColour(Juicy16::headerBackgroundColourId));
 }
 
-void FilePicker::filenameComponentChanged (FilenameComponent*) {
-    // Path first, so the bookmark handler's fallback reads the new path.
-    {
-        Value value{valueTreeState.state.getChildWithName("soundFont").getPropertyAsValue("path", nullptr)};
-        value.setValue(fileChooser.getCurrentFile().getFullPathName());
+void FilePicker::lookAndFeelChanged() {
+    // The browse-button factory needs its own LookAndFeel, but its palette
+    // must follow the editor rather than keeping the default accent.
+    if (auto* theme = dynamic_cast<Juicy16::PluginLookAndFeel*>(&getLookAndFeel())) {
+        if (folderIconLookAndFeel.getAccent() != theme->getAccent())
+            folderIconLookAndFeel.setAccent(theme->getAccent());
     }
+}
+
+void FilePicker::filenameComponentChanged (FilenameComponent*) {
+    const File selectedFile{fileChooser.getCurrentFile()};
+    juce::MemoryBlock bookmark;
 #if JUCE_MAC || JUCE_IOS
-    CFUniquePtr<CFStringRef> fileExtensionCF{fileChooser.getCurrentFile().getFullPathName().toCFString()};
+    CFUniquePtr<CFStringRef> fileExtensionCF{selectedFile.getFullPathName().toCFString()};
     CFUniquePtr<CFURLRef> cfURL{CFURLCreateWithFileSystemPath(nullptr, fileExtensionCF.get(), CFURLPathStyle::kCFURLPOSIXPathStyle, false)};
     CFErrorRef cfError = nullptr;
 
@@ -116,22 +128,102 @@ void FilePicker::filenameComponentChanged (FilenameComponent*) {
     if (cfData) {
         const UInt8 * cfDataBytePtr{CFDataGetBytePtr(cfData.get())};
         CFIndex cfDataByteLength{CFDataGetLength(cfData.get())};
-        Value value{valueTreeState.state.getChildWithName("soundFont").getPropertyAsValue("bookmark", nullptr)};
-        var bookmarkVar{static_cast<const void*>(cfDataBytePtr), static_cast<size_t>(cfDataByteLength)};
-        value.setValue(bookmarkVar);
-    } else {
-        // Clear the previous file's bookmark so the model falls back to the path.
-        MemoryBlock emptyBookmark;
-        Value value{valueTreeState.state.getChildWithName("soundFont").getPropertyAsValue("bookmark", nullptr)};
-        value.setValue(var{std::move(emptyBookmark)});
+        bookmark.replaceAll(cfDataBytePtr, static_cast<size_t>(cfDataByteLength));
     }
     if (cfError != nullptr)
         CFRelease(cfError);
 #endif
+    // Publish the selected path and its bookmark together. A rejected bank must
+    // not roll back the path before the new bookmark's fallback is attempted.
+    model.restoreFontSelection(selectedFile.getFullPathName(), bookmark, true);
+}
+
+void FilePicker::setMidiFileLoader(std::function<bool(const File&, String&)> loader,
+                                 std::function<void(const String&)> resultHandler) {
+    midiFileLoader = std::move(loader);
+    loadResultHandler = std::move(resultHandler);
+    fileChooser.setBrowseCallback(midiFileLoader ? std::function<void()>{[this] { chooseFiles(); }}
+                                               : std::function<void()>{});
+}
+
+void FilePicker::chooseFiles() {
+    combinedChooser = std::make_unique<juce::FileChooser>(
+        "Choose a sound bank and MIDI file", fileChooser.getCurrentFile(),
+        "*.sf2;*.sf3;*.dls;*.mid;*.midi");
+    const auto safeThis = Component::SafePointer<FilePicker>{this};
+    combinedChooser->launchAsync(juce::FileBrowserComponent::openMode
+        | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::canSelectMultipleItems,
+        [safeThis](const juce::FileChooser& chooser) {
+            if (safeThis == nullptr)
+                return;
+            String error;
+            safeThis->loadSelectedFiles(chooser.getResults(), error);
+        });
+}
+
+bool FilePicker::loadSelectedFiles(const juce::Array<File>& files, String& error) {
+    error.clear();
+    if (files.isEmpty())
+        return true;
+    const auto finish = [this, &error](bool success) {
+        if (loadResultHandler)
+            loadResultHandler(error);
+        return success;
+    };
+    File bank, midi;
+    for (const auto& file : files) {
+        if (!file.existsAsFile()) {
+            error = "The selected file could not be opened: " + file.getFileName();
+            return finish(false);
+        }
+        if (file.hasFileExtension("sf2;sf3;dls")) {
+            if (bank != File{}) {
+                error = "Choose one sound bank at a time, optionally with one MIDI file.";
+                return finish(false);
+            }
+            bank = file;
+        } else if (file.hasFileExtension("mid;midi")) {
+            if (!midiFileLoader) {
+                error = "MIDI file playback is available only in Standalone.";
+                return finish(false);
+            }
+            if (midi != File{}) {
+                error = "Choose one MIDI file at a time, optionally with one sound bank.";
+                return finish(false);
+            }
+            midi = file;
+        } else {
+            error = "Choose a DLS, SF2, or SF3 sound bank or a MID/MIDI file.";
+            return finish(false);
+        }
+    }
+    // Check the complete MIDI before changing the bank. A malformed selection
+    // must not replace the working pair with half of the requested new pair.
+    if (midi != File{} && !MidiFilePlayer::validateFile(midi, error))
+        return finish(false);
+    if (bank != File{}) {
+        fileChooser.setCurrentFile(bank, true, dontSendNotification);
+        filenameComponentChanged(&fileChooser);
+        const auto fontState = valueTreeState.state.getChildWithName("soundFont");
+        if (fontState.getProperty("loadStatus").toString() == "error") {
+            error = fontState.getProperty("loadMessage").toString();
+            return finish(false);
+        }
+    }
+    if (midi != File{} && !midiFileLoader(midi, error))
+        return finish(false);
+    return finish(true);
 }
 
 void FilePicker::valueTreePropertyChanged(ValueTree& treeWhosePropertyHasChanged,
                                                const Identifier& property) {
+    if (treeWhosePropertyHasChanged.getType() != StringRef("soundFont")
+        || (property != StringRef("path") && property != StringRef("loadMessage")))
+        return;
+    if (!juce::MessageManager::getInstance()->isThisTheMessageThread()) {
+        triggerAsyncUpdate();
+        return;
+    }
     if (treeWhosePropertyHasChanged.getType() == StringRef("soundFont")) {
         if (property == StringRef("path")) {
             String soundFontPath = treeWhosePropertyHasChanged.getProperty("path", "");
@@ -142,18 +234,21 @@ void FilePicker::valueTreePropertyChanged(ValueTree& treeWhosePropertyHasChanged
     }
 }
 
+void FilePicker::handleAsyncUpdate() {
+    const auto font{valueTreeState.state.getChildWithName("soundFont")};
+    setDisplayedFilePath(font.getProperty("path", "").toString());
+    fileChooser.setTooltip(font.getProperty("loadMessage").toString());
+}
+
 void FilePicker::setDisplayedFilePath(const String& path) {
      if (!shouldChangeDisplayedFilePath(path)) {
          return;
      }
     currentPath = path;
-    fileChooser.setCurrentFile(File(path), true, dontSendNotification);
+    fileChooser.setCurrentFile(File(path), path.isNotEmpty(), dontSendNotification);
 }
 
 bool FilePicker::shouldChangeDisplayedFilePath(const String &path) {
-    if (path.isEmpty()) {
-        return false;
-    }
     if (path == currentPath) {
         return false;
     }

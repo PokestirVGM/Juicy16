@@ -4,13 +4,16 @@ Please read this before reporting a bug. Some of these are deliberate.
 
 ## Not yet tested
 
-- **Other hosts.** I test in FL Studio and Cubase. Logic and everything else are
-  untested.
+- **Current-build host coverage.** FL Studio and Cubase are the main test hosts,
+  but itemized playback and save/reopen checks for the latest fixes remain
+  pending. Logic and other hosts are untested.
 - **macOS 11.** The builds target macOS 11, but I've only run them on current
   macOS.
-- **Windows 1.0.0-beta.1.** The native pipeline has [automated evidence](WINDOWS_RELEASE.md)
-  for 0.6.1-beta.4. The merged version still needs Windows build/artifact checks,
-  DAW playback and save/reopen, and clean Windows 10 minimum-OS testing.
+- **Windows latest fixes.** [Local Windows evidence](WINDOWS_RELEASE.md) covers
+  1.0.0-beta.1 build/package checks and owner testing of the installed VST3 on
+  Windows 11. Windows remains at beta.1; the beta.2 changes still need a rebuild.
+  Itemized DAW playback/save/reopen and clean Windows 10 minimum-OS testing
+  remain pending.
 - **Screen readers.** Everything has accessible names, but I haven't tried
   VoiceOver or Narrator.
 
@@ -35,9 +38,12 @@ Please read this before reporting a bug. Some of these are deliberate.
 - **FL Studio squashes imported bends** to ±2 semitones. Use *Bend scale* in
   settings (×6 for a rip written for 12 semitones) or *Bend range* to force one
   range. I haven't confirmed which works best in FL yet.
-- **A reset keeps the file's bend range.** If you play a 12-semitone rip and then
+- **DAW recovery keeps the file's bend range.** With that plugin reset policy,
+  if you play a 12-semitone rip and then
   a file that relies on the default ±2 in the same instance, the second file
-  bends 12. Reload the plugin or use the bend range override.
+  bends 12. Reload the plugin or use the bend range override. Standard MIDI
+  resets and new Standalone file imports start from their reset defaults unless
+  the bend range override is set.
 
 ## Levels
 
@@ -50,9 +56,13 @@ does, the host may be changing the level: Cubase's track Volume/Pan and its
 
 - One stereo output for all 16 channels.
 - Up to 96 kHz natively. Above that it renders at a lower rate and upsamples.
-  Below 8 kHz it stays silent rather than playing out of tune.
+  The current source removes extra FIFO read-ahead and silent tails in normal
+  odd-sized blocks; engine quantization and interpolator latency remain. A
+  block larger than the prepared capacity can end in silence on
+  that path. Below 8 kHz it stays silent rather than playing out of tune.
 - Note timing can be up to 63 samples late because of FluidSynth's internal
   buffering.
+- Keyboard MIDI tracking can still allocate for long SysEx packets.
 - DLS repair only fixes bad size headers, and only on files up to 512 MB.
 - Selecting a bank/program the loaded bank doesn't have shows your choice but
   plays a substitute until you load the right bank.
@@ -64,9 +74,23 @@ does, the host may be changing the level: Cubase's track Volume/Pan and its
 
 ## Leaks
 
-The leak check still reports two tiny leaks: 32 bytes inside FluidSynth when a
-bank unloads, and 192 bytes in JUCE's AU parameter setup. They're harmless but
-not fixed yet.
+The macOS 1.0.0-beta.2 source includes fixes for FluidSynth timer-thread and
+JUCE AU parameter-text leaks that were absent from the beta.1 Mac package.
+On 2026-09-28 and again in the 2026-10-02 [source audit](AUDIT.md), local macOS
+font, engine, VST3 and AU harnesses completed with zero failures and zero leaked
+bytes. Those local results do not prove hosted CI or real-DAW behavior. Windows
+beta.1 predates these fixes and still needs a rebuild.
+
+## Standalone player
+
+The macOS beta.2 app retriggers held notes when seeking or restarting loops,
+so their envelopes restart and a held note uses the current patch. Earlier
+release voices and effects tails are not reconstructed. MIDI files and transport
+settings are runtime-only; audio-device reconfiguration pauses playback.
+Format 2 and escaped/split SysEx are rejected. See [standalone playback](STANDALONE.md)
+for file-size, timing, SysEx and section-loop limits. Native multi-file dialog and
+pointer interaction still need manual validation; automated UI tests do not
+replace that check.
 
 ## Licensing
 

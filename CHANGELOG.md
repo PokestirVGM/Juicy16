@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.0.0-beta.2 — 2026-10-02 (macOS)
+
+- Added Standalone MIDI loading and drag/drop, play/pause, stop, seek, elapsed
+  and total time, playback speed, whole-song loops and A/B section markers.
+- Reused the existing sixteen-channel rack for automatic instrument changes,
+  live activity and mute/solo. The transport follows the existing UI style.
+- The header folder can load a bank and MIDI together. Added a clean seek
+  timeline, draggable section-loop boundaries and current/effective BPM.
+- Restore controllers and held/pedal notes on seek and resume; release notes
+  on pause/stop and retain the current song if a new import fails.
+- MIDI formats 0/1, tempo maps and SMPTE timing; bounded, strict file validation.
+  AU/VST3 parameter/state identities and host program routes are unchanged.
+
+Standalone is included with the macOS AU/VST3 package. Controls and current
+limits are in [standalone playback](docs/STANDALONE.md). Windows remains on
+1.0.0-beta.1 until rebuilt and tested.
+
+### Audit and performance fixes
+
+- Fixed same-bank project recall for all sixteen channels, custom reverb recall,
+  and older projects inheriting mixer, mute/solo or reverb settings.
+- Fixed pedal-held notes continuing after mute/solo exclusion, SysEx reset
+  recognition, offset-bank drum fallback, and MIDI in empty high-rate blocks.
+- Fixed high-rate event carry and silent tails in ordinary uneven audio blocks.
+- Fixed audition velocity, shared mouse/QWERTY holds, focus/keyboard cleanup,
+  worker-thread recall updates, and accent updates throughout the
+  editor. Accent choices now survive saved projects (state schema 11; the 131
+  parameter identities are unchanged).
+- Removed reverb callback string allocation and a profile-application data race;
+  later knob edits or profile choices now supersede earlier pending changes.
+- Reject corrupt normalized state values and unsafe host sample rates safely.
+- Strengthened fresh-build, leak, sanitizer, strict AU and source-package checks;
+  added regression coverage for gate failures and Windows archive integrity.
+- Reduced Apple Silicon mixer work, cached repeated meter calculations and
+  unchanged UI text, and limited keyboard drawing to dirty regions. Audio
+  quality settings, all sixteen channels and effect processing are preserved.
+- Healthy DLS banks avoid a full-file repair copy. Saved bank paths and bookmarks
+  restore together with one load; failed selections retain their fallback.
+
+Current DAW, Windows and minimum-OS validation remain pending; see the
+[audit report](docs/AUDIT.md) for evidence and limitations.
+
 ## 1.0.0-beta.1 — 2026-09-27
 
 This update brings GBA-style DLS playback closer to Fruity LSD.

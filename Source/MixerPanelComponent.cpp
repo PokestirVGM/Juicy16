@@ -256,6 +256,7 @@ MixerPanelComponent::MixerPanelComponent(AudioProcessorValueTreeState& state, Fl
 MixerPanelComponent::~MixerPanelComponent() {
     stopTimer();
     valueTreeState.state.removeListener(this);
+    cancelPendingUpdate();
 }
 
 void MixerPanelComponent::selectEffect(bool chorus) {
@@ -281,6 +282,7 @@ void MixerPanelComponent::syncOutputLevelReadout() {
 }
 
 void MixerPanelComponent::syncBankSummary() {
+    patchDisplayInvalid = true; // A replacement bank may rename an unchanged bank/program pair.
     const ValueTree fontState{valueTreeState.state.getChildWithName("soundFont")};
     const String loadedPath{fontState.getProperty("loadedPath", "").toString()};
     auto& theme = getLookAndFeel();
@@ -311,11 +313,22 @@ void MixerPanelComponent::syncBankSummary() {
 
 void MixerPanelComponent::valueTreePropertyChanged(ValueTree& tree,
                                                    const Identifier& property) {
+    if (!(tree.getType() == StringRef("banks")
+        || (tree.getType() == StringRef("soundFont") && property == StringRef("loadedPath"))))
+        return;
+    if (!juce::MessageManager::getInstance()->isThisTheMessageThread()) {
+        triggerAsyncUpdate();
+        return;
+    }
     if (tree.getType() == StringRef("soundFont")
         && property == StringRef("loadedPath"))
         syncBankSummary();
     else if (tree.getType() == StringRef("banks"))
         syncBankSummary();
+}
+
+void MixerPanelComponent::handleAsyncUpdate() {
+    syncBankSummary();
 }
 
 void MixerPanelComponent::lookAndFeelChanged() {
@@ -414,6 +427,10 @@ void MixerPanelComponent::resized() {
 }
 
 void MixerPanelComponent::PeakReadout::setPeak(float value, bool over) {
+    if (initialised && juce::exactlyEqual(peak, value) && overload == over)
+        return;
+    initialised = true;
+    JUICY16_COUNT_UI_WORK(mixerPeakFormats);
     peak = value;
     overload = over;
     setButtonText((over ? "Overload: " : "Output peak: ")
@@ -455,22 +472,55 @@ void MixerPanelComponent::timerCallback() {
     const auto d = fluidSynthModel.getChannelDiagnostics(ch);
     int bank{0}, program{0};
     fluidSynthModel.getAppliedChannelProgram(ch, bank, program);
-    const auto bankTree = valueTreeState.state.getChildWithName("banks")
-        .getChildWithProperty("num", d.soundingBank);
-    const auto presetTree = bankTree.getChildWithProperty("num", d.soundingPreset);
-    const String name = presetTree.getProperty("name", "Unnamed instrument").toString();
-    const bool fallback = d.soundingBank >= 0 && (bank != d.soundingBank || program != d.soundingPreset);
-    channelInfo.setText("CHANNEL " + String(ch + 1).paddedLeft('0', 2), dontSendNotification);
-    channelState.setText(fluidSynthModel.isChannelSilenced(ch) ? "Silenced" : "", dontSendNotification);
-    channelPatch.setText(d.soundingBank < 0 ? "No instrument loaded" : name, dontSendNotification);
-    channelPatch.setTooltip(name);
-    channelPatchDetail.setText(d.soundingBank < 0 ? "Load a bank to begin"
-        : fallback ? "Fallback " + String(d.soundingBank) + ":" + String(d.soundingPreset)
-            + String::fromUTF8(" · requested ") + String(bank) + ":" + String(program)
-        : "Bank " + String(bank) + String::fromUTF8(" · Program ") + String(program), dontSendNotification);
-    const double range = static_cast<double>(d.bendRange >> 7) + static_cast<double>(d.bendRange & 127) / 100.0;
-    const String values[]{String(d.expression), d.sustain >= 64 ? "On" : "Off",
-        String(range, 2) + " st", String(d.pitchBend), String(d.chorusSend)};
-    for (int i = 0; i < diagnosticValues.size(); ++i)
-        diagnosticValues[i]->setText(values[i], dontSendNotification);
+    if (ch != displayedChannel) {
+        displayedChannel = ch;
+        channelInfo.setText("CHANNEL " + String(ch + 1).paddedLeft('0', 2), dontSendNotification);
+    }
+    const int silenced{fluidSynthModel.isChannelSilenced(ch) ? 1 : 0};
+    if (silenced != displayedSilenced) {
+        displayedSilenced = silenced;
+        channelState.setText(silenced != 0 ? "Silenced" : "", dontSendNotification);
+    }
+    const std::array<int, 5> patchInputs{{ch, bank, program, d.soundingBank, d.soundingPreset}};
+    if (patchDisplayInvalid || patchInputs != displayedPatchInputs) {
+        JUICY16_COUNT_UI_WORK(mixerPatchFormats);
+        patchDisplayInvalid = false;
+        displayedPatchInputs = patchInputs;
+        const auto bankTree = valueTreeState.state.getChildWithName("banks")
+            .getChildWithProperty("num", d.soundingBank);
+        const auto presetTree = bankTree.getChildWithProperty("num", d.soundingPreset);
+        const String name{presetTree.getProperty("name", "Unnamed instrument").toString()};
+        const bool fallback{d.soundingBank >= 0 && (bank != d.soundingBank || program != d.soundingPreset)};
+        channelPatch.setText(d.soundingBank < 0 ? "No instrument loaded" : name, dontSendNotification);
+        channelPatch.setTooltip(name);
+        channelPatchDetail.setText(d.soundingBank < 0 ? "Load a bank to begin"
+            : fallback ? "Fallback " + String(d.soundingBank) + ":" + String(d.soundingPreset)
+                + String::fromUTF8(" · requested ") + String(bank) + ":" + String(program)
+            : "Bank " + String(bank) + String::fromUTF8(" · Program ") + String(program), dontSendNotification);
+    }
+    const std::array<int, 5> diagnosticInputs{{d.expression, d.sustain >= 64 ? 1 : 0,
+                                             d.bendRange, d.pitchBend, d.chorusSend}};
+    for (int i = 0; i < diagnosticValues.size(); ++i) {
+        const auto index{static_cast<size_t>(i)};
+        if (diagnosticInputs[index] == displayedDiagnosticInputs[index])
+            continue;
+        displayedDiagnosticInputs[index] = diagnosticInputs[index];
+        JUICY16_COUNT_UI_WORK(mixerControllerFormats);
+        String text;
+        if (i == 1)
+            text = diagnosticInputs[index] != 0 ? "On" : "Off";
+        else if (i == 2) {
+            const double range = static_cast<double>(d.bendRange >> 7)
+                + static_cast<double>(d.bendRange & 127) / 100.0;
+            text = String(range, 2) + " st";
+        } else
+            text = String(diagnosticInputs[index]);
+        diagnosticValues[i]->setText(text, dontSendNotification);
+    }
 }
+
+#if JUICYSF_UI_WORK_COUNTERS
+void Juicy16::UIWorkBenchmark::tickMixer(MixerPanelComponent& mixer) {
+    mixer.timerCallback();
+}
+#endif

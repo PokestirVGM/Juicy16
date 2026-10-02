@@ -5,13 +5,17 @@ small patches ([details](../vendor/fluidsynth_patched/README.md)).
 
 ## The basics
 
-- Every controller reaches the synth on its own channel at its exact position in
-  the block, except **balance (CC8/CC40)**, which is ignored like in Fruity LSD.
+- Every controller is dispatched on its own channel at its timestamp in the
+  block at native rates up to 96 kHz, except **balance (CC8/CC40)**, which is
+  ignored like in Fruity LSD. Dispatch timing does not establish audio onset.
 - Pitch bend keeps its full 14-bit range (0–16383, centre 8192).
 - Channel and key pressure pass through unchanged.
 - Whether a controller is *audible* can depend on the bank's own modulators.
 - FluidSynth renders in 64-sample chunks, so a note can start up to 63 samples
-  late.
+  late. Above 96 kHz, Juicy16 renders at a lower rate and upsamples; timestamps
+  quantize to an engine sample and interpolation adds latency. Split/continuous
+  rendering tests cover even, odd and tiny blocks at four high rates; this does
+  not establish zero-delay audible onset.
 
 ## Controllers
 
@@ -26,7 +30,7 @@ small patches ([details](../vendor/fluidsynth_patched/README.md)).
 | CC91, CC93 | Reverb and chorus send per channel. CC91 starts at 40 (the GM default), CC93 at 0. |
 | CC98–101, CC6/38 | NRPN/RPN and Data Entry. RPN 0,0 sets the bend range, cents included. |
 | CC120 | All Sound Off: silences the channel at once. |
-| CC121 | Reset All Controllers. Volume, pan, sends and bend range stay. Juicy16 then restores the channel's last CC11, because hosts send CC121 on stop. |
+| CC121 | Reset All Controllers. Volume, pan, sends and bend range stay. With DAW recovery, Juicy16 restores the channel's last CC11 because hosts send CC121 on stop; Standard MIDI leaves expression at 127. |
 | CC123 | All Notes Off: releases notes normally. |
 | CC124–127 | Mode messages. They reach FluidSynth, then Juicy16 restores its 16 independent channels, so mono mode isn't supported. |
 

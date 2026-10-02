@@ -44,7 +44,7 @@ Name: "custom"; Description: "Custom installation"; Flags: iscustom
 
 [Components]
 Name: "plugin"; Description: "Juicy16 VST3 plugin"; Types: full plugin custom; Flags: fixed
-Name: "standalone"; Description: "Standalone application for auditioning banks"; Types: full
+Name: "standalone"; Description: "Standalone MIDI and sound bank player"; Types: full
 
 [Files]
 Source: "{#StageDir}\VST3\Juicy16.vst3\*"; DestDir: "{code:Vst3Directory}\Juicy16.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs; Components: plugin

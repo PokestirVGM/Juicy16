@@ -3,8 +3,13 @@
 #include <cstring>
 #include <array>
 #include <algorithm>
+#include <limits>
 #include <fluidsynth.h>
 #include "FluidSynthModel.h"
+
+#if defined(__aarch64__) && defined(__clang__)
+  #include <arm_neon.h>
+#endif
 
 #ifndef FLUIDSYNTH_JUICY16_VIBRATO_SCALE
 #error "Rebuild the FluidSynth dependency with tools/build_macos_dependencies.sh or tools/build_windows_dependencies.ps1 (Juicy16 vibrato extension required)."
@@ -59,6 +64,7 @@ const map<String, fluid_midi_control_change> FluidSynthModel::channelPropertyToC
 const fluid_midi_control_change FluidSynthModel::ccIndexOrder[FluidSynthModel::kNumMixerCcs]{
     VOLUME_MSB, PAN_MSB};
 thread_local bool FluidSynthModel::mirroringParameters{false};
+thread_local const FluidSynthModel* FluidSynthModel::applyingReverbProfile{nullptr};
 
 
 int FluidSynthModel::ccToIndex(int cc) {
@@ -112,16 +118,16 @@ juce::StringArray FluidSynthModel::reverbProfileNames() {
     return names;
 }
 
-String FluidSynthModel::reverbParamId(int reverbParam) {
-    switch (reverbParam) {
-        case reverbSize:  return "reverbSize";
-        case reverbDamp:  return "reverbDamp";
-        case reverbWidth: return "reverbWidth";
-        case reverbLevel: return "reverbLevel";
-        default: break;
-    }
+const String& FluidSynthModel::reverbParamId(int reverbParam) {
+    // The constructor registers all four listeners before audio can run, so
+    // these strings are created there and never allocated in parameterChanged.
+    static const std::array<String, numReverbParams> ids{
+        "reverbSize", "reverbDamp", "reverbWidth", "reverbLevel"};
+    if (juce::isPositiveAndBelow(reverbParam, numReverbParams))
+        return ids[static_cast<size_t>(reverbParam)];
     jassertfalse;
-    return {};
+    static const String empty;
+    return empty;
 }
 
 String FluidSynthModel::mixerParamId(int ccIndex, int chZeroBased) {
@@ -381,13 +387,16 @@ bool FluidSynthModel::getVoiceStateCounts(int requestedChannel,
 
 void FluidSynthModel::prepareToPlay(double sampleRate, int samplesPerBlock) {
     setSampleRate(static_cast<float>(sampleRate));
+    // Rejected rates still need safe smoother initialization. A nonfinite host
+    // rate would otherwise be converted to an integer ramp length inside JUCE.
+    const double smoothingRate{sampleRateSupported.load() ? sampleRate : currentSampleRate};
     // 20 ms: long enough to hide steps, short enough to feel immediate.
-    outputLevelSmoother.reset(sampleRate, 0.02);
+    outputLevelSmoother.reset(smoothingRate, 0.02);
     outputLevelSmoother.setCurrentAndTargetValue(
         outputLevelGain.load(std::memory_order_relaxed));
     // Reverb glides per block: FluidSynth takes settings, not signals.
     for (int i = 0; i < numReverbParams; ++i)
-        reverbSmoother[i].reset(sampleRate, 0.02);
+        reverbSmoother[i].reset(smoothingRate, 0.02);
     resetReverbToParameters();
     // Preallocate scratch off the audio thread.
     stereoScratch.setSize(2, jmax(64, samplesPerBlock), false, false, true);
@@ -413,6 +422,7 @@ void FluidSynthModel::prepareToPlay(double sampleRate, int samplesPerBlock) {
     oversampleFifo.setSize(
         2, jmax(64, samplesPerBlock / jmax(1, oversampleFactor) + 8), false, true, true);
     oversampleFifoFill = 0;
+    oversampleRenderAhead = 0;
     for (auto& interpolator : oversampleInterpolators)
         interpolator.reset();
 }
@@ -458,9 +468,10 @@ bool FluidSynthModel::applyProgramToEngine(int midiCh,
     // A drum channel searches only the percussion bank; if it finds nothing (e.g. a
     // kit at 0:0 without the drum flag), fall back to the melodic bank.
     if (retainCurrentBank && fluid_synth_get_channel_preset(synth.get(), midiCh) == nullptr) {
-        result = fluid_synth_program_select(synth.get(), midiCh, fontId, 0, preset);
+        const int melodicBank{loadedFontBankOffset()};
+        result = fluid_synth_program_select(synth.get(), midiCh, fontId, melodicBank, preset);
         if (result != FLUID_OK)
-            result = fluid_synth_program_select(synth.get(), midiCh, fontId, 0, 0);
+            result = fluid_synth_program_select(synth.get(), midiCh, fontId, melodicBank, 0);
     }
     if (result != FLUID_OK) {
         recordProgramApplyFailure(midiCh);
@@ -588,15 +599,18 @@ void FluidSynthModel::parameterChanged(const String& parameterID, float /*newVal
         return;
     }
     if (parameterID == "reverbProfile") {
-        if (applyingReverbProfile)
+        if (applyingReverbProfile == this)
             return;
         int profile{0};
         if (auto* p{dynamic_cast<juce::AudioParameterChoice*>(
                 valueTreeState.getParameter(parameterID))})
             profile = p->getIndex();
-        // Writing the four parameters is message-thread work.
+        // The most recent user action wins. A new profile supersedes an older
+        // manual edit; choosing Custom cancels a profile not yet applied.
+        pendingReverbCustom.store(false, std::memory_order_release);
+        pendingReverbProfile.store(profile != customReverbProfileIndex() ? profile : -1,
+                                  std::memory_order_release);
         if (profile != customReverbProfileIndex()) {
-            pendingReverbProfile.store(profile, std::memory_order_release);
             triggerAsyncUpdate();
         }
         return;
@@ -608,7 +622,8 @@ void FluidSynthModel::parameterChanged(const String& parameterID, float /*newVal
                 valueTreeState.getParameter(parameterID))})
             reverbTarget[i].store(p->get(), std::memory_order_relaxed);
         // A manual edit switches the selection to Custom, unless applying a profile.
-        if (!applyingReverbProfile) {
+        if (applyingReverbProfile != this) {
+            pendingReverbProfile.store(-1, std::memory_order_release);
             pendingReverbCustom.store(true, std::memory_order_release);
             triggerAsyncUpdate();
         }
@@ -761,6 +776,35 @@ void FluidSynthModel::syncToSelectedChannel() {
     loadSelectedChannel(juce::jlimit(0, kNumChannels - 1, sel));
 }
 
+void FluidSynthModel::finishStateRestore(bool restoreChannelRecords) {
+    // A parameter need not emit a change when recalling the same project. MIDI
+    // may have changed the engine since the last UI mirror, so explicitly apply
+    // its saved channel records even when the bank was not reloaded.
+    discardPendingStateUpdates();
+    if (restoreChannelRecords)
+        restoreSavedChannelState(true);
+    else
+        for (int ch = 0; ch < kNumChannels; ++ch)
+            for (int idx = 0; idx < kNumMixerCcs; ++idx)
+                setChannelControllerValue(ch, ccIndexOrder[idx], savedMixerValue(ch, idx));
+
+    // The saved control values outrank an asynchronously selected profile.
+    // Reconcile its label without allowing a delayed profile write to overwrite
+    // a custom edit saved before the message thread ran.
+    auto* profile = dynamic_cast<juce::AudioParameterChoice*>(
+        valueTreeState.getParameter("reverbProfile"));
+    if (profile != nullptr && profile->getIndex() < customReverbProfileIndex()) {
+        bool matches{true};
+        for (int i = 0; i < numReverbParams; ++i)
+            matches = matches && std::abs(valueTreeState.getRawParameterValue(reverbParamId(i))->load()
+                - reverbProfiles[profile->getIndex()].values[i]) < 1.0e-5f;
+        if (!matches) {
+            const juce::ScopedValueSetter<const FluidSynthModel*> guard{applyingReverbProfile, this};
+            *profile = customReverbProfileIndex();
+        }
+    }
+}
+
 void FluidSynthModel::selectChannelForEditing(int selectedChannel) {
     valueTreeState.state.getChildWithName("uiState").setProperty(
         "selectedChannel",
@@ -797,7 +841,7 @@ void FluidSynthModel::handleAsyncUpdate() {
     // stops the two directions chasing each other.
     if (const int profile{pendingReverbProfile.exchange(-1, std::memory_order_acquire)};
         profile >= 0 && profile < customReverbProfileIndex()) {
-        const juce::ScopedValueSetter<bool> guard{applyingReverbProfile, true};
+        const juce::ScopedValueSetter<const FluidSynthModel*> guard{applyingReverbProfile, this};
         for (int i = 0; i < numReverbParams; ++i) {
             const float value{reverbProfiles[profile].values[i]};
             reverbTarget[i].store(value, std::memory_order_relaxed);
@@ -805,10 +849,9 @@ void FluidSynthModel::handleAsyncUpdate() {
                     valueTreeState.getParameter(reverbParamId(i)))})
                 *p = value;
         }
-        pendingReverbCustom.store(false, std::memory_order_release);
     }
     if (pendingReverbCustom.exchange(false, std::memory_order_acquire)) {
-        const juce::ScopedValueSetter<bool> guard{applyingReverbProfile, true};
+        const juce::ScopedValueSetter<const FluidSynthModel*> guard{applyingReverbProfile, this};
         if (auto* p{dynamic_cast<juce::AudioParameterChoice*>(
                 valueTreeState.getParameter("reverbProfile"))};
             p != nullptr && p->getIndex() != customReverbProfileIndex())
@@ -907,45 +950,8 @@ void FluidSynthModel::valueTreePropertyChanged(ValueTree& treeWhosePropertyHasCh
                     unloadAndLoadFont(path);
             }
         }
-        if (property == StringRef("bookmark")) {
-            CFErrorRef cfError = nullptr;
-            MemoryBlock buffer;
-            var bookmark = treeWhosePropertyHasChanged.getProperty("bookmark", buffer);
-            jassert(bookmark.isBinaryData());
-            bool loadedViaBookmark = false;
-            String bookmarkPath;
-            if (bookmark.getBinaryData()->getSize() > 0) {
-                CFUniquePtr<CFDataRef> data{CFDataCreate(
-                    nullptr,
-                    static_cast<const UInt8 *>(bookmark.getBinaryData()->getData()),
-                    static_cast<CFIndex>(bookmark.getBinaryData()->getSize()))};
-                // Stale = still resolves but the target moved; the resolved URL is used anyway.
-                Boolean isStale = false;
-                CFUniquePtr<CFURLRef> cfURL{CFURLCreateByResolvingBookmarkData(nullptr, data.get(), kCFURLBookmarkResolutionWithSecurityScope, nullptr, nullptr, &isStale, &cfError)};
-                if (cfURL) {
-                    CFUniquePtr<CFStringRef> cfPath {CFURLCopyFileSystemPath(cfURL.get(), CFURLPathStyle::kCFURLPOSIXPathStyle)};
-                    // Own the string; fromCFString returns a temporary.
-                    bookmarkPath = String::fromCFString(cfPath.get());
-                    if (bookmarkPath.isNotEmpty()) {
-                        CFURLStartAccessingSecurityScopedResource(cfURL.get());
-                        // The bookmark target may no longer load; the stored path is tried next.
-                        loadedViaBookmark = unloadAndLoadFont(bookmarkPath);
-                        CFURLStopAccessingSecurityScopedResource(cfURL.get());
-                    }
-                }
-                if (ValueTree fontState{valueTreeState.state.getChildWithName("soundFont")};
-                    fontState.isValid())
-                    fontState.setProperty("bookmarkStale", isStale != 0, nullptr);
-            }
-            if (cfError != nullptr)
-                CFRelease(cfError);
-            if (!loadedViaBookmark) {
-                String soundFontPath = treeWhosePropertyHasChanged.getProperty("path", "");
-                if (soundFontPath.isNotEmpty() && soundFontPath != bookmarkPath) {
-                    unloadAndLoadFont(soundFontPath);
-                }
-            }
-        }
+        if (property == StringRef("bookmark"))
+            loadFontFromSelectionBookmark();
 #else
         if (property == StringRef("path")) {
             String soundFontPath = treeWhosePropertyHasChanged.getProperty("path", "");
@@ -955,6 +961,79 @@ void FluidSynthModel::valueTreePropertyChanged(ValueTree& treeWhosePropertyHasCh
         }
 #endif
     }
+}
+
+void FluidSynthModel::restoreFontSelection(const String& path,
+                                           const juce::MemoryBlock& bookmark,
+                                           bool forceReload) {
+    ValueTree fontState{valueTreeState.state.getChildWithName("soundFont")};
+    if (!fontState.isValid())
+        return;
+    juce::MemoryBlock emptyBookmark;
+    const var previousBookmark{fontState.getProperty("bookmark", emptyBookmark)};
+    const bool pathChanged{fontState.getProperty("path", "").toString() != path};
+    const bool bookmarkChanged{!previousBookmark.isBinaryData()
+        || *previousBookmark.getBinaryData() != bookmark};
+    if (!forceReload && !pathChanged && !bookmarkChanged)
+        return;
+    {
+        juce::ScopedValueSetter<bool> suppress{suppressFontStateReload, true};
+        fontState.setProperty("path", path, nullptr);
+        fontState.setProperty("bookmark", bookmark, nullptr);
+    }
+#if JUCE_MAC || JUCE_IOS
+    loadFontFromSelectionBookmark();
+#else
+    if ((forceReload || pathChanged) && path.isNotEmpty())
+        unloadAndLoadFont(path);
+#endif
+}
+
+void FluidSynthModel::loadFontFromSelectionBookmark() {
+#if JUCE_MAC || JUCE_IOS
+    ValueTree fontState{valueTreeState.state.getChildWithName("soundFont")};
+    juce::MemoryBlock emptyBookmark;
+    const var bookmark{fontState.getProperty("bookmark", emptyBookmark)};
+    const String fallbackPath{fontState.getProperty("path", "").toString()};
+    jassert(bookmark.isBinaryData());
+    bool loaded{false}, attempted{false};
+    {
+        // A rejected bookmark candidate must not roll the saved fallback path
+        // back to the old active bank before that fallback has been attempted.
+        juce::ScopedValueSetter<bool> defer{deferFontSelectionRollback, true};
+        CFErrorRef error{nullptr};
+        String bookmarkPath;
+        if (bookmark.isBinaryData() && !bookmark.getBinaryData()->isEmpty()) {
+            CFUniquePtr<CFDataRef> data{CFDataCreate(nullptr,
+                static_cast<const UInt8*>(bookmark.getBinaryData()->getData()),
+                static_cast<CFIndex>(bookmark.getBinaryData()->getSize()))};
+            Boolean stale{false};
+            CFUniquePtr<CFURLRef> url{CFURLCreateByResolvingBookmarkData(nullptr,
+                data.get(), kCFURLBookmarkResolutionWithSecurityScope, nullptr,
+                nullptr, &stale, &error)};
+            if (url) {
+                CFUniquePtr<CFStringRef> resolved{CFURLCopyFileSystemPath(
+                    url.get(), kCFURLPOSIXPathStyle)};
+                bookmarkPath = String::fromCFString(resolved.get());
+                if (bookmarkPath.isNotEmpty()) {
+                    CFURLStartAccessingSecurityScopedResource(url.get());
+                    attempted = true;
+                    loaded = unloadAndLoadFont(bookmarkPath);
+                    CFURLStopAccessingSecurityScopedResource(url.get());
+                }
+            }
+            fontState.setProperty("bookmarkStale", stale != 0, nullptr);
+        }
+        if (error != nullptr)
+            CFRelease(error);
+        if (!loaded && fallbackPath.isNotEmpty() && fallbackPath != bookmarkPath) {
+            attempted = true;
+            loaded = unloadAndLoadFont(fallbackPath);
+        }
+    }
+    if (attempted && !loaded)
+        restoreActiveFontSelection();
+#endif
 }
 
 void FluidSynthModel::setControllerValue(int controller, int value) {
@@ -993,10 +1072,18 @@ void FluidSynthModel::refreshSilencedMask() {
         muteMask.load(std::memory_order_relaxed),
         soloMask.load(std::memory_order_relaxed))};
     const unsigned int previous{silencedMask.exchange(updated, std::memory_order_release)};
-    // All-notes-off, so envelopes release without clicks.
+    // Usually release envelopes without clicks. Pedals can hold note-off voices
+    // indefinitely; cut those voices while preserving the file's pedal values.
     for (int ch = 0; ch < kNumChannels; ++ch)
-        if ((updated & ~previous & (1u << ch)) != 0)
-            fluid_synth_all_notes_off(synth.get(), ch);
+        if ((updated & ~previous & (1u << ch)) != 0) {
+            int sustain{0}, sostenuto{0};
+            fluid_synth_get_cc(synth.get(), ch, 64, &sustain);
+            fluid_synth_get_cc(synth.get(), ch, 66, &sostenuto);
+            if (sustain >= 64 || sostenuto >= 64)
+                fluid_synth_all_sounds_off(synth.get(), ch);
+            else
+                fluid_synth_all_notes_off(synth.get(), ch);
+        }
 }
 
 bool FluidSynthModel::isChannelSilenced(int channelToRead) const {
@@ -1026,7 +1113,8 @@ void FluidSynthModel::applyChorusFromAudioThread(int numSamples) {
         float value = chorusTarget[i].load(std::memory_order_relaxed);
         if (i >= chorusLevel && i <= chorusDepth) {
             auto& smoother = chorusSmoother[i - chorusLevel];
-            smoother.setTargetValue(value);
+            if (!juce::exactlyEqual(value, smoother.getTargetValue()))
+                smoother.setTargetValue(value);
             value = smoother.skip(numSamples);
         }
         if (chorusEverApplied && std::abs(value - chorusApplied[i]) < 1.0e-5f)
@@ -1075,7 +1163,9 @@ void FluidSynthModel::applyReverbFromAudioThread(int numSamples) {
     }
 
     for (int i = 0; i < numReverbParams; ++i) {
-        reverbSmoother[i].setTargetValue(reverbTarget[i].load(std::memory_order_relaxed));
+        const float target{reverbTarget[i].load(std::memory_order_relaxed)};
+        if (!juce::exactlyEqual(target, reverbSmoother[i].getTargetValue()))
+            reverbSmoother[i].setTargetValue(target);
         // One value per block; the smoother hides automation steps.
         reverbSmoother[i].skip(numSamples);
         const float value{reverbSmoother[i].getCurrentValue()};
@@ -1387,11 +1477,16 @@ void FluidSynthModel::publishFontLoadResult(bool success,
         return;
     }
 
-    // The candidate failed: restore the saved selection to the active bank so saving
-    // or a rate change cannot break the session. Error fields stay for the UI.
+    if (!deferFontSelectionRollback)
+        restoreActiveFontSelection();
+}
+
+void FluidSynthModel::restoreActiveFontSelection() {
+    // Keep an unsuccessful selection out of saved state and rate-change reloads.
+    ValueTree fontState{valueTreeState.state.getChildWithName("soundFont")};
     const String loadedPath{fontState.getProperty("loadedPath", "").toString()};
     if (loadedPath.isNotEmpty()) {
-        juce::ScopedValueSetter<bool> suppress{ suppressFontStateReload, true };
+        juce::ScopedValueSetter<bool> suppress{suppressFontStateReload, true};
         MemoryBlock emptyBookmark;
         fontState.setProperty("path", loadedPath, nullptr);
         fontState.setProperty(
@@ -1418,33 +1513,62 @@ bool FluidSynthModel::riffContainerOverrunsFile(const juce::File& src) {
 }
 
 juce::File FluidSynthModel::writeRepairedTempCopy(const juce::File& src) {
-    // Bound the in-memory repair size; larger files go to FluidSynth unrepaired,
-    // which streams them.
+    // Bound every allocation, including if the file grows between preflight
+    // and repair. Larger banks still go to FluidSynth's streaming loader.
     static constexpr juce::int64 maxRepairableBytes{512ll * 1024 * 1024};
-    if (src.getSize() > maxRepairableBytes)
+    const juce::int64 initialSize{src.getSize()};
+    if (initialSize < 0 || initialSize > maxRepairableBytes)
         return {};
-
-    // Only DLS files are repair candidates.
-    char hdr[12] = {};
+    const auto initialModified{src.getLastModificationTime()};
     {
-        juce::FileInputStream in{src};
-        if (in.failedToOpen())
-            return {};
-        in.read(hdr, sizeof(hdr));
+        juce::FileInputStream input{src};
+        if (!input.failedToOpen() && input.getTotalLength() == initialSize) {
+            size_t headerReads{0};
+            const auto scan{juicysf::dlsRepairNeeded(static_cast<size_t>(initialSize),
+                [&input, &headerReads](size_t offset, uint8_t* destination, size_t count) {
+                    // Pathological files may contain millions of empty chunks.
+                    // Bound seeks, then use the original in-memory repair path.
+                    if (++headerReads > 4096)
+                        return false;
+                    return input.setPosition(static_cast<juce::int64>(offset))
+                        && input.read(destination, static_cast<int>(count)) == static_cast<int>(count);
+                })};
+            if (scan == juicysf::DlsRepairScan::notNeeded
+                && src.getSize() == initialSize
+                && src.getLastModificationTime() == initialModified)
+                return {}; // Healthy DLS: do not copy its sample payload.
+        }
     }
-    if (std::memcmp(hdr, "RIFF", 4) != 0 || std::memcmp(hdr + 8, "DLS ", 4) != 0)
+
+    // Read failure or changed file metadata is indeterminate, not proof that
+    // repair is unnecessary. Reopen and re-evaluate the actual bounded bytes.
+    juce::FileInputStream input{src};
+    if (input.failedToOpen())
+        return {};
+    const juce::int64 size{input.getTotalLength()};
+    if (size < 12 || size > maxRepairableBytes)
+        return {};
+    juce::MemoryBlock bytes{static_cast<size_t>(size)};
+    size_t completed{0};
+    while (completed < bytes.getSize()) {
+        const int count{static_cast<int>(std::min<size_t>(65536, bytes.getSize() - completed))};
+        const int received{input.read(static_cast<uint8_t*>(bytes.getData()) + completed, count)};
+        if (received <= 0)
+            return {};
+        completed += static_cast<size_t>(received);
+    }
+    uint8_t extra{0};
+    if (input.read(&extra, 1) != 0)
+        return {}; // Grew while reading; never repair an incomplete snapshot.
+    if (!juicysf::repairDlsImage(static_cast<uint8_t*>(bytes.getData()), bytes.getSize()))
         return {};
 
-    juce::MemoryBlock mb;
-    if (!src.loadFileAsData(mb))
+    juce::File temporary{juce::File::createTempFile(".dls")};
+    if (!temporary.replaceWithData(bytes.getData(), bytes.getSize())) {
+        temporary.deleteFile();
         return {};
-    if (!juicysf::repairDlsImage(static_cast<uint8_t*>(mb.getData()), mb.getSize()))
-        return {}; // already well-formed: load the original
-
-    juce::File tmp{juce::File::createTempFile(".dls")};
-    if (!tmp.replaceWithData(mb.getData(), mb.getSize()))
-        return {};
-    return tmp;
+    }
+    return temporary;
 }
 
 void FluidSynthModel::clearRepairedTemp() {
@@ -1482,6 +1606,23 @@ void FluidSynthModel::refreshBanks() {
     }
     valueTreeState.state.getChildWithName("banks").copyPropertiesAndChildrenFrom(banks, nullptr);
 
+    restoreSavedChannelState();
+
+    valueTreeState.state.getChildWithName("banks").sendPropertyChangeMessage("synthetic");
+
+    // Refresh the selected channel's params for the possibly adjusted program.
+    syncToSelectedChannel();
+
+    if (onBanksRefreshed)
+        onBanksRefreshed();
+
+#if JUCE_DEBUG
+#endif
+}
+
+void FluidSynthModel::restoreSavedChannelState(bool preserveRequestedPrograms) {
+    const int fontId{sfont_id.load(std::memory_order_acquire)};
+    const ValueTree banks{valueTreeState.state.getChildWithName("banks")};
     // After a font load, apply each channel's saved program from channelPrograms,
     // falling back to the first preset if the font lacks it. Incoming MIDI still
     // overrides at play time.
@@ -1507,7 +1648,7 @@ void FluidSynthModel::refreshBanks() {
             // them through Bank Select + Program Change so FluidSynth substitutes the kit;
             // the generic fallback would pick a melodic preset.
             const bool substituteThroughBankSelect{
-                !exists && rawBank > MidiConstants::percussionBank};
+                !exists && (preserveRequestedPrograms || rawBank > MidiConstants::percussionBank)};
             if (!exists && !substituteThroughBankSelect) {
                 rawBank = fallbackBank;
                 rawPreset = fallbackPreset;
@@ -1541,20 +1682,12 @@ void FluidSynthModel::refreshBanks() {
         }
     }
 
-    valueTreeState.state.getChildWithName("banks").sendPropertyChangeMessage("synthetic");
-
-    // Refresh the selected channel's params for the possibly adjusted program.
     syncToSelectedChannel();
-
-    if (onBanksRefreshed)
-        onBanksRefreshed();
-
-#if JUCE_DEBUG
-#endif
 }
 
 void FluidSynthModel::setSampleRate(float sampleRate) {
-    if (sampleRate <= 0.0f || settings == nullptr) {
+    if (!std::isfinite(sampleRate) || sampleRate <= 0.0f || settings == nullptr
+        || static_cast<double>(sampleRate) * 0.02 >= std::numeric_limits<int>::max()) {
         sampleRateSupported.store(false, std::memory_order_release);
         return;
     }
@@ -1572,7 +1705,12 @@ void FluidSynthModel::setSampleRate(float sampleRate) {
     int factor{1};
     double engineRate{sampleRate};
     if (sampleRate > maximumRate) {
-        factor = static_cast<int>(std::ceil(sampleRate / maximumRate));
+        const double requiredFactor{std::ceil(sampleRate / maximumRate)};
+        if (requiredFactor > std::numeric_limits<int>::max()) {
+            sampleRateSupported.store(false, std::memory_order_release);
+            return;
+        }
+        factor = static_cast<int>(requiredFactor);
         engineRate = static_cast<double>(sampleRate) / static_cast<double>(factor);
     }
     if (engineRate < minimumRate || engineRate > maximumRate) {
@@ -1636,32 +1774,35 @@ bool FluidSynthModel::isSystemResetSysex(const uint8_t* d, int size) {
     // Data excludes F0/F7.
     if (d == nullptr)
         return false;
-    // GM1 On / GM Off / GM2 On: 7E <dev> 09 <01|02|03>.
-    if (size >= 4 && d[0] == 0x7E && d[2] == 0x09)
+    // GM1 / GM2 On. GM Off is recognized by the backend but does not reset it.
+    if (size >= 4 && d[0] == 0x7E && d[2] == 0x09
+        && (d[3] == 0x01 || d[3] == 0x03))
         return true;
     // Roland GS Reset: 41 <dev> 42 12 40 00 7F 00 41
-    if (size >= 9 && d[0] == 0x41 && d[2] == 0x42 && d[3] == 0x12
-        && d[4] == 0x40 && d[5] == 0x00 && d[6] == 0x7F)
-        return true;
-    // Yamaha XG System On: 43 <dev> 4C 00 00 7E 00
-    if (size >= 7 && d[0] == 0x43 && d[2] == 0x4C && d[3] == 0x00
-        && d[4] == 0x00 && d[5] == 0x7E)
+    if (size == 9 && d[0] == 0x41 && d[2] == 0x42 && d[3] == 0x12
+        && d[4] == 0x40 && d[5] == 0x00 && d[6] == 0x7F
+        && (d[7] == 0 || d[7] == 0x7F))
+        return ((d[4] + d[5] + d[6] + d[7] + d[8]) & 0x7F) == 0;
+    // Yamaha XG System On and factory reset, with exactly one zero data byte.
+    if (size == 7 && d[0] == 0x43 && d[2] == 0x4C && d[3] == 0x00
+        && d[4] == 0x00 && (d[5] == 0x7E || d[5] == 0x7F) && d[6] == 0)
         return true;
     return false;
 }
 
 // Payload excludes the F0/F7 framing.
 void FluidSynthModel::dispatchSysEx(const uint8_t* payload, int payloadBytes) {
-    fluid_synth_sysex(
+    int handled{0};
+    const int result{fluid_synth_sysex(
         synth.get(),
         reinterpret_cast<const char*>(payload),
         payloadBytes,
         nullptr,
         nullptr,
-        nullptr,
-        static_cast<int>(false));
+        &handled,
+        static_cast<int>(false))};
 
-    if (!isSystemResetSysex(payload, payloadBytes))
+    if (result != FLUID_OK || handled == 0 || !isSystemResetSysex(payload, payloadBytes))
         return;
     for (auto& send : diagnosticChorusSend) send.store(0);
     for (auto& value : diagnosticModulation) value.store(0);
@@ -1673,7 +1814,7 @@ void FluidSynthModel::dispatchSysEx(const uint8_t* payload, int payloadBytes) {
     if (fontId == -1)
         return;
 
-    if (standardMidiResets.load()) {
+    if (processingMidiFile || standardMidiResets.load()) {
         for (int ch = 0; ch < kNumChannels; ++ch) {
             engineExpression[ch].store(-1);
             engineBendRange[ch].store(-1);
@@ -1770,8 +1911,13 @@ void FluidSynthModel::reassertBendRange(int ch) {
     applyBendRangeOverride(ch);
     diagnosticBendRange[ch].store(bendRangeOverride.load() > 0
         ? bendRangeOverride.load() << 7 : (range >= 0 ? range : 256));
-    diagnosticBend[ch].store(8192);
-    diagnosticSustain[ch].store(0);
+    // This also runs during project recall and bank reload, which do not reset
+    // live bend or pedals. Report the engine instead of assuming a MIDI reset.
+    int bend{8192}, sustain{0};
+    fluid_synth_get_pitch_bend(synth.get(), ch, &bend);
+    fluid_synth_get_cc(synth.get(), ch, 64, &sustain);
+    diagnosticBend[ch].store(bend);
+    diagnosticSustain[ch].store(sustain);
 }
 
 // Remembers CC11 and re-asserts it after CC121 (already applied by the engine).
@@ -1780,7 +1926,7 @@ void FluidSynthModel::noteControllerForExpression(int ch, int cc, int value) {
         engineExpression[ch].store(value, std::memory_order_relaxed);
         diagnosticExpression[ch].store(value);
     } else if (cc == ALL_CTRL_OFF) {
-        if (standardMidiResets.load()) {
+        if (processingMidiFile || standardMidiResets.load()) {
             engineExpression[ch].store(-1);
             diagnosticExpression[ch].store(127);
         } else {
@@ -1931,7 +2077,19 @@ void FluidSynthModel::dispatchGroupEvent(const GroupEvent& e, int eventPosition)
 void FluidSynthModel::dispatchTimestampGroup(juce::MidiBufferIterator begin,
                                              juce::MidiBufferIterator end,
                                              int eventPosition) {
-    if (standardMidiResets.load()) {
+    // A lone event has no ordering dependencies. Avoid filling the sorting
+    // scratch while retaining the raw SysEx path and MidiMessage validation.
+    auto next = begin;
+    if (next != end && ++next == end) {
+        const auto m = *begin;
+        GroupEvent raw{};
+        raw.data = m.data;
+        raw.numBytes = m.numBytes;
+        raw.kind = m.numBytes > 0 && m.data[0] == 0xf0 ? kindSysEx : kindOther;
+        dispatchGroupEvent(raw, eventPosition);
+        return;
+    }
+    if (processingMidiFile || standardMidiResets.load()) {
         for (auto it = begin; it != end; ++it) {
             const auto m = *it;
             GroupEvent raw{};
@@ -2132,36 +2290,38 @@ void FluidSynthModel::dispatchMidiEvent(const MidiMessage& m, int samplePosition
                 midiCh,
                 m.getNoteNumber());
         } else if (m.isController()) {
-            lastCcValue[midiCh][m.getControllerNumber()].store(
-                m.getControllerValue(), std::memory_order_relaxed);
-            lastCcSample[midiCh][m.getControllerNumber()].store(
+            const int controller{m.getControllerNumber()};
+            const int value{m.getControllerValue()};
+            lastCcValue[midiCh][controller].store(
+                value, std::memory_order_relaxed);
+            lastCcSample[midiCh][controller].store(
                 samplePosition, std::memory_order_relaxed);
-            if (reachesEngine(m.getControllerNumber()))
+            if (reachesEngine(controller))
                 fluid_synth_cc(
                     synth.get(),
                     midiCh,
-                    m.getControllerNumber(),
-                    m.getControllerValue());
-            if (m.getControllerNumber() == 1)
-                diagnosticModulation[midiCh].store(m.getControllerValue());
-            if (m.getControllerNumber() == 121)
+                    controller,
+                    value);
+            if (controller == 1)
+                diagnosticModulation[midiCh].store(value);
+            if (controller == 121)
                 diagnosticModulation[midiCh].store(0);
-            if (m.getControllerNumber() == 93)
-                diagnosticChorusSend[midiCh].store(m.getControllerValue());
-            if (m.getControllerNumber() == 64)
-                diagnosticSustain[midiCh].store(m.getControllerValue());
+            if (controller == 93)
+                diagnosticChorusSend[midiCh].store(value);
+            if (controller == 64)
+                diagnosticSustain[midiCh].store(value);
             noteControllerForBendRange(
-                midiCh, m.getControllerNumber(), m.getControllerValue());
+                midiCh, controller, value);
             noteControllerForExpression(
-                midiCh, m.getControllerNumber(), m.getControllerValue());
-            restoreSixteenChannelLayout(m.getControllerNumber());
+                midiCh, controller, value);
+            restoreSixteenChannelLayout(controller);
 
             // Mirror CC7/CC10 into state via atomics; handleAsyncUpdate writes the tree on
             // the message thread.
-            if (int idx{ccToIndex(m.getControllerNumber())};
+            if (int idx{ccToIndex(controller)};
                 idx >= 0) {
-                engineCc[midiCh][idx].store(m.getControllerValue(), std::memory_order_relaxed);
-                midiCcValue[midiCh][idx].store(m.getControllerValue(), std::memory_order_relaxed);
+                engineCc[midiCh][idx].store(value, std::memory_order_relaxed);
+                midiCcValue[midiCh][idx].store(value, std::memory_order_relaxed);
                 midiCcDirtyMask.fetch_or(1u << midiCh, std::memory_order_release);
                 triggerAsyncUpdate();
             }
@@ -2227,9 +2387,12 @@ void FluidSynthModel::renderSamples(AudioBuffer<float>& buffer, int startSample,
             stereoScratch.clear(1, 0, chunk);
             renderWithEffects(
                 const_cast<float**>(stereoScratch.getArrayOfWritePointers()), chunk);
-            buffer.copyFrom(0, startSample + rendered, stereoScratch, 0, 0, chunk);
-            buffer.addFrom(0, startSample + rendered, stereoScratch, 1, 0, chunk);
-            buffer.applyGain(0, startSample + rendered, chunk, 0.5f);
+            const float* const left{stereoScratch.getReadPointer(0)};
+            const float* const right{stereoScratch.getReadPointer(1)};
+            float* const mono{buffer.getWritePointer(0, startSample + rendered)};
+            // Preserve copy L -> add R -> halve arithmetic in one memory pass.
+            for (int i = 0; i < chunk; ++i)
+                mono[i] = (left[i] + right[i]) * 0.5f;
             rendered += chunk;
         }
     }
@@ -2245,10 +2408,31 @@ void FluidSynthModel::renderWithEffects(float* const* outputs, int numSamples) {
     fluid_synth_process(synth.get(), numSamples, 64, effectOutputs.data(), 32, dryOutputs.data());
     effectsScratch.setNotClear();
     channelScratch.setNotClear();
-    const float decay = std::pow(0.1f, static_cast<float>(numSamples) / currentSampleRate);
+    if (meterDecaySamples != numSamples || !juce::exactlyEqual(meterDecayRate, currentSampleRate)) {
+        if (!juce::exactlyEqual(meterDecayRate, currentSampleRate)) {
+            meterDecayCache.fill(MeterDecayEntry{});
+            meterDecayCacheNext = 0;
+            meterDecayRate = currentSampleRate;
+        }
+        meterDecaySamples = numSamples;
+        const auto cached = std::find_if(meterDecayCache.begin(), meterDecayCache.end(),
+            [numSamples](const auto& entry) { return entry.samples == numSamples; });
+        if (cached != meterDecayCache.end()) {
+            meterDecayValue = cached->value;
+        } else {
+            meterDecayValue = std::pow(0.1f, static_cast<float>(numSamples) / currentSampleRate);
+            meterDecayCache[meterDecayCacheNext] = {numSamples, meterDecayValue};
+            meterDecayCacheNext = (meterDecayCacheNext + 1) % meterDecayCache.size();
+        }
+    }
+    const float decay{meterDecayValue};
     for (int ch = 0; ch < 16; ++ch) {
         auto& smooth = channelTrimSmoother[ch];
-        smooth.setTargetValue(channelTrimGain[ch].load(std::memory_order_relaxed));
+        const float target{channelTrimGain[ch].load(std::memory_order_relaxed)};
+        // Equal targets need no tolerance check; changed targets retain JUCE's
+        // original approximatelyEqual/setTargetValue behavior.
+        if (!juce::exactlyEqual(target, smooth.getTargetValue()))
+            smooth.setTargetValue(target);
         const float* const dryLeft = dryOutputs[static_cast<size_t>(2 * ch)];
         const float* const dryRight = dryOutputs[static_cast<size_t>(2 * ch + 1)];
         const float* const wetLeft = effectsScratch.getReadPointer(2 * ch);
@@ -2267,10 +2451,44 @@ void FluidSynthModel::renderWithEffects(float* const* outputs, int numSamples) {
         // Hoist the settled case out of the loop; arithmetic and order are unchanged.
         if (smooth.isSmoothing())
             mix([&smooth] { return smooth.getNextValue(); });
-        else
+        else {
+#if defined(__aarch64__) && defined(__clang__)
+            // Keep each add, multiply and output add separate: contraction would
+            // change rounding. Channels still accumulate in their original order.
+            #pragma clang fp contract(off)
+            const float gain{smooth.getTargetValue()};
+            const float32x4_t gains{vdupq_n_f32(gain)};
+            float32x4_t peaks{vdupq_n_f32(0.0f)};
+            int i{0};
+            for (; i <= numSamples - 4; i += 4) {
+                const float32x4_t left{vmulq_f32(
+                    vaddq_f32(vld1q_f32(dryLeft + i), vld1q_f32(wetLeft + i)), gains)};
+                const float32x4_t right{vmulq_f32(
+                    vaddq_f32(vld1q_f32(dryRight + i), vld1q_f32(wetRight + i)), gains)};
+                vst1q_f32(outputs[0] + i, vaddq_f32(vld1q_f32(outputs[0] + i), left));
+                vst1q_f32(outputs[1] + i, vaddq_f32(vld1q_f32(outputs[1] + i), right));
+                // JUCE jmax(peak, abs(left), abs(right)) ignores NaNs because
+                // peak starts at +0 and remains numeric. Numeric-max does too.
+                peaks = vmaxnmq_f32(vmaxnmq_f32(peaks, vabsq_f32(left)), vabsq_f32(right));
+            }
+            peak = vmaxnmvq_f32(peaks);
+            for (; i < numSamples; ++i) {
+                const float left{(dryLeft[i] + wetLeft[i]) * gain};
+                const float right{(dryRight[i] + wetRight[i]) * gain};
+                outputs[0][i] += left;
+                outputs[1][i] += right;
+                peak = juce::jmax(peak, std::abs(left), std::abs(right));
+            }
+#else
             mix([gain = smooth.getTargetValue()] { return gain; });
+#endif
+        }
         // Peak decays with audio time at 20 dB/s, independent of the UI.
-        channelPeak[ch].store(juce::jmax(peak, channelPeak[ch].load() * decay));
+        // Each peak is independently atomic telemetry; it publishes no other
+        // data and has one rendering writer, so no cross-object fence is needed.
+        channelPeak[ch].store(juce::jmax(peak,
+            channelPeak[ch].load(std::memory_order_relaxed) * decay),
+            std::memory_order_relaxed);
     }
 }
 
@@ -2298,19 +2516,29 @@ void FluidSynthModel::renderThroughOversampler(
     if (outputChannels < 1 || numSamples <= 0)
         return;
 
-    // Input needed for numSamples outputs at 1/N, plus one sample of read-ahead.
-    const int required{juce::jmin(oversampleFifo.getNumSamples(),
-                                  numSamples / oversampleFactor + 2)};
-    const int toRender{juce::jmax(0, required - oversampleFifoFill)};
+    // Lagrange uses its past-input history, not future samples. Render only the
+    // input needed by this block, including a partial input frame when needed.
+    // Extra read-ahead would synthesize next-block audio before its MIDI arrives.
+    const juce::int64 uncovered{juce::jmax(juce::int64{0},
+        static_cast<juce::int64>(numSamples) - oversampleRenderAhead)};
+    const juce::int64 requiredNew{(uncovered + oversampleFactor - 1) / oversampleFactor};
+    const int toRender{static_cast<int>(juce::jmin(requiredNew,
+        static_cast<juce::int64>(oversampleFifo.getNumSamples() - oversampleFifoFill)))};
     const int fifoBase{oversampleFifoFill};
 
-    // Positions divide by N too, so order holds; timing quantises to one internal
-    // sample.
+    // Account for engine samples already rendered, including fractional input
+    // frames held by Lagrange. Timing still quantises to one engine sample and
+    // FluidSynth's own render quantum; it must not gain a FIFO-dependent delay.
     dispatchTimestampedEvents(
         midiMessages, numSamples, toRender,
         [this, fifoBase](int from, int count) { renderIntoFifo(fifoBase + from, count); },
-        [this](int hostPosition) { return hostPosition / oversampleFactor; });
+        [this](int hostPosition) {
+            return static_cast<int>(juce::jmax(juce::int64{0},
+                (static_cast<juce::int64>(hostPosition) - oversampleRenderAhead)
+                    / oversampleFactor));
+        });
     oversampleFifoFill += toRender;
+    oversampleRenderAhead += static_cast<juce::int64>(toRender) * oversampleFactor;
 
     float* outputs[2];
     const bool downmix{outputChannels < 2};
@@ -2324,8 +2552,8 @@ void FluidSynthModel::renderThroughOversampler(
 
     // Produce only what the FIFO holds; an oversized host block ends in silence
     // rather than a bad read.
-    int produce{juce::jmin(numSamples,
-                           juce::jmax(0, (oversampleFifoFill - 2) * oversampleFactor))};
+    int produce{static_cast<int>(juce::jmin(
+        static_cast<juce::int64>(numSamples), oversampleRenderAhead))};
     if (downmix)
         produce = juce::jmin(produce, stereoScratch.getNumSamples());
     if (produce < numSamples)
@@ -2338,14 +2566,18 @@ void FluidSynthModel::renderThroughOversampler(
     for (int ch = 0; ch < 2; ++ch)
         consumed = oversampleInterpolators[ch].process(
             ratio, oversampleFifo.getReadPointer(ch), outputs[ch], produce);
+    oversampleRenderAhead -= produce;
 
     if (downmix) {
-        buffer.copyFrom(0, 0, stereoScratch, 0, 0, produce);
-        buffer.addFrom(0, 0, stereoScratch, 1, 0, produce);
-        buffer.applyGain(0, 0, produce, 0.5f);
+        const float* const left{stereoScratch.getReadPointer(0)};
+        const float* const right{stereoScratch.getReadPointer(1)};
+        float* const mono{buffer.getWritePointer(0)};
+        for (int i = 0; i < produce; ++i)
+            mono[i] = (left[i] + right[i]) * 0.5f;
     }
 
     // Carry unconsumed samples to the next block.
+    jassert(consumed >= 0 && consumed <= oversampleFifoFill);
     consumed = juce::jlimit(0, oversampleFifoFill, consumed);
     const int remaining{oversampleFifoFill - consumed};
     if (remaining > 0 && consumed > 0)
@@ -2356,7 +2588,8 @@ void FluidSynthModel::renderThroughOversampler(
     oversampleFifoFill = remaining;
 }
 
-void FluidSynthModel::processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiMessages) {
+void FluidSynthModel::processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiMessages, bool midiFilePlayback) {
+    const juce::ScopedValueSetter<bool> context{processingMidiFile, midiFilePlayback};
     if (!sampleRateSupported.load(std::memory_order_acquire) || synth == nullptr) {
         buffer.clear();
         return;
@@ -2373,7 +2606,7 @@ void FluidSynthModel::processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiM
 
     // Render up to each event, then apply that timestamp's events. Keeps Bank Select
     // -> Program Change -> Note order without quantising to the block start.
-    if (oversampleFactor <= 1)
+    if (oversampleFactor <= 1 || numSamples == 0)
         dispatchTimestampedEvents(
             midiMessages, numSamples, numSamples,
             [this, &buffer](int from, int count) { renderSamples(buffer, from, count); },
@@ -2382,8 +2615,20 @@ void FluidSynthModel::processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiM
         renderThroughOversampler(buffer, midiMessages, numSamples);
 
     // Master trim over the whole block, smoothed.
-    outputLevelSmoother.setTargetValue(outputLevelGain.load(std::memory_order_relaxed));
-    outputLevelSmoother.applyGain(buffer, numSamples);
+    const float target{outputLevelGain.load(std::memory_order_relaxed)};
+    if (!juce::exactlyEqual(target, outputLevelSmoother.getTargetValue()))
+        outputLevelSmoother.setTargetValue(target);
+    if (numSamples > 0 && buffer.getNumChannels() == 2 && outputLevelSmoother.isSmoothing()) {
+        float* const left{buffer.getWritePointer(0)};
+        float* const right{buffer.getWritePointer(1)};
+        for (int i = 0; i < numSamples; ++i) {
+            const float gain{outputLevelSmoother.getNextValue()};
+            left[i] *= gain;
+            right[i] *= gain;
+        }
+    } else {
+        outputLevelSmoother.applyGain(buffer, numSamples);
+    }
     float peak{0.0f};
     for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
         peak = juce::jmax(peak, buffer.getMagnitude(ch, 0, numSamples));

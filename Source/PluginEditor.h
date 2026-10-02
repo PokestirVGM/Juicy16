@@ -8,6 +8,7 @@
 #include "SurjectiveMidiKeyboardComponent.h"
 #include "FilePicker.h"
 #include "MixerPanelComponent.h"
+#include "MidiPlayerComponent.h"
 #include "Theme.h"
 #include "GuiConstants.h"
 
@@ -67,6 +68,9 @@ class JuicySFAudioProcessorEditor
 : public AudioProcessorEditor
 , private Value::Listener
 , private ValueTree::Listener
+, public juce::AsyncUpdater
+, public juce::FileDragAndDropTarget
+, private juce::KeyListener
 {
 public:
     JuicySFAudioProcessorEditor(
@@ -81,9 +85,14 @@ public:
 
     bool keyPressed(const KeyPress &key) override;
     bool keyStateChanged (bool isKeyDown) override;
+    void focusLost(FocusChangeType) override;
+    void focusOfChildComponentChanged(FocusChangeType) override;
+    bool isInterestedInFileDrag(const StringArray&) override;
+    void filesDropped(const StringArray&, int, int) override;
 
 private:
     void valueChanged (Value&) override;
+    void handleAsyncUpdate() override;
 
     // Keyboard follows the selected channel.
     void valueTreePropertyChanged (ValueTree&, const Identifier&) override;
@@ -101,6 +110,10 @@ private:
     void syncStatusLabel();
     void showSettings();
     void applyAccentFromState();
+    bool handleTransportKey(const KeyPress&, juce::Component* origin);
+    bool keyPressed(const KeyPress&, juce::Component* origin) override;
+    bool keyStateChanged(bool, juce::Component*) override { return false; }
+    void registerTransportKeys(juce::Component&, bool add);
 
     JuicySFAudioProcessor& audioProcessor;
     AudioProcessorValueTreeState& valueTreeState;
@@ -118,6 +131,7 @@ private:
     ChannelListComponent channelRack;
     FilePicker filePicker;
     MixerPanelComponent mixerPanel;
+    std::unique_ptr<MidiPlayerComponent> midiPlayer;
     LogoButton logoButton;
 
     // Build version plus the latest bank-load result.

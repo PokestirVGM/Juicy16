@@ -4,6 +4,7 @@
 #include "PatchList.h"
 #include "GuiConstants.h"
 #include "Theme.h"
+#include "PluginEditor.h"
 
 #include <array>
 #include <algorithm>
@@ -14,6 +15,7 @@
 #include <map>
 #include <set>
 #include <vector>
+#include <thread>
 
 #if ! JUCE_WINDOWS
  #include <sys/stat.h>
@@ -1427,6 +1429,93 @@ int main(int argc, char** argv)
                     " levels %.3f / %.3f / %.3f\n",
                     pitch96, pitch192, pitch176, ceilingLevel, level192, level176);
         rateFixture.deleteFile();
+    }
+
+    std::printf("== high-rate MIDI timing across host block boundaries ==\n");
+    {
+        juce::TemporaryFile timingFixture{".sf2"};
+        const bool fixtureWritten{SyntheticSf2::write(timingFixture.getFile(), {
+            {0, 0, 441.0, "Timing reference"}, {0, 1, 882.0, "Timing second"}})};
+        check(fixtureWritten, "the high-rate timestamp fixture is written");
+        const auto timingState{makeState(timingFixture.getFile().getFullPathName())};
+        // Input timestamps sit on FluidSynth's 64-sample boundaries. This
+        // isolates FIFO mapping from the engine's documented onset quantum.
+        // The first note at engine sample 576 exposes the former two-input
+        // FIFO lead: a 1024-frame host block at 192 kHz moved it to sample 640.
+        struct TimedEvent { int sample; juce::MidiMessage message; };
+        const std::array<std::vector<int>, 3> partitions{{
+            {1024}, {127, 513, 255, 1023, 65, 510}, {1, 2, 3, 127, 509, 1024}
+        }};
+        const auto firstSound{[](const juce::AudioBuffer<float>& waveform) {
+            for (int i = 0; i < waveform.getNumSamples(); ++i)
+                for (int ch = 0; ch < waveform.getNumChannels(); ++ch)
+                    if (std::abs(waveform.getSample(ch, i)) > 1.0e-6f)
+                        return i;
+            return -1;
+        }};
+        for (const double rate : {176400.0, 192000.0, 256000.0, 768000.0}) {
+            const int factor{static_cast<int>(std::ceil(rate / 96000.0))};
+            const int totalFrames{3072 * factor};
+            const std::vector<TimedEvent> events{
+                {576 * factor, juce::MidiMessage::noteOn(1, 60, static_cast<juce::uint8>(100))},
+                {960 * factor, juce::MidiMessage::controllerEvent(1, 7, 31)},
+                {1280 * factor, juce::MidiMessage::controllerEvent(1, 7, 100)},
+                {1536 * factor, juce::MidiMessage::controllerEvent(1, 120, 0)},
+                {1536 * factor, juce::MidiMessage::programChange(1, 1)},
+                {1536 * factor, juce::MidiMessage::noteOn(1, 64, static_cast<juce::uint8>(100))},
+                {1920 * factor, juce::MidiMessage::controllerEvent(1, 10, 0)},
+                {2304 * factor, juce::MidiMessage::controllerEvent(1, 10, 127)},
+                {2688 * factor, juce::MidiMessage::controllerEvent(1, 120, 0)}
+            };
+            const auto renderPartition{[&](const std::vector<int>& lengths,
+                                           juce::AudioBuffer<float>& output) {
+                JuicySFAudioProcessor timingProcessor;
+                const int preparedFrames{*std::max_element(lengths.begin(), lengths.end())};
+                timingProcessor.prepareToPlay(rate, preparedFrames);
+                timingProcessor.setStateInformation(
+                    timingState.getData(), static_cast<int>(timingState.getSize()));
+                output.setSize(2, totalFrames, false, false, true);
+                int rendered{0};
+                size_t blockIndex{0};
+                while (rendered < totalFrames) {
+                    const int frames{juce::jmin(totalFrames - rendered,
+                        lengths[blockIndex++ % lengths.size()])};
+                    juce::AudioBuffer<float> block{2, frames};
+                    juce::MidiBuffer midi;
+                    for (const auto& event : events)
+                        if (event.sample >= rendered && event.sample < rendered + frames)
+                            midi.addEvent(event.message, event.sample - rendered);
+                    render(timingProcessor, block, midi);
+                    output.copyFrom(0, rendered, block, 0, 0, frames);
+                    output.copyFrom(1, rendered, block, 1, 0, frames);
+                    rendered += frames;
+                }
+                return timingProcessor.getFluidSynthModel().getFontLoadStatus() == "loaded";
+            }};
+            juce::AudioBuffer<float> continuous;
+            const bool referenceLoaded{renderPartition({totalFrames}, continuous)};
+            const int referenceOnset{firstSound(continuous)};
+            bool onsetsMatch{referenceLoaded && referenceOnset >= 576 * factor};
+            bool waveformsMatch{referenceLoaded};
+            float maximumDifference{0.0f};
+            for (const auto& lengths : partitions) {
+                juce::AudioBuffer<float> partitioned;
+                const bool loaded{renderPartition(lengths, partitioned)};
+                onsetsMatch = onsetsMatch && loaded
+                    && firstSound(partitioned) == referenceOnset;
+                for (int ch = 0; ch < 2; ++ch)
+                    for (int i = 0; i < totalFrames; ++i)
+                        maximumDifference = juce::jmax(maximumDifference,
+                            std::abs(partitioned.getSample(ch, i) - continuous.getSample(ch, i)));
+                waveformsMatch = waveformsMatch && loaded && maximumDifference < 1.0e-5f;
+            }
+            std::printf("    %.0f Hz, factor %d: onset %d, maximum split/continuous difference %.9g\n",
+                rate, factor, referenceOnset, static_cast<double>(maximumDifference));
+            check(onsetsMatch,
+                "high-rate note onset matches continuous rendering across even, odd, and tiny blocks");
+            check(waveformsMatch,
+                "high-rate programs, volume, pan, and note cuts match continuous rendering sample by sample");
+        }
     }
 
     std::printf("== channel mode messages ==\n");
@@ -3814,6 +3903,164 @@ int main(int argc, char** argv)
               "channel and polyphonic key pressure preserve value, timestamp, channel, and key on all 16 channels");
     }
 
+    std::printf("== pedal-held mute, reset validation, and offset drum fallback ==\n");
+    {
+        // A melodic-only looped bank makes held voices independent of a host's
+        // system bank, and deliberately leaves channel 10 without a drum kit.
+        juce::TemporaryFile auditFixture{".sf2"};
+        const bool fixtureWritten{SyntheticSf2::write(auditFixture.getFile(), {
+            {0, 0, 441.0, "Held reference"}, {0, 1, 882.0, "Fallback reference"}})};
+        check(fixtureWritten, "the pedal/reset/kitless regression fixture is written");
+        const auto fixtureState{makeState(auditFixture.getFile().getFullPathName())};
+
+        for (const int pedal : {64, 66}) {
+            for (const bool excludeThroughSolo : {false, true}) {
+                JuicySFAudioProcessor heldProcessor;
+                heldProcessor.prepareToPlay(48000.0, blockSize);
+                heldProcessor.setStateInformation(
+                    fixtureState.getData(), static_cast<int>(fixtureState.getSize()));
+                auto& heldModel{heldProcessor.getFluidSynthModel()};
+                constexpr int heldChannel{2};
+                juce::AudioBuffer<float> heldAudio{2, blockSize};
+                juce::MidiBuffer hold;
+                hold.addEvent(juce::MidiMessage::noteOn(
+                    heldChannel + 1, 60, static_cast<juce::uint8>(100)), 1);
+                hold.addEvent(juce::MidiMessage::controllerEvent(
+                    heldChannel + 1, pedal, 127), 2);
+                hold.addEvent(juce::MidiMessage::noteOff(heldChannel + 1, 60), 3);
+                render(heldProcessor, heldAudio, hold);
+                FluidSynthModel::VoiceStateCounts before;
+                const bool wasHeld{heldModel.getVoiceStateCounts(heldChannel, before)
+                    && before.playing > 0
+                    && (pedal == 64 ? before.sustained > 0 : before.sostenuto > 0)};
+
+                auto* silencingParameter{findBoolParameter(heldProcessor,
+                    excludeThroughSolo ? "soloCh16" : "muteCh3")};
+                if (silencingParameter != nullptr)
+                    *silencingParameter = true;
+                juce::MidiBuffer none;
+                render(heldProcessor, heldAudio, none);
+                FluidSynthModel::VoiceStateCounts after;
+                int pedalValue{-1};
+                const bool cleared{wasHeld && silencingParameter != nullptr
+                    && heldModel.isChannelSilenced(heldChannel)
+                    && heldModel.getVoiceStateCounts(heldChannel, after)
+                    && after.playing == 0
+                    && heldModel.getControllerValue(heldChannel, pedal, pedalValue)
+                    && pedalValue == 127};
+                check(cleared, pedal == 64
+                    ? (excludeThroughSolo
+                        ? "solo exclusion clears sustain-held voices without changing CC64"
+                        : "mute clears sustain-held voices without changing CC64")
+                    : (excludeThroughSolo
+                        ? "solo exclusion clears sostenuto-held voices without changing CC66"
+                        : "mute clears sostenuto-held voices without changing CC66"));
+            }
+        }
+
+        const auto configureResetChannel{[](juce::MidiBuffer& events) {
+            events.addEvent(juce::MidiMessage::programChange(3, 1), 0);
+            events.addEvent(juce::MidiMessage::controllerEvent(3, 7, 77), 1);
+            events.addEvent(juce::MidiMessage::controllerEvent(3, 10, 33), 2);
+            events.addEvent(juce::MidiMessage::controllerEvent(3, 11, 43), 3);
+            events.addEvent(juce::MidiMessage::controllerEvent(3, 101, 0), 4);
+            events.addEvent(juce::MidiMessage::controllerEvent(3, 100, 0), 5);
+            events.addEvent(juce::MidiMessage::controllerEvent(3, 6, 12), 6);
+            events.addEvent(juce::MidiMessage::controllerEvent(3, 38, 25), 7);
+            events.addEvent(juce::MidiMessage::controllerEvent(3, 1, 81), 8);
+            events.addEvent(juce::MidiMessage::controllerEvent(3, 91, 88), 9);
+            events.addEvent(juce::MidiMessage::controllerEvent(3, 93, 66), 10);
+            events.addEvent(juce::MidiMessage::pitchWheel(3, 12345), 11);
+            events.addEvent(juce::MidiMessage::controllerEvent(3, 64, 127), 12);
+        }};
+        const std::array<std::vector<juce::uint8>, 3> nonResets{{
+            {0x7e, 0x7f, 0x09, 0x02}, // GM Off is not a system reset.
+            {0x41, 0x10, 0x42, 0x12, 0x40, 0x00, 0x7f, 0x00, 0x42}, // Bad checksum.
+            {0x43, 0x10, 0x4c, 0x00, 0x00, 0x7e, 0x01} // Invalid reset data.
+        }};
+        const std::array<const char*, 3> nonResetNames{{
+            "GM Off preserves live controllers and their diagnostics",
+            "a GS reset with a bad checksum preserves live controllers and diagnostics",
+            "an XG reset with invalid data preserves live controllers and diagnostics"
+        }};
+        for (size_t i = 0; i < nonResets.size(); ++i) {
+            JuicySFAudioProcessor resetProcessor;
+            resetProcessor.prepareToPlay(48000.0, blockSize);
+            resetProcessor.setStateInformation(
+                fixtureState.getData(), static_cast<int>(fixtureState.getSize()));
+            auto& resetModel{resetProcessor.getFluidSynthModel()};
+            juce::AudioBuffer<float> resetAudio{2, blockSize};
+            juce::MidiBuffer setup;
+            configureResetChannel(setup);
+            render(resetProcessor, resetAudio, setup);
+            juce::MidiBuffer message;
+            message.addEvent(juce::MidiMessage::createSysExMessage(
+                nonResets[i].data(), static_cast<int>(nonResets[i].size())), 0);
+            render(resetProcessor, resetAudio, message);
+            int reverbSend{-1}, pitchBend{-1}, sustain{-1}, expression{-1};
+            const auto diagnostic{resetModel.getChannelDiagnostics(2)};
+            check(resetModel.getControllerValue(2, 91, reverbSend) && reverbSend == 88
+                && resetModel.getPitchBend(2, pitchBend) && pitchBend == 12345
+                && resetModel.getControllerValue(2, 64, sustain) && sustain == 127
+                && resetModel.getControllerValue(2, 11, expression) && expression == 43
+                && resetModel.rememberedBendRange(2) == ((12 << 7) | 25)
+                && diagnostic.pitchBend == 12345 && diagnostic.sustain == 127
+                && diagnostic.modulation == 81 && diagnostic.chorusSend == 66,
+                nonResetNames[i]);
+        }
+        {
+            JuicySFAudioProcessor factoryProcessor;
+            factoryProcessor.prepareToPlay(48000.0, blockSize);
+            factoryProcessor.setStateInformation(
+                fixtureState.getData(), static_cast<int>(fixtureState.getSize()));
+            auto& factoryModel{factoryProcessor.getFluidSynthModel()};
+            juce::AudioBuffer<float> factoryAudio{2, blockSize};
+            juce::MidiBuffer setup;
+            configureResetChannel(setup);
+            render(factoryProcessor, factoryAudio, setup);
+            const juce::uint8 factoryReset[]{0x43, 0x10, 0x4c, 0x00, 0x00, 0x7f, 0x00};
+            juce::MidiBuffer reset;
+            reset.addEvent(juce::MidiMessage::createSysExMessage(
+                factoryReset, sizeof(factoryReset)), 0);
+            render(factoryProcessor, factoryAudio, reset);
+            int bank{-1}, preset{-1}, volume{-1}, pan{-1}, expression{-1}, sensitivity{-1};
+            const auto diagnostic{factoryModel.getChannelDiagnostics(2)};
+            check(factoryModel.getChannelProgram(2, bank, preset) && bank == 0 && preset == 1
+                && factoryModel.getControllerValue(2, 7, volume) && volume == 77
+                && factoryModel.getControllerValue(2, 10, pan) && pan == 33
+                && factoryModel.getControllerValue(2, 11, expression) && expression == 43
+                && factoryModel.getPitchWheelSensitivity(2, sensitivity) && sensitivity == 12
+                && factoryModel.rememberedBendRange(2) == ((12 << 7) | 25)
+                && diagnostic.pitchBend == 8192 && diagnostic.sustain == 0
+                && diagnostic.modulation == 0 && diagnostic.chorusSend == 0,
+                "a valid XG factory reset recovers programs, mixer, expression, and bend range");
+        }
+        {
+            JuicySFAudioProcessor offsetDrums;
+            constexpr int toneBlock{4096};
+            offsetDrums.prepareToPlay(48000.0, toneBlock);
+            offsetDrums.setStateInformation(
+                fixtureState.getData(), static_cast<int>(fixtureState.getSize()));
+            auto& offsetModel{offsetDrums.getFluidSynthModel()};
+            const bool offsetInstalled{offsetModel.setLoadedFontBankOffset(10)};
+            juce::AudioBuffer<float> drumAudio{2, toneBlock};
+            juce::MidiBuffer drums;
+            drums.addEvent(juce::MidiMessage::controllerEvent(10, 0, 0), 0);
+            drums.addEvent(juce::MidiMessage::programChange(10, 1), 1);
+            drums.addEvent(juce::MidiMessage::noteOn(
+                10, 60, static_cast<juce::uint8>(100)), 2);
+            render(offsetDrums, drumAudio, drums);
+            int bank{-1}, preset{-1};
+            const double frequency{estimatePeriodicFrequency(
+                drumAudio, 1024, 3072, 48000.0, 882.0)};
+            check(offsetInstalled
+                && offsetModel.getChannelProgram(9, bank, preset) && bank == 0 && preset == 1
+                && magnitude(drumAudio, 1024, 3072) > audiblePresence
+                && std::abs(frequency - 882.0) < 882.0 * 0.02,
+                "channel 10's kitless fallback selects and sounds the requested preset under a bank offset");
+        }
+    }
+
     std::printf("== corrupt-state bounds ==\n");
     {
         const auto corruptState{makeState(argv[1], 999)};
@@ -3849,7 +4096,7 @@ int main(int argc, char** argv)
                     allChannelProperties = allChannelProperties
                         && ch->hasAttribute(property);
         check(xml != nullptr && xml->hasTagName("MYPLUGINSETTINGS")
-                  && xml->getIntAttribute("stateVersion", -1) == 10
+                  && xml->getIntAttribute("stateVersion", -1) == 11
                   && allParams && allChannelProperties
                   && font != nullptr && font->hasAttribute("path")
                   && font->hasAttribute("bookmark"),
@@ -3907,6 +4154,173 @@ int main(int argc, char** argv)
                   && migrated.getFluidSynthModel().getControllerValue(0, 10, pan)
                   && pan == MidiConstants::centreValue,
               "pre-v3 state keeps program assignments and leaves volume/pan at the GM defaults");
+    }
+    {
+        // Font selection is one transaction: no intermediate path-only load
+        // before the saved bookmark arrives, and no reload for identical state.
+        const auto first{juce::File::createTempFile(".sf2")};
+        const auto second{juce::File::createTempFile(".sf2")};
+        const bool fixtures{SyntheticSf2::write(first, {{0, 0, 441.0, "First font"}})
+            && SyntheticSf2::write(second, {{0, 0, 882.0, "Second font"}})};
+        check(fixtures, "font-selection transaction fixtures created");
+        if (fixtures) {
+            JuicySFAudioProcessor selected;
+            selected.prepareToPlay(48000.0, blockSize);
+            auto& selectedModel{selected.getFluidSynthModel()};
+            int refreshes{0};
+            const auto originalHook{selectedModel.onBanksRefreshed};
+            selectedModel.onBanksRefreshed = [&] {
+                ++refreshes;
+                if (originalHook)
+                    originalHook();
+            };
+            const auto makeSelectionState = [&](const juce::String& path,
+                                                 const juce::MemoryBlock& bookmark) {
+                const auto selectionState{makeState(path)};
+                auto xml{juce::AudioProcessor::getXmlFromBinary(
+                    selectionState.getData(), static_cast<int>(selectionState.getSize()))};
+                xml->getChildByName("soundFont")->setAttribute(
+                    "bookmark", bookmark.toBase64Encoding());
+                juce::MemoryBlock result;
+                juce::AudioProcessor::copyXmlToBinary(*xml, result);
+                return result;
+            };
+            juce::MemoryBlock noBookmark;
+            const auto firstState{makeSelectionState(first.getFullPathName(), noBookmark)};
+            selected.setStateInformation(firstState.getData(), static_cast<int>(firstState.getSize()));
+            check(refreshes == 1 && selectedModel.getLoadedFontPath() == first.getFullPathName(),
+                  "path-only state loads its bank exactly once");
+            selected.setStateInformation(firstState.getData(), static_cast<int>(firstState.getSize()));
+            check(refreshes == 1, "identical font selection recalls state without reloading samples");
+#if JUCE_MAC
+            const auto makeBookmark = [](const juce::File& file) {
+                juce::MemoryBlock bytes;
+                const String fullPath{file.getFullPathName()};
+                const auto path{fullPath.toRawUTF8()};
+                CFURLRef url{CFURLCreateFromFileSystemRepresentation(nullptr,
+                    reinterpret_cast<const UInt8*>(path), static_cast<CFIndex>(std::strlen(path)), false)};
+                if (url != nullptr) {
+                    CFDataRef data{CFURLCreateBookmarkData(nullptr, url,
+                        kCFURLBookmarkCreationWithSecurityScope, nullptr, nullptr, nullptr)};
+                    if (data == nullptr)
+                        data = CFURLCreateBookmarkData(nullptr, url, 0, nullptr, nullptr, nullptr);
+                    if (data != nullptr) {
+                        bytes.append(CFDataGetBytePtr(data), static_cast<size_t>(CFDataGetLength(data)));
+                        CFRelease(data);
+                    }
+                    CFRelease(url);
+                }
+                return bytes;
+            };
+            const auto validBookmark{makeBookmark(second)};
+            if (validBookmark.isEmpty()) {
+                std::printf("  SKIP  actual bookmark unavailable for single-load transaction coverage\n");
+            } else {
+                const auto bookmarkedState{makeSelectionState(second.getFullPathName(), validBookmark)};
+                refreshes = 0;
+                selected.setStateInformation(bookmarkedState.getData(), static_cast<int>(bookmarkedState.getSize()));
+                // Core Foundation canonicalises /var to /private/var outside
+                // sandboxed runs. Require the actual same file, not the same
+                // spelling, while retaining the exact successful-load count.
+                struct stat requestedFileInfo{}, loadedFileInfo{};
+                const bool sameBookmarkedFile{
+                    ::stat(second.getFullPathName().toRawUTF8(), &requestedFileInfo) == 0
+                    && ::stat(selectedModel.getLoadedFontPath().toRawUTF8(), &loadedFileInfo) == 0
+                    && requestedFileInfo.st_dev == loadedFileInfo.st_dev
+                    && requestedFileInfo.st_ino == loadedFileInfo.st_ino};
+                if (refreshes != 1 || selectedModel.getFontLoadStatus() != "loaded"
+                    || !sameBookmarkedFile)
+                    std::printf("    bookmark transaction: refreshes=%d status=%s file_match=%d requested=%s loaded=%s\n",
+                                refreshes, selectedModel.getFontLoadStatus().toRawUTF8(),
+                                sameBookmarkedFile ? 1 : 0,
+                                second.getFullPathName().toRawUTF8(),
+                                selectedModel.getLoadedFontPath().toRawUTF8());
+                check(refreshes == 1 && selectedModel.getFontLoadStatus() == "loaded"
+                          && sameBookmarkedFile,
+                      "restoring path plus an actual bookmark performs one font load");
+                selected.setStateInformation(bookmarkedState.getData(), static_cast<int>(bookmarkedState.getSize()));
+                check(refreshes == 1, "identical bookmarked selection does not reload its bank");
+                juce::MemoryBlock saved;
+                selected.getStateInformation(saved);
+                const auto savedXml{juce::AudioProcessor::getXmlFromBinary(
+                    saved.getData(), static_cast<int>(saved.getSize()))};
+                const auto* savedFont{savedXml->getChildByName("soundFont")};
+                check(savedFont->getStringAttribute("path") == second.getFullPathName()
+                          && savedFont->getStringAttribute("bookmark") == validBookmark.toBase64Encoding(),
+                      "the single-load transaction saves the original path/bookmark pair");
+
+                const auto pathOnlyXmlState{makeSelectionState(first.getFullPathName(), noBookmark)};
+                auto pathOnlyXml{juce::AudioProcessor::getXmlFromBinary(
+                    pathOnlyXmlState.getData(), static_cast<int>(pathOnlyXmlState.getSize()))};
+                pathOnlyXml->getChildByName("soundFont")->removeAttribute("bookmark");
+                juce::MemoryBlock pathOnlyState;
+                juce::AudioProcessor::copyXmlToBinary(*pathOnlyXml, pathOnlyState);
+                refreshes = 0;
+                selected.setStateInformation(pathOnlyState.getData(), static_cast<int>(pathOnlyState.getSize()));
+                check(refreshes == 1 && selectedModel.getLoadedFontPath() == first.getFullPathName(),
+                      "an explicit replacement path without a bookmark cannot reuse the old bank's bookmark");
+                juce::XmlElement noFont{"MYPLUGINSETTINGS"};
+                noFont.setAttribute("stateVersion", 11);
+                juce::MemoryBlock noFontState;
+                juce::AudioProcessor::copyXmlToBinary(noFont, noFontState);
+                selected.setStateInformation(noFontState.getData(), static_cast<int>(noFontState.getSize()));
+                check(refreshes == 1 && selectedModel.getLoadedFontPath() == first.getFullPathName(),
+                      "a state with no font record retains its current selection without reloading");
+
+                const auto decoy{juce::File::createTempFile(".sf2")};
+                decoy.replaceWithText("not a loadable bank");
+                const auto rejectedBookmark{makeBookmark(decoy)};
+                if (!rejectedBookmark.isEmpty()) {
+                    // Start with a different active bank, so candidate failure
+                    // cannot silently replace the requested fallback with it.
+                    selected.setStateInformation(firstState.getData(), static_cast<int>(firstState.getSize()));
+                    refreshes = 0;
+                    const auto fallbackState{makeSelectionState(second.getFullPathName(), rejectedBookmark)};
+                    selected.setStateInformation(fallbackState.getData(), static_cast<int>(fallbackState.getSize()));
+                    check(refreshes == 1 && selectedModel.getFontLoadStatus() == "loaded"
+                              && selectedModel.getLoadedFontPath() == second.getFullPathName(),
+                          "an unloadable bookmark preserves the requested fallback instead of the old active bank");
+                    juce::MemoryBlock activeState;
+                    selected.getStateInformation(activeState);
+                    const auto activeXml{juce::AudioProcessor::getXmlFromBinary(
+                        activeState.getData(), static_cast<int>(activeState.getSize()))};
+                    const auto* activeFont{activeXml->getChildByName("soundFont")};
+                    refreshes = 0;
+                    const auto missingState{makeSelectionState(
+                        second.getSiblingFile("juicy16-missing-transaction-bank.sf2").getFullPathName(), rejectedBookmark)};
+                    selected.setStateInformation(missingState.getData(), static_cast<int>(missingState.getSize()));
+                    juce::MemoryBlock rejectedState;
+                    selected.getStateInformation(rejectedState);
+                    const auto rejectedXml{juce::AudioProcessor::getXmlFromBinary(
+                        rejectedState.getData(), static_cast<int>(rejectedState.getSize()))};
+                    const auto* rejectedFont{rejectedXml->getChildByName("soundFont")};
+                    check(refreshes == 0 && selectedModel.getFontLoadStatus() == "error"
+                              && selectedModel.getLoadedFontPath() == second.getFullPathName()
+                              && rejectedFont->getStringAttribute("path") == activeFont->getStringAttribute("path")
+                              && rejectedFont->getStringAttribute("bookmark") == activeFont->getStringAttribute("bookmark"),
+                          "failed bookmark and path candidates retain active audio and roll back the saved selection");
+                    juce::AudioBuffer<float> sounding{2, blockSize};
+                    juce::MidiBuffer notes;
+                    notes.addEvent(juce::MidiMessage::noteOn(1, 60, static_cast<juce::uint8>(100)), 0);
+                    render(selected, sounding, notes);
+                    check(magnitude(sounding, 0, blockSize) > audiblePresence,
+                          "the previous bank remains audible after a rejected font transaction");
+                } else {
+                    std::printf("  SKIP  actual decoy bookmark unavailable for transaction fallback coverage\n");
+                }
+                decoy.deleteFile();
+            }
+#else
+            const auto secondState{makeSelectionState(second.getFullPathName(), noBookmark)};
+            refreshes = 0;
+            selected.setStateInformation(secondState.getData(), static_cast<int>(secondState.getSize()));
+            check(refreshes == 1 && selectedModel.getLoadedFontPath() == second.getFullPathName(),
+                  "restoring a replacement path loads its bank exactly once");
+#endif
+            selectedModel.onBanksRefreshed = originalHook;
+        }
+        first.deleteFile();
+        second.deleteFile();
     }
 #if JUCE_MAC
     {
@@ -4082,16 +4496,16 @@ int main(int argc, char** argv)
         const auto* rewrittenParams{
             rewrittenXml != nullptr ? rewrittenXml->getChildByName("params") : nullptr};
         check(rewrittenXml != nullptr
-                  && rewrittenXml->getIntAttribute("stateVersion", -1) == 10
+                  && rewrittenXml->getIntAttribute("stateVersion", -1) == 11
                   && rewrittenParams != nullptr
                   && !rewrittenParams->hasAttribute("volume")
                   && !rewrittenParams->hasAttribute("pan")
                   && rewrittenParams->hasAttribute("volCh1")
                   && rewrittenParams->hasAttribute("soloCh16"),
-              "re-saving a migrated project writes schema 6 and drops the retired volume/pan parameters");
+              "re-saving a migrated project writes the current schema and drops the retired volume/pan parameters");
 
         // v5 -> v6: a save written before the reverb existed opens on the
-        // Universal profile with the reverb enabled, which is the deliberate
+        // Universal profile with the reverb disabled, which is the deliberate
         // default rather than FluidSynth's inherited one.
         {
             juce::XmlElement preReverb{"MYPLUGINSETTINGS"};
@@ -4127,7 +4541,7 @@ int main(int argc, char** argv)
 
         // A save from a FUTURE schema is still refused rather than half-applied.
         juce::XmlElement future{"MYPLUGINSETTINGS"};
-        future.setAttribute("stateVersion", 11);
+        future.setAttribute("stateVersion", 12);
         juce::MemoryBlock futureState;
         juce::AudioProcessor::copyXmlToBinary(future, futureState);
         migrated.setStateInformation(
@@ -4572,6 +4986,442 @@ int main(int argc, char** argv)
         check(errorStatus >= minimumTextRatio,
               "the status label meets WCAG AA contrast in its error colour");
     }
+
+    std::printf("== editor state and audition lifecycle ==\n");
+    {
+        JuicySFAudioProcessor uiProcessor;
+        const auto recallAccent = [&uiProcessor](const juce::String& accent, int selectedChannel = 1) {
+            juce::MemoryBlock saved;
+            uiProcessor.getStateInformation(saved);
+            auto xml{juce::AudioProcessor::getXmlFromBinary(saved.getData(), static_cast<int>(saved.getSize()))};
+            if (xml == nullptr || xml->getChildByName("uiState") == nullptr)
+                return;
+            xml->getChildByName("uiState")->setAttribute("accent", accent);
+            xml->getChildByName("uiState")->setAttribute("selectedChannel", selectedChannel);
+            juce::AudioProcessor::copyXmlToBinary(*xml, saved);
+            uiProcessor.setStateInformation(saved.getData(), static_cast<int>(saved.getSize()));
+        };
+        std::unique_ptr<juce::AudioProcessorEditor> editor{uiProcessor.createEditor()};
+        auto* bankPicker{editor != nullptr ? dynamic_cast<juce::FilenameComponent*>(
+            findNamedComponent(*editor, "Sound bank file")) : nullptr};
+        auto* picker{bankPicker != nullptr ? dynamic_cast<FilePicker*>(bankPicker->getParentComponent()) : nullptr};
+        bool pathDisplayed{false};
+        if (picker != nullptr) {
+            const auto path{juce::File{argv[1]}.getFullPathName()};
+            picker->setDisplayedFilePath(path);
+            pathDisplayed = bankPicker->getCurrentFileText() == path;
+            picker->setDisplayedFilePath({});
+        }
+        check(pathDisplayed && bankPicker != nullptr && bankPicker->getCurrentFileText().isEmpty(),
+              "clearing the displayed bank path clears the filename field");
+
+        recallAccent("rose");
+        const auto rose{Juicy16::accentColour(Juicy16::Accent::rose)};
+        check(editor != nullptr && bankPicker != nullptr
+                  && editor->getLookAndFeel().findColour(Juicy16::accentColourId) == rose
+                  && bankPicker->getLookAndFeel().findColour(Juicy16::accentColourId) == rose,
+              "external accent changes refresh the editor and the file picker's private palette");
+
+        auto* settings{editor != nullptr ? dynamic_cast<juce::Button*>(
+            findNamedComponent(*editor, "Settings")) : nullptr};
+        if (settings != nullptr && settings->onClick != nullptr)
+            settings->onClick();
+        auto* accentBox{editor != nullptr ? dynamic_cast<juce::ComboBox*>(
+            findNamedComponent(*editor, "Accent colour")) : nullptr};
+        recallAccent("ice");
+        const auto ice{Juicy16::accentColour(Juicy16::Accent::ice)};
+        check(accentBox != nullptr && accentBox->getText() == "Ice"
+                  && accentBox->findColour(juce::ComboBox::textColourId) == ice
+                  && accentBox->getLookAndFeel().findColour(Juicy16::accentColourId) == ice
+                  && bankPicker != nullptr
+                  && bankPicker->getLookAndFeel().findColour(Juicy16::accentColourId) == ice,
+              "an open settings picker and its popup palette follow externally recalled accent state");
+
+        std::thread recallThread{[&] { recallAccent("rose", 12); }};
+        recallThread.join();
+        check(editor != nullptr
+                  && editor->getLookAndFeel().findColour(Juicy16::accentColourId) == ice,
+              "worker-thread state recall defers editor widget changes until the message thread handles them");
+        const auto flushUI = [](auto&& self, juce::Component& component) -> void {
+            if (auto* updater = dynamic_cast<juce::AsyncUpdater*>(&component))
+                updater->handleUpdateNowIfNeeded();
+            for (int i = 0; i < component.getNumChildComponents(); ++i)
+                self(self, *component.getChildComponent(i));
+        };
+        if (editor != nullptr)
+            flushUI(flushUI, *editor);
+        auto* recalledKeyboard{editor != nullptr ? dynamic_cast<juce::SurjectiveMidiKeyboardComponent*>(
+            findNamedComponent(*editor, "MIDI Keyboard")) : nullptr};
+        auto* recalledTable{editor != nullptr ? dynamic_cast<juce::TableListBox*>(
+            channelTableForFocus(*editor)) : nullptr};
+        auto* vibratoChannel{editor != nullptr ? dynamic_cast<juce::ComboBox*>(
+            findNamedComponent(*editor, "CC1 MIDI channel")) : nullptr};
+        check(editor != nullptr && accentBox != nullptr && accentBox->getText() == "Rose"
+                  && editor->getLookAndFeel().findColour(Juicy16::accentColourId) == rose
+                  && recalledKeyboard != nullptr && recalledKeyboard->getMidiChannel() == 12
+                  && recalledTable != nullptr && recalledTable->getSelectedRow() == 11
+                  && vibratoChannel != nullptr && vibratoChannel->getSelectedId() == 12,
+              "deferred state recall updates editor, rack, audition channel and open settings on the message thread");
+    }
+    {
+        class TestKeyboard final : public juce::SurjectiveMidiKeyboardComponent {
+        public:
+            explicit TestKeyboard(juce::MidiKeyboardState& state)
+                : SurjectiveMidiKeyboardComponent(state, horizontalKeyboard) {}
+            bool typedKeyDown{false};
+            void pointerChange(juce::Point<int> position, bool down, int index) {
+                updateNoteUnderMouse(position, down, index);
+            }
+        protected:
+            bool containsMousePosition(juce::Point<int> position) override {
+                return getLocalBounds().contains(position);
+            }
+            bool isKeyCurrentlyDown(const juce::KeyPress& key) const override {
+                return typedKeyDown && key == juce::KeyPress{'Z'};
+            }
+        };
+        juce::MidiKeyboardState keyboardState;
+        auto keyboard{std::make_unique<TestKeyboard>(keyboardState)};
+        keyboard->setAvailableRange(60, 72);
+        keyboard->setScrollButtonsVisible(false);
+        keyboard->setSize(240, 80);
+        keyboard->setMidiChannel(7);
+        keyboard->setVelocity(0.25f, false);
+        const juce::Point<float> position{
+            static_cast<float>(keyboard->getKeyStartPosition(60) + 5), 75.0f};
+        check(keyboard->getNoteAtPosition(position.roundToInt()) == 60,
+              "mouse-audition fixture maps its local click position to the intended MIDI note");
+        const auto now{juce::Time::getCurrentTime()};
+        const juce::MouseEvent click{juce::Desktop::getInstance().getMainMouseSource(), position,
+            juce::ModifierKeys{juce::ModifierKeys::leftButtonModifier},
+            1.0f, 0.0f, 0.0f, 0.0f, 0.0f, keyboard.get(), keyboard.get(),
+            now, position, now, 1, false};
+        keyboardState.noteOn(3, 64, 0.5f);
+        juce::MidiBuffer events;
+        keyboardState.processNextMidiBuffer(events, 0, 128, true);
+        events.clear();
+        keyboard->mouseDown(click);
+        keyboardState.processNextMidiBuffer(events, 0, 128, true);
+        bool fixedVelocity{false};
+        for (const auto event : events) {
+            const auto message{event.getMessage()};
+            if (message.isNoteOn() && message.getChannel() == 7 && message.getNoteNumber() == 60)
+                fixedVelocity = std::abs(message.getFloatVelocity() - 0.25f) < 1.0f / 127.0f;
+        }
+        check(fixedVelocity, "fixed mouse-audition velocity respects setVelocity instead of emitting full strength");
+
+        keyboard->setMidiChannel(8);
+        check(!keyboardState.isNoteOn(7, 60) && keyboardState.isNoteOn(3, 64),
+              "changing audition channel releases the held mouse note and preserves other channels");
+        keyboard->mouseDown(click);
+        const bool auditionHeld{keyboardState.isNoteOn(8, 60)};
+        events.clear();
+        keyboardState.processNextMidiBuffer(events, 0, 128, true);
+        events.clear();
+        keyboard.reset();
+        keyboardState.processNextMidiBuffer(events, 0, 128, true);
+        int releaseCount{0};
+        for (const auto event : events) {
+            const auto message{event.getMessage()};
+            if (message.isNoteOff() && message.getChannel() == 8 && message.getNoteNumber() == 60)
+                ++releaseCount;
+        }
+        check(auditionHeld && !keyboardState.isNoteOn(8, 60)
+                  && keyboardState.isNoteOn(3, 64) && releaseCount == 1,
+              "destroying the keyboard emits one release for its held audition note and preserves unrelated MIDI");
+
+        TestKeyboard typedKeyboard{keyboardState};
+        typedKeyboard.setMidiChannel(11);
+        typedKeyboard.typedKeyDown = true;
+        typedKeyboard.keyStateChanged(true);
+        const bool typedNoteHeld{keyboardState.isNoteOn(11, 60)};
+        typedKeyboard.focusLost(juce::Component::focusChangedDirectly);
+        check(typedNoteHeld && !keyboardState.isNoteOn(11, 60)
+                  && keyboardState.isNoteOn(3, 64),
+              "focus loss releases a tracked QWERTY audition note and preserves other channels");
+
+        const auto countNoteEvents = [&keyboardState](int channel) {
+            juce::MidiBuffer pending;
+            keyboardState.processNextMidiBuffer(pending, 0, 128, true);
+            std::pair<int, int> counts{0, 0};
+            for (const auto event : pending) {
+                const auto message{event.getMessage()};
+                if (message.getChannel() == channel && message.getNoteNumber() == 60) {
+                    if (message.isNoteOn()) ++counts.first;
+                    if (message.isNoteOff()) ++counts.second;
+                }
+            }
+            return counts;
+        };
+        bool mixedOwnership{true};
+        for (const bool mouseReleasedFirst : {false, true}) {
+            TestKeyboard overlap{keyboardState};
+            overlap.setMidiChannel(12);
+            overlap.setAvailableRange(60, 72);
+            overlap.setScrollButtonsVisible(false);
+            overlap.setSize(240, 80);
+            overlap.typedKeyDown = true;
+            overlap.keyStateChanged(true);
+            overlap.pointerChange({5, 75}, true, 0);
+            const auto onset{countNoteEvents(12)};
+            if (mouseReleasedFirst)
+                overlap.pointerChange({5, 75}, false, 0);
+            else {
+                overlap.typedKeyDown = false;
+                overlap.keyStateChanged(false);
+            }
+            const bool stillHeld{keyboardState.isNoteOn(12, 60)};
+            const auto firstRelease{countNoteEvents(12)};
+            if (mouseReleasedFirst) {
+                overlap.typedKeyDown = false;
+                overlap.keyStateChanged(false);
+            } else
+                overlap.pointerChange({5, 75}, false, 0);
+            const auto lastRelease{countNoteEvents(12)};
+            mixedOwnership = mixedOwnership && onset.first == 1 && onset.second == 0
+                && stillHeld && firstRelease.first == 0 && firstRelease.second == 0
+                && !keyboardState.isNoteOn(12, 60)
+                && lastRelease.first == 0 && lastRelease.second == 1;
+        }
+        check(mixedOwnership,
+              "mouse and QWERTY share one audition note without retriggering and either release order waits for the final owner");
+
+        auto shared{std::make_unique<TestKeyboard>(keyboardState)};
+        shared->setMidiChannel(13);
+        shared->setAvailableRange(60, 72);
+        shared->setScrollButtonsVisible(false);
+        shared->setSize(240, 80);
+        shared->pointerChange({5, 75}, true, 0);
+        shared->pointerChange({5, 75}, true, 1);
+        const auto sharedOnset{countNoteEvents(13)};
+        shared->pointerChange({5, 75}, false, 0);
+        const bool secondPointerHeld{keyboardState.isNoteOn(13, 60)};
+        const auto firstPointerRelease{countNoteEvents(13)};
+        shared->pointerChange({5, 75}, false, 1);
+        const auto lastPointerRelease{countNoteEvents(13)};
+        check(sharedOnset.first == 1 && sharedOnset.second == 0
+                  && secondPointerHeld && firstPointerRelease.second == 0
+                  && !keyboardState.isNoteOn(13, 60) && lastPointerRelease.second == 1,
+              "two mouse pointers retain separate ownership of the same note until the last pointer releases");
+
+        keyboardState.noteOn(13, 67, 0.5f);
+        shared->pointerChange({5, 75}, true, 0);
+        shared->pointerChange({5, 75}, true, 33);
+        shared->typedKeyDown = true;
+        shared->keyStateChanged(true);
+        const auto teardownOnset{countNoteEvents(13)};
+        shared.reset();
+        const auto sharedTeardown{countNoteEvents(13)};
+        check(teardownOnset.first == 1 && teardownOnset.second == 0
+                  && !keyboardState.isNoteOn(13, 60) && sharedTeardown.second == 1
+                  && keyboardState.isNoteOn(13, 67) && keyboardState.isNoteOn(3, 64),
+              "teardown releases a note shared by QWERTY and multiple pointers once while preserving unrelated external MIDI");
+    }
+
+#if JUICYSF_UI_WORK_COUNTERS
+    std::printf("== optional UI work counters ==\n");
+    {
+        juce::TemporaryFile firstBank{".sf2"}, secondBank{".sf2"};
+        const bool banksWritten{SyntheticSf2::write(firstBank.getFile(), {
+            {0, 0, 441.0, "UI First"}, {0, 1, 882.0, "UI Second"}})
+            && SyntheticSf2::write(secondBank.getFile(), {
+                {0, 0, 441.0, "UI New first"}, {0, 1, 882.0, "UI New second"}})};
+        check(banksWritten, "the UI cache-invalidation benchmark banks are written");
+        JuicySFAudioProcessor benchmark;
+        benchmark.prepareToPlay(48000.0, blockSize);
+        auto bankState{makeState(firstBank.getFile().getFullPathName())};
+        benchmark.setStateInformation(bankState.getData(), static_cast<int>(bankState.getSize()));
+        std::unique_ptr<juce::AudioProcessorEditor> editor{benchmark.createEditor()};
+        auto* rack{editor != nullptr ? channelListFor(*editor) : nullptr};
+        auto* mixer{editor != nullptr ? dynamic_cast<MixerPanelComponent*>(
+            findNamedComponent(*editor, "Master and bank panel")) : nullptr};
+        auto* settingsButton{editor != nullptr ? dynamic_cast<juce::Button*>(
+            findNamedComponent(*editor, "Settings")) : nullptr};
+        if (settingsButton != nullptr && settingsButton->onClick != nullptr)
+            settingsButton->onClick();
+        auto* accent{editor != nullptr ? findNamedComponent(*editor, "Accent colour") : nullptr};
+        auto* settings{accent != nullptr ? accent->getParentComponent() : nullptr};
+        check(editor != nullptr && rack != nullptr && mixer != nullptr && settings != nullptr,
+              "UI work benchmark has a live rack, mixer and open settings");
+        if (editor != nullptr && rack != nullptr && mixer != nullptr && settings != nullptr) {
+            const auto tick = [&] {
+                Juicy16::UIWorkBenchmark::tickRack(*rack);
+                Juicy16::UIWorkBenchmark::tickMixer(*mixer);
+                Juicy16::UIWorkBenchmark::tickSettings(*settings);
+            };
+            for (int i = 0; i < 5; ++i) tick();
+            Juicy16::uiWorkCounters = {};
+            for (int i = 0; i < 100; ++i) {
+                rack->resized(); // Equivalent unchanged-row table refreshes.
+                tick();
+            }
+            const auto idle{Juicy16::uiWorkCounters};
+            std::printf("    100 idle ticks + table refreshes: patch lookups=%llu tooltip formats=%llu"
+                        " signal repaints=%llu mixer patch/controller/peak formats=%llu/%llu/%llu CC1 formats=%llu\n",
+                static_cast<unsigned long long>(idle.rackPatchLookups),
+                static_cast<unsigned long long>(idle.rackTooltipFormats),
+                static_cast<unsigned long long>(idle.rackActivityRepaints),
+                static_cast<unsigned long long>(idle.mixerPatchFormats),
+                static_cast<unsigned long long>(idle.mixerControllerFormats),
+                static_cast<unsigned long long>(idle.mixerPeakFormats),
+                static_cast<unsigned long long>(idle.settingsCC1Formats));
+            check(idle.rackPatchLookups == 0 && idle.rackTooltipFormats == 0
+                      && idle.rackActivityRepaints == 0 && idle.mixerPatchFormats == 0
+                      && idle.mixerControllerFormats == 0 && idle.mixerPeakFormats == 0
+                      && idle.settingsCC1Formats == 0,
+                  "100 unchanged UI ticks and row refreshes do no redundant lookup, formatting or signal repaint work");
+
+            Juicy16::uiWorkCounters = {};
+            const bool programChanged{benchmark.getFluidSynthModel().setChannelProgram(0, 0, 1)};
+            tick();
+            auto* combo{rack->patchComboForRow(0)};
+            const auto programWork{Juicy16::uiWorkCounters};
+            check(programChanged && combo != nullptr && combo->getText().contains("UI Second")
+                      && programWork.rackPatchLookups == 1 && programWork.rackTooltipFormats == 1
+                      && programWork.mixerPatchFormats == 1,
+                  "one changed program refreshes exactly its dropdown lookup, diagnostic tooltip and selected patch readout");
+
+            Juicy16::uiWorkCounters = {};
+            juce::MidiBuffer controls;
+            controls.addEvent(juce::MidiMessage::controllerEvent(1, 11, 64), 0);
+            controls.addEvent(juce::MidiMessage::controllerEvent(1, 64, 127), 1);
+            controls.addEvent(juce::MidiMessage::controllerEvent(1, 101, 0), 2);
+            controls.addEvent(juce::MidiMessage::controllerEvent(1, 100, 0), 3);
+            controls.addEvent(juce::MidiMessage::controllerEvent(1, 6, 12), 4);
+            controls.addEvent(juce::MidiMessage::controllerEvent(1, 38, 25), 5);
+            controls.addEvent(juce::MidiMessage::pitchWheel(1, 12345), 6);
+            controls.addEvent(juce::MidiMessage::controllerEvent(1, 93, 45), 7);
+            controls.addEvent(juce::MidiMessage::controllerEvent(1, 1, 5), 8);
+            juce::AudioBuffer<float> output{2, blockSize};
+            render(benchmark, output, controls);
+            tick();
+            const auto controllerWork{Juicy16::uiWorkCounters};
+            const auto labelText = [&](const char* name) {
+                auto* label{dynamic_cast<juce::Label*>(findNamedComponent(*editor, name))};
+                return label != nullptr ? label->getText() : juce::String{};
+            };
+            check(controllerWork.mixerControllerFormats == 5 && controllerWork.settingsCC1Formats == 1
+                      && controllerWork.rackActivityRepaints == 1
+                      && labelText("Selected channel expression") == "64"
+                      && labelText("Selected channel sustain") == "On"
+                      && labelText("Selected channel bend range") == "12.25 st"
+                      && labelText("Selected channel pitch bend") == "12345"
+                      && labelText("Selected channel chorus send (cc93)") == "45"
+                      && labelText("Received CC1 value") == "5",
+                  "changed controller fields retain their exact displayed values, refresh once, and light the MIDI lamp");
+
+            Juicy16::uiWorkCounters = {};
+            for (int i = 0; i < 100; ++i) tick();
+            check(Juicy16::uiWorkCounters.rackActivityRepaints == 1
+                      && Juicy16::uiWorkCounters.mixerControllerFormats == 0
+                      && Juicy16::uiWorkCounters.settingsCC1Formats == 0,
+                  "unchanged controllers avoid reformatting while the MIDI lamp still expires on its existing cadence");
+
+            bankState = makeState(secondBank.getFile().getFullPathName());
+            benchmark.setStateInformation(bankState.getData(), static_cast<int>(bankState.getSize()));
+            benchmark.getFluidSynthModel().setChannelProgram(0, 0, 1);
+            Juicy16::uiWorkCounters = {};
+            tick();
+            combo = rack->patchComboForRow(0);
+            check(combo != nullptr && combo->getText().contains("UI New second")
+                      && Juicy16::uiWorkCounters.rackTooltipFormats == 16
+                      && Juicy16::uiWorkCounters.mixerPatchFormats == 1,
+                  "bank replacement invalidates every patch tooltip and the selected patch cache even for unchanged bank/program numbers");
+
+            juce::MemoryBlock paletteState;
+            benchmark.getStateInformation(paletteState);
+            auto paletteXml{juce::AudioProcessor::getXmlFromBinary(
+                paletteState.getData(), static_cast<int>(paletteState.getSize()))};
+            if (paletteXml != nullptr && paletteXml->getChildByName("uiState") != nullptr) {
+                paletteXml->getChildByName("uiState")->setAttribute("accent", "rose");
+                juce::AudioProcessor::copyXmlToBinary(*paletteXml, paletteState);
+                Juicy16::uiWorkCounters = {};
+                benchmark.setStateInformation(paletteState.getData(), static_cast<int>(paletteState.getSize()));
+                tick();
+                auto* picker{findNamedComponent(*editor, "Sound bank file")};
+                auto* accentBox{dynamic_cast<juce::ComboBox*>(accent)};
+                check(Juicy16::uiWorkCounters.accentTreeRefreshes == 1
+                          && picker != nullptr
+                          && picker->getLookAndFeel().findColour(Juicy16::accentColourId)
+                              == Juicy16::accentColour(Juicy16::Accent::rose)
+                          && accentBox != nullptr && accentBox->getText() == "Rose",
+                      "recalled palette refreshes its complete tree once while preserving picker and open settings colours");
+            } else
+                check(false, "the UI palette benchmark state contains its UI record");
+        }
+    }
+    {
+        Juicy16::PluginLookAndFeel palette;
+        juce::MidiKeyboardState paintState;
+        class PaintKeyboard final : public juce::SurjectiveMidiKeyboardComponent {
+        public:
+            explicit PaintKeyboard(juce::MidiKeyboardState& s)
+                : SurjectiveMidiKeyboardComponent(s, horizontalKeyboard) {}
+            juce::Rectangle<int> noteBounds(int note) const { return getRectangleForKey(note); }
+        } keyboard{paintState};
+        keyboard.setLookAndFeel(&palette);
+        keyboard.setScrollButtonsVisible(false);
+        const int extent{keyboard.getTotalKeyboardWidth()};
+        using PaintOrientation = juce::SurjectiveMidiKeyboardComponent::Orientation;
+        constexpr std::array<PaintOrientation, 3> paintOrientations{{
+            juce::SurjectiveMidiKeyboardComponent::horizontalKeyboard,
+            juce::SurjectiveMidiKeyboardComponent::verticalKeyboardFacingLeft,
+            juce::SurjectiveMidiKeyboardComponent::verticalKeyboardFacingRight}};
+        constexpr std::array<const char*, 3> orientationNames{{"horizontal", "vertical left", "vertical right"}};
+        for (size_t orientationIndex = 0; orientationIndex < paintOrientations.size(); ++orientationIndex) {
+            const auto paintOrientation{paintOrientations[orientationIndex]};
+            const bool horizontal{paintOrientation == juce::SurjectiveMidiKeyboardComponent::horizontalKeyboard};
+            keyboard.setOrientation(paintOrientation);
+            keyboard.setSize(horizontal ? extent : 80, horizontal ? 80 : extent);
+            juce::Image full{juce::Image::ARGB, keyboard.getWidth(), keyboard.getHeight(), true};
+            juce::Graphics fullGraphics{full};
+            Juicy16::uiWorkCounters = {};
+            keyboard.paint(fullGraphics);
+            const auto fullDraws{Juicy16::uiWorkCounters.keyboardKeyDraws};
+            std::vector<juce::Rectangle<int>> dirtyRegions;
+            for (int note = 0; note <= 127; ++note)
+                dirtyRegions.push_back(keyboard.noteBounds(note));
+            // Include a small dirty region spanning the first octave label and
+            // its adjacent white key, rather than only whole-key rectangles.
+            const auto firstNote{keyboard.noteBounds(0)};
+            dirtyRegions.push_back(horizontal
+                ? juce::Rectangle<int>{firstNote.getRight() - 4, firstNote.getBottom() - 12, 8, 12}
+                : paintOrientation == juce::SurjectiveMidiKeyboardComponent::verticalKeyboardFacingLeft
+                    ? juce::Rectangle<int>{firstNote.getX() + 2, firstNote.getBottom() - 4, 24, 8}
+                    : juce::Rectangle<int>{firstNote.getRight() - 26, firstNote.getY() - 4, 24, 8});
+
+            juce::Image partial{juce::Image::ARGB, keyboard.getWidth(), keyboard.getHeight(), true};
+            bool samePixels{true};
+            juce::uint64 largestPartialDraws{0}, totalPartialDraws{0};
+            for (size_t regionIndex = 0; regionIndex < dirtyRegions.size(); ++regionIndex) {
+                const auto clip{dirtyRegions[regionIndex].getIntersection(keyboard.getLocalBounds())};
+                partial.clear(partial.getBounds());
+                juce::Graphics partialGraphics{partial};
+                partialGraphics.reduceClipRegion(clip);
+                Juicy16::uiWorkCounters = {};
+                keyboard.paint(partialGraphics);
+                const auto partialDraws{Juicy16::uiWorkCounters.keyboardKeyDraws};
+                largestPartialDraws = juce::jmax(largestPartialDraws, partialDraws);
+                totalPartialDraws += partialDraws;
+                bool regionMatches{true};
+                for (int y = clip.getY(); y < clip.getBottom(); ++y)
+                    for (int x = clip.getX(); x < clip.getRight(); ++x)
+                        regionMatches = regionMatches && full.getPixelAt(x, y) == partial.getPixelAt(x, y);
+                if (!regionMatches)
+                    std::printf("    keyboard pixel mismatch: %s region=%zu\n", orientationNames[orientationIndex], regionIndex);
+                samePixels = samePixels && regionMatches;
+            }
+            const auto unconditionalDraws{fullDraws * dirtyRegions.size()};
+            std::printf("    keyboard %s: full=%llu 129 dirty clips=%llu largest clip=%llu avoided=%llu\n",
+                orientationNames[orientationIndex], static_cast<unsigned long long>(fullDraws),
+                static_cast<unsigned long long>(totalPartialDraws), static_cast<unsigned long long>(largestPartialDraws),
+                static_cast<unsigned long long>(unconditionalDraws - totalPartialDraws));
+            check(fullDraws == 128 && largestPartialDraws < 10 && samePixels,
+                  "all white/black/edge-note and label-spill clips match full-render pixels while skipping unrelated keys");
+        }
+        keyboard.setLookAndFeel(nullptr);
+    }
+#endif
 
     std::printf("== accessibility metadata ==\n");
     {

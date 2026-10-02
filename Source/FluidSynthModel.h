@@ -42,6 +42,15 @@ public:
     // Pushes the selected channel's saved program into params/UI after restore.
     void syncToSelectedChannel();
 
+    // Complete project recall even when its bank path and parameter values did
+    // not change. Called with processing suspended, after all saved values apply.
+    void finishStateRestore(bool restoreChannelRecords);
+
+    // Restore the saved path/bookmark pair before resolving either one. This
+    // prevents an intermediate path assignment from loading the bank twice.
+    void restoreFontSelection(const String& path, const juce::MemoryBlock& bookmark,
+                              bool forceReload = false);
+
     // Selects the channel the editor's shared controls edit.
     void selectChannelForEditing(int channel);
 
@@ -70,6 +79,8 @@ public:
     String getLoadedFontPath() const;
     // Unsupported host rates render silence rather than mis-pitched audio.
     bool isSampleRateSupported() const;
+    // Shared by the file player's note chase and the synth reset path.
+    static bool isSystemResetSysex(const uint8_t* data, int size);
 
     // Zero-based view of uiState.selectedChannel.
     int getSelectedChannel() const;
@@ -109,7 +120,7 @@ public:
     // Trailing "Custom" entry; no fixed values.
     static int customReverbProfileIndex();
     static juce::StringArray reverbProfileNames();
-    static String reverbParamId(int reverbParam);
+    static const String& reverbParamId(int reverbParam);
 
     // For tests.
     bool isReverbEnabled() const;
@@ -121,7 +132,7 @@ public:
     // Message thread, after refreshBanks. Feeds VST3 program names.
     std::function<void()> onBanksRefreshed;
 
-    void processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiMessages);
+    void processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiMessages, bool midiFilePlayback = false);
 
     // Applies audio-thread program/CC captures to state and UI on the message thread.
     void handleAsyncUpdate() override;
@@ -180,6 +191,7 @@ public:
     void clearOutputOverload();
 
 private:
+    void restoreSavedChannelState(bool preserveRequestedPrograms = false);
     std::atomic<float> chorusTarget[numChorusParams]{};
     float chorusApplied[numChorusParams]{};
     bool chorusEverApplied{false};
@@ -187,9 +199,20 @@ private:
     void resetChorusToParameters();
     void applyChorusFromAudioThread(int numSamples);
     std::atomic<bool> standardMidiResets{false};
+    bool processingMidiFile{false};
     std::atomic<float> channelTrimGain[16];
     juce::SmoothedValue<float> channelTrimSmoother[16];
     std::atomic<float> channelPeak[16];
+    // Audio-thread-only cache for identical meter decay calculations. The rate
+    // key invalidates it naturally after a synth/sample-rate rebuild.
+    int meterDecaySamples{-1};
+    float meterDecayRate{0.0f}, meterDecayValue{0.0f};
+    struct MeterDecayEntry {
+        int samples{-1};
+        float value{0.0f};
+    };
+    std::array<MeterDecayEntry, 8> meterDecayCache{};
+    size_t meterDecayCacheNext{0};
     std::atomic<unsigned int> channelMidiEvents[16];
     std::atomic<int> soundingBank[16], soundingPreset[16];
     std::atomic<int> diagnosticExpression[16], diagnosticBendRange[16];
@@ -356,8 +379,6 @@ private:
     std::atomic<int> engineBank[kNumChannels];
     std::atomic<int> enginePreset[kNumChannels];
 
-    static bool isSystemResetSysex(const uint8_t* data, int size);
-
     // Mixer CC values captured on the audio thread (-1 none pending); written to
     // the ValueTree in handleAsyncUpdate.
     std::atomic<int> midiCcValue[kNumChannels][kNumMixerCcs];
@@ -377,8 +398,9 @@ private:
     std::atomic<bool> pendingReverbCustom{false};
     // Mute/solo changed off the message thread; refresh the rows' silenced look.
     std::atomic<bool> pendingMuteSoloSync{false};
-    // Set while applying a profile so those writes do not switch to Custom.
-    bool applyingReverbProfile{false};
+    // Suppress only this thread's own profile writes, leaving automation on
+    // another thread free to select Custom. The pointer also isolates instances.
+    static thread_local const FluidSynthModel* applyingReverbProfile;
     // Audio thread, once per block before rendering.
     void applyReverbFromAudioThread(int numSamples);
     // Renders dry audio and mixes the effects bus on top.
@@ -434,6 +456,9 @@ private:
     // Set while rolling back path/bookmark after a rejected load, so the rollback
     // is not treated as a new load.
     bool suppressFontStateReload{false};
+    bool deferFontSelectionRollback{false};
+    void loadFontFromSelectionBookmark();
+    void restoreActiveFontSelection();
 
     // Declaration order matters: the synth is destroyed before its settings.
     unique_ptr<fluid_settings_t, decltype(&delete_fluid_settings)> settings;
@@ -470,6 +495,9 @@ private:
     AudioBuffer<float> oversampleFifo;
     // Rendered but unconsumed samples carried to the next block.
     int oversampleFifoFill{0};
+    // Host frames covered by rendered engine samples but not yet output. This
+    // includes fractional input frames already held by the interpolator.
+    juce::int64 oversampleRenderAhead{0};
     juce::LagrangeInterpolator oversampleInterpolators[2];
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FluidSynthModel)

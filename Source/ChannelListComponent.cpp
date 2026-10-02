@@ -25,16 +25,20 @@ ChannelListComponent::PatchCell::PatchCell(ChannelListComponent& ownerRef)
 }
 
 void ChannelListComponent::PatchCell::setRow(int newRow) {
-    row = newRow;
-    const String accessibleName{channelPrefix(row) + " instrument"};
-    combo.setName(accessibleName);
-    combo.setTitle(accessibleName);
-    combo.setDescription(String{"Bank and preset selection for "} + accessibleName);
-    combo.setHelpText(
-        "Choose the starting instrument. Incoming Bank Select and Program Change may replace it.");
+    const bool rowChanged{row != newRow};
+    if (rowChanged) {
+        row = newRow;
+        const String accessibleName{channelPrefix(row) + " instrument"};
+        combo.setName(accessibleName);
+        combo.setTitle(accessibleName);
+        combo.setDescription(String{"Bank and preset selection for "} + accessibleName);
+        combo.setHelpText(
+            "Choose the starting instrument. Incoming Bank Select and Program Change may replace it.");
+    }
 
     // Repopulate only when the font's patch list changed.
-    if (cellListVersion != owner.patchListVersion) {
+    const bool listChanged{cellListVersion != owner.patchListVersion};
+    if (listChanged) {
         combo.clear(juce::dontSendNotification);
         for (size_t i = 0; i < owner.patches.size(); ++i)
             combo.addItem(patchLabel(owner.patches[i]), static_cast<int>(i) + 1);
@@ -44,22 +48,45 @@ void ChannelListComponent::PatchCell::setRow(int newRow) {
     // Show the channel's current program without notifying (avoids a loop).
     ValueTree chNode{owner.valueTreeState.state.getChildWithName("channelPrograms")
         .getChildWithProperty("num", row)};
+    const bool valid{chNode.isValid()};
+    const int bank{chNode.getProperty("bank", 0)}, preset{chNode.getProperty("preset", 0)};
+    if (!rowChanged && !listChanged && valid == displayedNodeValid
+        && bank == displayedBank && preset == displayedPreset)
+        return;
+    displayedBank = bank;
+    displayedPreset = preset;
+    displayedNodeValid = valid;
     int id{0};
-    if (chNode.isValid()) {
-        int idx{owner.patchIndexFor(chNode.getProperty("bank", 0),
-                                    chNode.getProperty("preset", 0))};
+    if (valid) {
+        int idx{owner.patchIndexFor(bank, preset)};
         if (idx >= 0)
             id = idx + 1;
     }
     if (id != 0)
         combo.setSelectedId(id, juce::dontSendNotification);
-    else if (chNode.isValid())
+    else if (valid)
         // Saved patch is missing from the loaded font.
-        combo.setText("Missing " + String(static_cast<int>(chNode.getProperty("bank", 0))) + ":"
-                      + String(static_cast<int>(chNode.getProperty("preset", 0))),
+        combo.setText("Missing " + String(bank) + ":" + String(preset),
                       juce::dontSendNotification);
     else
         combo.setText({}, juce::dontSendNotification);
+}
+
+void ChannelListComponent::PatchCell::updateDiagnosticTooltip(
+    int bank, int program, int soundingBank, int soundingPreset) {
+    const std::array<int, 6> inputs{{row, owner.patchListVersion, bank, program, soundingBank, soundingPreset}};
+    if (inputs == tooltipInputs)
+        return;
+    tooltipInputs = inputs;
+    JUICY16_COUNT_UI_WORK(rackTooltipFormats);
+    String description{"Requested " + String(bank) + ":" + String(program)};
+    if (soundingBank < 0) description += " - no playable instrument";
+    else if (soundingBank != bank || soundingPreset != program) {
+        const int idx{owner.patchIndexFor(soundingBank, soundingPreset)};
+        description += " - FALLBACK: " + (idx >= 0 ? patchLabel(owner.patches[static_cast<size_t>(idx)])
+            : String(soundingBank) + ":" + String(soundingPreset));
+    }
+    combo.setTooltip(description);
 }
 
 void ChannelListComponent::PatchCell::resized() {
@@ -251,6 +278,7 @@ ChannelListComponent::ChannelListComponent(
 ChannelListComponent::~ChannelListComponent() {
     stopTimer();
     valueTreeState.state.removeListener(this);
+    cancelPendingUpdate();
 }
 
 void ChannelListComponent::rebuildPatchList() {
@@ -259,6 +287,7 @@ void ChannelListComponent::rebuildPatchList() {
 }
 
 int ChannelListComponent::patchIndexFor(int bank, int preset) const {
+    JUICY16_COUNT_UI_WORK(rackPatchLookups);
     for (size_t i = 0; i < patches.size(); ++i)
         if (patches[i].bank == bank && patches[i].preset == preset)
             return static_cast<int>(i);
@@ -451,6 +480,15 @@ void ChannelListComponent::valueTreePropertyChanged(
     ValueTree& treeWhosePropertyHasChanged,
     const Identifier& property) {
     const Identifier type{treeWhosePropertyHasChanged.getType()};
+    if (!(type == StringRef("banks")
+        || (type == StringRef("ch") && (property == StringRef("bank") || property == StringRef("preset")
+            || property == StringRef("mute") || property == StringRef("solo")))
+        || (type == StringRef("uiState") && property == StringRef("selectedChannel"))))
+        return;
+    if (!juce::MessageManager::getInstance()->isThisTheMessageThread()) {
+        triggerAsyncUpdate();
+        return;
+    }
     if (type == StringRef("banks")) {
         // Font reloaded: rebuild the patch list and every dropdown.
         rebuildPatchList();
@@ -469,6 +507,14 @@ void ChannelListComponent::valueTreePropertyChanged(
         table.repaint();
         syncTableSelectionFromState();
     }
+}
+
+void ChannelListComponent::handleAsyncUpdate() {
+    rebuildPatchList();
+    table.updateContent();
+    refreshSilencedRows();
+    syncTableSelectionFromState();
+    table.repaint();
 }
 
 int ChannelListComponent::instrumentColumnWidth() const {
@@ -492,22 +538,25 @@ void ChannelListComponent::timerCallback() {
     for (int ch = 0; ch < 16; ++ch) {
         const auto d = fluidSynthModel.getChannelDiagnostics(ch);
         const auto i = static_cast<size_t>(ch);
+        const bool lampWasOn{midiLampTicks[i] > 0};
         if (d.midiEvents != lastMidiEvents[i]) midiLampTicks[i] = 4;
         else midiLampTicks[i] = juce::jmax(0, midiLampTicks[i] - 1);
         lastMidiEvents[i] = d.midiEvents;
         if (auto* cell = dynamic_cast<PatchCell*>(table.getCellComponent(instrumentColumn, ch))) {
             const auto saved = valueTreeState.state.getChildWithName("channelPrograms").getChildWithProperty("num", ch);
             const int bank = saved.getProperty("bank", 0), program = saved.getProperty("preset", 0);
-            String description = "Requested " + String(bank) + ":" + String(program);
-            if (d.soundingBank < 0) description += " - no playable instrument";
-            else if (d.soundingBank != bank || d.soundingPreset != program) {
-                const int idx = patchIndexFor(d.soundingBank, d.soundingPreset);
-                description += " - FALLBACK: " + (idx >= 0 ? patchLabel(patches[static_cast<size_t>(idx)])
-                    : String(d.soundingBank) + ":" + String(d.soundingPreset));
-            }
-            cell->getCombo().setTooltip(description);
+            cell->updateDiagnosticTooltip(bank, program, d.soundingBank, d.soundingPreset);
         }
-        // Only the activity column animates.
-        table.repaint(table.getCellPosition(activityColumn, ch, true));
+        if (lampWasOn != (midiLampTicks[i] > 0) || !juce::exactlyEqual(d.peak, lastPaintedPeak[i])) {
+            lastPaintedPeak[i] = d.peak;
+            JUICY16_COUNT_UI_WORK(rackActivityRepaints);
+            table.repaint(table.getCellPosition(activityColumn, ch, true));
+        }
     }
 }
+
+#if JUICYSF_UI_WORK_COUNTERS
+void Juicy16::UIWorkBenchmark::tickRack(ChannelListComponent& rack) {
+    rack.timerCallback();
+}
+#endif

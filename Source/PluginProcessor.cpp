@@ -4,6 +4,7 @@
 #include "Util.h"
 #include "GuiConstants.h"
 #include <limits>
+#include <cmath>
 
 using namespace std;
 using Parameter = AudioProcessorValueTreeState::Parameter;
@@ -20,6 +21,16 @@ JuicySFAudioProcessor::JuicySFAudioProcessor()
     "MYPLUGINSETTINGS",
     createParameterLayout()}
 , fluidSynthModel{valueTreeState}
+, midiFilePlayer{*this, [this](juce::MidiBuffer& setup) {
+    if (wrapperType != wrapperType_Standalone) return;
+    // Setup/chase is prepared on the UI thread and applied while the callback
+    // lock is held. Zero frames dispatch MIDI without synthesising old audio.
+    keyboardState.reset();
+    AudioBuffer<float> empty{2, 0};
+    fluidSynthModel.processBlock(empty, setup, true);
+    for (const auto event : setup)
+        keyboardState.processNextMidiEvent(event.getMessage());
+}}
 {
     MemoryBlock bookmarkBuffer;
     MemoryBlock loadedBookmarkBuffer;
@@ -302,6 +313,10 @@ void JuicySFAudioProcessor::changeProgramName (int, const String&)
 //==============================================================================
 void JuicySFAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
+    if (wrapperType == wrapperType_Standalone) {
+        midiFilePlayer.pause();
+        midiFilePlayer.prepare(samplesPerBlock, sampleRate);
+    }
     keyboardState.reset();
     fluidSynthModel.prepareToPlay(sampleRate, samplesPerBlock);
 
@@ -310,6 +325,7 @@ void JuicySFAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBloc
 
 void JuicySFAudioProcessor::releaseResources()
 {
+    if (wrapperType == wrapperType_Standalone) midiFilePlayer.pause();
     keyboardState.reset();
 }
 
@@ -341,10 +357,19 @@ void JuicySFAudioProcessor::processBlock(AudioBuffer<float>& buffer, MidiBuffer&
          i < juce::jmin(getTotalNumOutputChannels(), buffer.getNumChannels()); ++i)
         buffer.clear (i, 0, buffer.getNumSamples());
 
-    // Merge on-screen keyboard notes into the MIDI stream.
-    keyboardState.processNextMidiBuffer(midiMessages, 0, buffer.getNumSamples(), true);
-    
-    fluidSynthModel.processBlock(buffer, midiMessages);
+    if (wrapperType == wrapperType_Standalone) {
+        auto& events = midiFilePlayer.getRenderBuffer();
+        events.clear();
+        events.addEvents(midiMessages, 0, -1, 0);
+        if (fluidSynthModel.isSampleRateSupported())
+            midiFilePlayer.appendNextBlock(events, buffer.getNumSamples(), midiFilePlayer.getPreparedSampleRate());
+        keyboardState.processNextMidiBuffer(events, 0, buffer.getNumSamples(), true);
+        fluidSynthModel.processBlock(buffer, events, midiFilePlayer.hasSong());
+    } else {
+        // Preserve the existing host MIDI and program-parameter routes.
+        keyboardState.processNextMidiBuffer(midiMessages, 0, buffer.getNumSamples(), true);
+        fluidSynthModel.processBlock(buffer, midiMessages);
+    }
 
 
     // No MIDI output (the VST3 wrapper asserts otherwise).
@@ -367,7 +392,7 @@ void JuicySFAudioProcessor::getStateInformation (MemoryBlock& destData)
 {
 
     XmlElement xml{"MYPLUGINSETTINGS"};
-    // Schema history: v10 interpolation; v9 vibrato strength; v8 chorus; v7 reset
+    // Schema history: v11 saved accent; v10 interpolation; v9 vibrato strength; v8 chorus; v7 reset
     // policy, trims and remembered controllers; v6 reverb; v5 per-channel mixer
     // parameters; v4 bank spans 0-255; v3 volume/pan replaced CC71-79 (v1-v2).
     xml.setAttribute("stateVersion", currentStateVersion);
@@ -407,6 +432,8 @@ void JuicySFAudioProcessor::getStateInformation (MemoryBlock& destData)
             int value{tree.getProperty("selectedChannel", 1)};
             newElement->setAttribute("selectedChannel", value);
         }
+        newElement->setAttribute("accent", Juicy16::accentName(Juicy16::accentFromName(
+            tree.getProperty("accent", "sage").toString())));
     }
     {
         // Per-channel instrument and mixer state.
@@ -480,6 +507,25 @@ void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInByt
             fluidSynthModel.discardPendingStateUpdates();
             for (int ch = 0; ch < 16; ++ch)
                 fluidSynthModel.restoreRememberedControllers(ch, -1, -1);
+            if (stateVersion < 5) {
+                auto channels = valueTreeState.state.getChildWithName("channelPrograms");
+                for (auto channel : channels) {
+                    channel.setProperty("mute", 0, nullptr);
+                    channel.setProperty("solo", 0, nullptr);
+                    if (!restoreMixer) {
+                        channel.setProperty("volume", MidiConstants::defaultChannelVolume, nullptr);
+                        channel.setProperty("pan", MidiConstants::centreValue, nullptr);
+                    }
+                }
+            }
+            if (stateVersion < 6) {
+                for (const String& id : {String{"reverbOn"}, String{"reverbProfile"},
+                        FluidSynthModel::reverbParamId(0), FluidSynthModel::reverbParamId(1),
+                        FluidSynthModel::reverbParamId(2), FluidSynthModel::reverbParamId(3)}) {
+                    auto* control = valueTreeState.getParameter(id);
+                    control->setValueNotifyingHost(control->getDefaultValue());
+                }
+            }
             if (stateVersion < 7) {
                 valueTreeState.getParameter("resetPolicy")->setValueNotifyingHost(0.0f);
                 for (int ch = 1; ch <= 16; ++ch)
@@ -530,6 +576,9 @@ void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInByt
             {
                 ValueTree tree{valueTreeState.state.getChildWithName("uiState")};
                 XmlElement* xmlElement{xmlState->getChildByName("uiState")};
+                tree.setProperty("accent", Juicy16::accentName(Juicy16::accentFromName(
+                    xmlElement != nullptr ? xmlElement->getStringAttribute("accent", "sage")
+                                          : String{"sage"})), nullptr);
                 if (xmlElement) {
                     {
                         Value value{tree.getPropertyAsValue("width", nullptr)};
@@ -549,24 +598,35 @@ void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInByt
                 XmlElement* xmlElement{xmlState->getChildByName("soundFont")};
                 if (xmlElement) {
                     ValueTree tree{valueTreeState.state.getChildWithName("soundFont")};
-                    {
-                        Value value{tree.getPropertyAsValue("path", nullptr)};
-                        value = xmlElement->getStringAttribute("path", value.getValue());
-                    }
-                    {
-                        Value value{tree.getPropertyAsValue("bookmark", nullptr)};
-                        jassert(value.getValue().isBinaryData());
-                        MemoryBlock buffer;
-                        buffer.fromBase64Encoding(xmlElement->getStringAttribute("bookmark", value.getValue()));
-                        value = buffer;
-                    }
+                    MemoryBlock emptyBookmark;
+                    const var previousBookmark{tree.getProperty("bookmark", emptyBookmark)};
+                    jassert(previousBookmark.isBinaryData());
+                    const String currentPath{tree.getProperty("path", "").toString()};
+                    const String restoredPath{xmlElement->getStringAttribute("path", currentPath)};
+                    // A path-only record selecting another bank cannot carry a
+                    // bookmark for the previous bank into that selection.
+                    const bool newPathWithoutBookmark{xmlElement->hasAttribute("path")
+                        && restoredPath != currentPath && !xmlElement->hasAttribute("bookmark")};
+                    const String encodedBookmark{!newPathWithoutBookmark && previousBookmark.isBinaryData()
+                        ? previousBookmark.getBinaryData()->toBase64Encoding() : String{}};
+                    MemoryBlock bookmark;
+                    bookmark.fromBase64Encoding(xmlElement->getStringAttribute(
+                        "bookmark", encodedBookmark));
+                    fluidSynthModel.restoreFontSelection(
+                        restoredPath, bookmark);
                 }
             }
+
             XmlElement* params{xmlState->getChildByName("params")};
             if (params) {
                 for (auto* param : getParameters()) {
                     if (auto* p = dynamic_cast<AudioProcessorParameterWithID*>(param)) {
                         double stored{params->getDoubleAttribute(p->paramID, p->getValue())};
+                        // Corrupt normalized values must never reach a float gain
+                        // or an integer migration. Keep the existing value for NaN/Inf.
+                        if (!std::isfinite(stored))
+                            continue;
+                        stored = juce::jlimit(0.0, 1.0, stored);
                         // v4 widened `bank` to 0-255; rescale v3's normalised value by bank number.
                         if (stateVersion < 4 && p->paramID == "bank")
                             stored = juce::jlimit(
@@ -589,6 +649,7 @@ void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInByt
                             stateVersion >= 7 ? saved->getIntAttribute("expression", -1) : -1,
                             stateVersion >= 7 ? saved->getIntAttribute("bendRange", -1) : -1);
                 }
+            fluidSynthModel.finishStateRestore(xmlState->getChildByName("channelPrograms") != nullptr);
         }
     }
 }

@@ -38,19 +38,22 @@ fi
 
 au_source="$artifacts_dir/AU/Juicy16.component"
 vst3_source="$artifacts_dir/VST3/Juicy16.vst3"
+standalone_source="$artifacts_dir/Standalone/Juicy16.app"
 test -f "$au_source/Contents/MacOS/Juicy16"
 test -f "$vst3_source/Contents/MacOS/Juicy16"
+test -f "$standalone_source/Contents/MacOS/Juicy16"
 
 cmake \
   -DPROJECT_SOURCE_DIR="$repo_dir" \
   -DARTIFACTS_DIR="$artifacts_dir" \
   -DPROJECT_VERSION="$project_version" \
   -DDISPLAY_VERSION="$display_version" \
+  -DINCLUDE_STANDALONE=ON \
   -P "$repo_dir/tests/MetadataTests.cmake"
 cmake \
   -DARTIFACTS_DIR="$artifacts_dir" \
   -DEXPECTED_DEPLOYMENT_TARGET=11.0 \
-  -DINCLUDE_STANDALONE=OFF \
+  -DINCLUDE_STANDALONE=ON \
   -P "$repo_dir/tests/MacArtifactTests.cmake"
 
 commit=$(git -C "$repo_dir" rev-parse HEAD)
@@ -66,13 +69,17 @@ if [[ -n $(git -C "$repo_dir" status --porcelain --untracked-files=normal) ]]; t
 fi
 
 signature=distribution
-signature_details=$(/usr/bin/codesign -dv --verbose=4 "$au_source" 2>&1)
-if grep -q '^Signature=adhoc$' <<< "$signature_details"; then
-  signature=adhoc
+for bundle in "$au_source" "$vst3_source" "$standalone_source"; do
+  signature_details=$(/usr/bin/codesign -dv --verbose=4 "$bundle" 2>&1)
+  if grep -q '^Signature=adhoc$' <<< "$signature_details"; then
+    signature=adhoc
+  fi
+done
+if [[ $signature == adhoc ]]; then
   label_suffix="$label_suffix-ADHOC"
 fi
 if [[ ${JUICY16_REQUIRE_DISTRIBUTION_SIGNATURE:-0} == 1 && $signature != distribution ]]; then
-  echo "A distribution signature was required, but the AU is ad-hoc signed." >&2
+  echo "A distribution signature was required, but a packaged bundle is ad-hoc signed." >&2
   exit 2
 fi
 
@@ -89,10 +96,12 @@ esac
 rm -rf -- "$staging_dir"
 rm -f -- "$archive" "$archive.sha256"
 mkdir -p "$staging_dir/AU" "$staging_dir/VST3" \
+             "$staging_dir/Standalone" \
              "$staging_dir/docs" "$staging_dir/licenses_of_dependencies"
 
 COPYFILE_DISABLE=1 cp -R "$au_source" "$staging_dir/AU/"
 COPYFILE_DISABLE=1 cp -R "$vst3_source" "$staging_dir/VST3/"
+COPYFILE_DISABLE=1 cp -R "$standalone_source" "$staging_dir/Standalone/"
 cp "$repo_dir/LICENSE.txt" "$repo_dir/NOTICE.md" "$repo_dir/README.md" \
    "$repo_dir/CHANGELOG.md" "$repo_dir/PRIVACY.txt" "$repo_dir/ROADMAP.md" \
    "$repo_dir/building.macos.md" "$repo_dir/building.win32.md" "$staging_dir/"
@@ -107,7 +116,8 @@ chmod +x "$staging_dir/install_macos.command"
 # package at all.
 for document in ARCHITECTURE.md BETA_TESTER_GUIDE.md COMPATIBILITY.md \
                 CONTROLLER_SUPPORT.md DEPENDENCIES.md KNOWN_ISSUES.md \
-                LICENSING.md TROUBLESHOOTING.md WINDOWS_RELEASE.md; do
+                LICENSING.md TROUBLESHOOTING.md WINDOWS_RELEASE.md \
+                STANDALONE.md AUDIT.md; do
   cp "$repo_dir/docs/$document" "$staging_dir/docs/"
 done
 mkdir -p "$staging_dir/vendor/juce_patched"
@@ -134,6 +144,7 @@ done
 
 au_hash=$(shasum -a 256 "$au_source/Contents/MacOS/Juicy16" | cut -d ' ' -f 1)
 vst3_hash=$(shasum -a 256 "$vst3_source/Contents/MacOS/Juicy16" | cut -d ' ' -f 1)
+standalone_hash=$(shasum -a 256 "$standalone_source/Contents/MacOS/Juicy16" | cut -d ' ' -f 1)
 {
   printf 'Product: Juicy16\n'
   printf 'Version: %s\n' "$display_version"
@@ -144,6 +155,7 @@ vst3_hash=$(shasum -a 256 "$vst3_source/Contents/MacOS/Juicy16" | cut -d ' ' -f 
   printf 'Signature: %s\n' "$signature"
   printf 'AU executable SHA-256: %s\n' "$au_hash"
   printf 'VST3 executable SHA-256: %s\n' "$vst3_hash"
+  printf 'Standalone executable SHA-256: %s\n' "$standalone_hash"
 } > "$staging_dir/BUILD_INFO.txt"
 
 (
@@ -163,7 +175,7 @@ if grep -IRnE --exclude=SHA256SUMS \
   echo "Package text contains a prohibited path or credential marker." >&2
   exit 1
 fi
-if find "$staging_dir" -iname '*standalone*' -o -iname '*vst2*' -o -iname 'testfiles' | grep -q .; then
+if find "$staging_dir" -iname '*vst2*' -o -iname 'testfiles' | grep -q .; then
   echo "Package contains an unsupported format or private test corpus." >&2
   exit 1
 fi
@@ -211,7 +223,9 @@ verified_root="$verification_dir/$package_name"
 # A bundle whose binary lost its executable bit in transit is not loadable, and
 # the failure would only show up in a host.
 for extracted in "$verified_root/AU/Juicy16.component/Contents/MacOS/Juicy16" \
-                 "$verified_root/VST3/Juicy16.vst3/Contents/MacOS/Juicy16"; do
+                 "$verified_root/VST3/Juicy16.vst3/Contents/MacOS/Juicy16" \
+                 "$verified_root/Standalone/Juicy16.app/Contents/MacOS/Juicy16" \
+                 "$verified_root/install_macos.command"; do
   if [[ ! -x $extracted ]]; then
     echo "Extracted binary is not executable: $extracted" >&2
     exit 1
@@ -223,7 +237,8 @@ done
 # JUCE's shared-folder special-location literal is not a developer identity; it
 # appears in the string table as /Users/Share with the final byte held elsewhere.
 for extracted in "$verified_root/AU/Juicy16.component/Contents/MacOS/Juicy16" \
-                 "$verified_root/VST3/Juicy16.vst3/Contents/MacOS/Juicy16"; do
+                 "$verified_root/VST3/Juicy16.vst3/Contents/MacOS/Juicy16" \
+                 "$verified_root/Standalone/Juicy16.app/Contents/MacOS/Juicy16"; do
   leaked=$(strings -a "$extracted" \
     | grep -aoE '/Users/[A-Za-z0-9._-]+|/private/tmp/[A-Za-z0-9._-]+|/opt/homebrew|/usr/local/(opt|Cellar)' \
     | grep -vE '^/Users/Shared?$' | sort -u || true)
@@ -238,11 +253,12 @@ cmake \
   -DARTIFACTS_DIR="$verified_root" \
   -DPROJECT_VERSION="$project_version" \
   -DDISPLAY_VERSION="$display_version" \
+  -DINCLUDE_STANDALONE=ON \
   -P "$repo_dir/tests/MetadataTests.cmake"
 cmake \
   -DARTIFACTS_DIR="$verified_root" \
   -DEXPECTED_DEPLOYMENT_TARGET=11.0 \
-  -DINCLUDE_STANDALONE=OFF \
+  -DINCLUDE_STANDALONE=ON \
   -P "$repo_dir/tests/MacArtifactTests.cmake"
 
 echo "Created and revalidated: $archive"

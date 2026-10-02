@@ -1,12 +1,9 @@
 #pragma once
 
-#if JUCE_MAC || JUCE_IOS
-  #include <Foundation/NSString.h>
-  #include <Foundation/NSArray.h>
-#endif
 #include "../JuceLibraryCode/JuceHeader.h"
 #include "FluidSynthModel.h"
 #include "VST3Multitimbral.h"
+#include "MidiFilePlayer.h"
 #include <list>
 
 using namespace std;
@@ -57,16 +54,18 @@ public:
     juce::VST3ClientExtensions* getVST3ClientExtensions() override { return &vst3Extensions; }
 
     FluidSynthModel& getFluidSynthModel();
+    MidiFilePlayer& getMidiFilePlayer() { return midiFilePlayer; }
 
     MidiKeyboardState keyboardState;
 
 private:
-    static constexpr int currentStateVersion{10};
+    static constexpr int currentStateVersion{11};
     void initialiseSynth();
 
     AudioProcessorValueTreeState valueTreeState;
 
     FluidSynthModel fluidSynthModel;
+    MidiFilePlayer midiFilePlayer;
     JuicyVST3Extensions vst3Extensions;
 
     AudioProcessorValueTreeState::ParameterLayout createParameterLayout();

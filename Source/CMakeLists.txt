@@ -2,6 +2,8 @@ set(_juicysf_plugin_sources
     ChannelListComponent.cpp
     FilePicker.cpp
     FluidSynthModel.cpp
+    MidiFilePlayer.cpp
+    MidiPlayerComponent.cpp
     MixerPanelComponent.cpp
     PluginEditor.cpp
     PluginProcessor.cpp

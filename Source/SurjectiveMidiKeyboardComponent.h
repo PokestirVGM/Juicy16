@@ -2,6 +2,7 @@
 
 #include "../JuceLibraryCode/JuceHeader.h"
 #include <map>
+#include <atomic>
 
 using namespace std;
 
@@ -188,6 +189,15 @@ public:
     void colourChanged() override;
 
 protected:
+    // Separate native input queries from note mapping and lifecycle so those
+    // behaviours can be exercised without a window or physical keys.
+    virtual bool containsMousePosition(juce::Point<int> position) {
+        return reallyContains(position, false);
+    }
+    virtual bool isKeyCurrentlyDown(const KeyPress& key) const {
+        return key.isCurrentlyDown();
+    }
+    void updateNoteUnderMouse(juce::Point<int>, bool isDown, int fingerNum);
     //==============================================================================
     // Draws a white note in the given rectangle.
     virtual void drawWhiteNote (int midiNoteNumber,
@@ -245,7 +255,7 @@ private:
 
     Array<int> mouseOverNotes, mouseDownNotes;
     BigInteger keysPressed, keysCurrentlyDrawnDown;
-    bool shouldCheckState;
+    std::atomic<bool> shouldCheckState;
 
     int rangeStart, rangeEnd;
     float firstKey;
@@ -264,7 +274,6 @@ private:
     int xyToNote (juce::Point<int>, float& mousePositionVelocity);
     int remappedXYToNote (juce::Point<int>, float& mousePositionVelocity) const;
     void resetAnyKeysInUse();
-    void updateNoteUnderMouse (juce::Point<int>, bool isDown, int fingerNum);
     void updateNoteUnderMouse (const MouseEvent&, bool isDown);
     void repaintNote (int midiNoteNumber);
     void setLowestVisibleKeyFloat (float noteNumber);

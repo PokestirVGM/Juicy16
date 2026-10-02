@@ -34,11 +34,13 @@ Everything is linked statically, so the plugin only depends on system frameworks
 
 ## Windows validation
 
-The 2026-09-22 Windows 0.6.1-beta.4 candidate passed static MSVC runtime/codec,
-SF2/SF3/DLS loading and system-only DLL checks. The native recipe uses CMake
-config packages and explicitly enables Opus's static runtime. That evidence
-predates the full-range DLS pan patch and 1.0.0-beta.1; rebuild and validate the
-merged version before release. See [Windows evidence](WINDOWS_RELEASE.md).
+The 2026-09-27 Windows 1.0.0-beta.1 candidate passed local Debug and Release
+checks, including the full-range DLS pan patch, static MSVC runtime/codec,
+SF2/SF3/DLS loading, system-only DLL imports and installer lifecycle. The native
+recipe uses CMake config packages and explicitly enables Opus's static runtime.
+That evidence predates the 2026-09-28 timer-thread cleanup patch; a Windows
+rebuild of the latest dependency closure remains pending. Itemized DAW and
+clean Windows 10 checks also remain open. See [Windows evidence](WINDOWS_RELEASE.md).
 
 ## Security notes
 

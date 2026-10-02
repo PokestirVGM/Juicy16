@@ -23,7 +23,7 @@ project(JUICY16 VERSION 1.0.0)
 # copy, so a stale one is worse than none. Editing this line now wins everywhere;
 # -DJUICYSF_PRERELEASE_LABEL=... on the command line still overrides it, and keeps
 # overriding it for that build directory until the cache entry is removed.
-set(JUICYSF_PRERELEASE_LABEL_DEFAULT "beta.1")
+set(JUICYSF_PRERELEASE_LABEL_DEFAULT "beta.2")
 # A build directory configured once with -DJUICYSF_PRERELEASE_LABEL=... keeps that
 # label forever, silently, and goes on displaying it in the status bar after the
 # line above has moved on. That is precisely the case the status bar exists to
@@ -988,6 +988,17 @@ if (BUILD_TESTING)
   # or the expected-value tables in the protocol document stop describing them.
   find_package(Python3 COMPONENTS Interpreter QUIET)
   if (Python3_Interpreter_FOUND)
+    if (UNIX)
+      add_test(NAME ci_gate_script_contract
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/CiGateScriptTests.py)
+      set_tests_properties(ci_gate_script_contract PROPERTIES LABELS "build;ci")
+      add_test(NAME mac_installer_script_contract
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/MacInstallerScriptTests.py)
+      set_tests_properties(mac_installer_script_contract PROPERTIES LABELS "build;packaging")
+    endif()
+    add_test(NAME windows_package_script_contract
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/WindowsPackageScriptTests.py)
+    set_tests_properties(windows_package_script_contract PROPERTIES LABELS "build;packaging")
     add_test(NAME host_fixtures_reproducible
       COMMAND ${CMAKE_COMMAND}
         -DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
@@ -1089,12 +1100,23 @@ if (BUILD_TESTING)
   target_compile_definitions(JuicySFPlaybackReliabilityTests PRIVATE JUCE_LOG_ASSERTIONS=1)
   add_test(NAME playback_reliability COMMAND JuicySFPlaybackReliabilityTests)
   set_tests_properties(playback_reliability PROPERTIES LABELS "engine;playback")
+
+  add_executable(JuicySFMidiFilePlayerTests tests/MidiFilePlayerTests.cpp)
+  juicysf_treat_warnings_as_errors(tests/MidiFilePlayerTests.cpp)
+  target_include_directories(JuicySFMidiFilePlayerTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Source")
+  target_link_libraries(JuicySFMidiFilePlayerTests PRIVATE
+    JuicySFPlugin juce::juce_audio_utils juce::juce_gui_extra ${FLUIDSYNTH_TARGET})
+  target_compile_features(JuicySFMidiFilePlayerTests PRIVATE cxx_std_17)
+  target_compile_definitions(JuicySFMidiFilePlayerTests PRIVATE JUCE_LOG_ASSERTIONS=1)
+  add_test(NAME standalone_midi_player COMMAND JuicySFMidiFilePlayerTests)
+  set_tests_properties(standalone_midi_player PROPERTIES LABELS "engine;playback;standalone")
   if (MSVC)
     # These offline harnesses hold several processor instances on the stack.
     # Match the macOS main-thread stack instead of Windows' 1 MiB default.
     # Real VST3 hosts allocate processor instances on the heap.
     foreach (_harness JuicySFEngineMidiTests JuicySFRenderEquivalenceTests
-                      JuicySFPlaybackReliabilityTests JuicySFPerfProbe JuicySFDynamicsProbe)
+                      JuicySFPlaybackReliabilityTests JuicySFMidiFilePlayerTests
+                      JuicySFPerfProbe JuicySFDynamicsProbe)
       target_link_options(${_harness} PRIVATE /STACK:8388608)
     endforeach ()
   endif ()

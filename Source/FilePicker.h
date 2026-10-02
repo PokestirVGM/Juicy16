@@ -4,6 +4,7 @@
 #include "FluidSynthModel.h"
 #include "Theme.h"
 #include "GuiConstants.h"
+#include <functional>
 
 #if JUCE_MAC || JUCE_IOS
   #include <CoreFoundation/CFURL.h>
@@ -42,21 +43,54 @@ public:
     }
 };
 
+// FilenameComponent recreates its browse button whenever the palette changes.
+// Reapply the standalone chooser callback after JUCE installs its default one.
+class FilePickerFilenameComponent final : public FilenameComponent
+{
+public:
+    using FilenameComponent::FilenameComponent;
+    void setBrowseCallback(std::function<void()> callback) {
+        browseCallback = std::move(callback);
+        lookAndFeelChanged();
+    }
+    void lookAndFeelChanged() override {
+        FilenameComponent::lookAndFeelChanged();
+        for (auto* child : getChildren()) {
+            if (auto* button = dynamic_cast<Button*>(child)) {
+                const String name{browseCallback ? "Load sound bank and MIDI files" : "Load sound bank"};
+                button->setName(name);
+                button->setTitle(name);
+                button->setTooltip(browseCallback
+                    ? "Select a sound bank and a MIDI file together, or either file on its own."
+                    : "Select a DLS, SF2, or SF3 sound bank.");
+                if (browseCallback)
+                    button->onClick = [this] { browseCallback(); };
+            }
+        }
+    }
+private:
+    std::function<void()> browseCallback;
+};
+
 class FilePicker: public Component,
                   public ValueTree::Listener,
+                  public juce::AsyncUpdater,
                   private FilenameComponentListener
 {
 public:
     FilePicker(
-        AudioProcessorValueTreeState& valueTreeState
+        AudioProcessorValueTreeState& valueTreeState, FluidSynthModel& model
     );
     ~FilePicker() override;
 
     void resized() override;
     void paint (Graphics& g) override;
+    void lookAndFeelChanged() override;
 
     void setDisplayedFilePath(const String&);
-    
+    void setMidiFileLoader(std::function<bool(const File&, String&)> loader,
+                           std::function<void(const String&)> resultHandler);
+    bool loadSelectedFiles(const juce::Array<File>& files, String& error);
 
     void valueTreePropertyChanged (ValueTree& treeWhosePropertyHasChanged,
                                    const Identifier& property) override;
@@ -66,11 +100,16 @@ public:
     void valueTreeParentChanged (ValueTree&) override {}
     void valueTreeRedirected (ValueTree&) override {}
 private:
+    void handleAsyncUpdate() override;
     // Declared before fileChooser so it outlives it.
     FilePickerLookAndFeel folderIconLookAndFeel;
-    FilenameComponent fileChooser;
+    FilePickerFilenameComponent fileChooser;
+    std::unique_ptr<juce::FileChooser> combinedChooser;
+    std::function<bool(const File&, String&)> midiFileLoader;
+    std::function<void(const String&)> loadResultHandler;
 
     AudioProcessorValueTreeState& valueTreeState;
+    FluidSynthModel& model;
 
     String currentPath;
 
@@ -79,6 +118,7 @@ private:
 #endif
 
     void filenameComponentChanged (FilenameComponent*) override;
+    void chooseFiles();
 
     bool shouldChangeDisplayedFilePath(const String &path);
 

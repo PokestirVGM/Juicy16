@@ -35,6 +35,7 @@ try {
     }
     cmake -S $repoRoot -B $BuildDir -G 'Visual Studio 17 2022' -A x64 `
         "-DCMAKE_PREFIX_PATH=$DepsPrefix;$JucePrefix" -DFLUIDSYNTH_LINK_STATIC=ON `
+        -DBUILD_TESTING=ON `
         -DJUICYSF_RELEASE_VALIDATION=ON -DJUICYSF_COPY_PLUGIN_AFTER_BUILD=OFF `
         "-DJUICYSF_FONT_CORPUS=$DepsPrefix/share/juicy16-test-fixtures" `
         "-DJUICYSF_SF3_FIXTURE=$DepsPrefix/share/juicy16-test-fixtures/VintageDreamsWaves-v2.sf3" `
@@ -42,7 +43,7 @@ try {
     Assert-NativeSuccess 'Configure'
     cmake --build $BuildDir --config $Configuration --parallel $BuildJobs
     Assert-NativeSuccess 'Build'
-    ctest --test-dir $BuildDir -C $Configuration --output-on-failure
+    ctest --test-dir $BuildDir -C $Configuration --output-on-failure --no-tests=error
     Assert-NativeSuccess 'Automated tests'
     Write-Output 'All automated Windows gates passed. DAW and minimum-OS testing remain manual.'
 } finally {

@@ -17,6 +17,10 @@
 #include "PluginProcessor.h"
 
 #include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <cstdlib>
+#include <string>
 #include <cstdio>
 #include <vector>
 
@@ -141,6 +145,291 @@ void addAutomationStorm(juce::MidiBuffer& midi, int blockSize, int programOffset
     }
 }
 
+// Optional, reproducible microbenchmark. It deliberately bypasses the resource
+// cycling above and never changes CTest's existing no-flag workload. MIDI is
+// generated once, then copied outside the timed processBlock call because the
+// processor is allowed to mutate the incoming buffer.
+struct BenchmarkScenario {
+    const char* name;
+    int notes; // 0 = silence, 1 = one note, 64 = sixteen chords, 512 = ceiling
+    bool reverb;
+    bool chorus;
+    bool denseMidi;
+    bool sameTimestamp;
+    bool parameterAutomation;
+    bool retrigger{false};
+};
+
+constexpr BenchmarkScenario benchmarkScenarios[]{
+    {"silence", 0, false, false, false, false, false},
+    {"single", 1, false, false, false, false, false},
+    {"sixteen", 64, false, false, false, false, false},
+    {"full", 512, false, false, false, false, false},
+    {"full_reverb", 512, true, false, false, false, false},
+    {"full_chorus", 512, false, true, false, false, false},
+    {"full_effects", 512, true, true, false, false, false},
+    {"dense_spread", 64, false, false, true, false, false},
+    {"dense_same", 64, false, false, true, true, false},
+    {"retrigger_same", 64, false, false, false, true, false, true},
+    {"parameters", 64, true, true, false, false, true},
+};
+
+struct BenchmarkOptions {
+    double seconds{0.5};
+    int repeats{3};
+    int rate{0};
+    int blockSize{0};
+    std::string scenario;
+    std::string interpolation{"linear"};
+};
+
+bool parseBenchmarkOptions(int argc, char** argv, BenchmarkOptions& options)
+{
+    for (int index = 3; index < argc; ++index) {
+        const std::string option{argv[index]};
+        const auto separator{option.find('=')};
+        if (separator == std::string::npos)
+            return false;
+        const auto key{option.substr(0, separator)};
+        const auto value{option.substr(separator + 1)};
+        if (key == "--scenario") {
+            options.scenario = value;
+            continue;
+        }
+        if (key == "--interpolation") {
+            if (value != "seventh" && value != "linear" && value != "none")
+                return false;
+            options.interpolation = value;
+            continue;
+        }
+        char* end{nullptr};
+        const double number{std::strtod(value.c_str(), &end)};
+        if (end == value.c_str() || *end != '\0' || !std::isfinite(number))
+            return false;
+        if (key == "--seconds") {
+            if (number < 0.1 || number > 30.0)
+                return false;
+            options.seconds = number;
+            continue;
+        }
+        // Bound the conversion before casting; rate/block/repeat are integer
+        // options, so compare accepted values as integers rather than doubles.
+        if (number < 1.0 || number > 192000.0 || !juce::exactlyEqual(number, std::floor(number)))
+            return false;
+        const int integer{static_cast<int>(number)};
+        if (key == "--repeat" && integer <= 100)
+            options.repeats = integer;
+        else if (key == "--rate" && (integer == 44100 || integer == 48000 || integer == 96000 || integer == 192000))
+            options.rate = integer;
+        else if (key == "--block-size" && integer >= 64 && integer <= 4096)
+            options.blockSize = integer;
+        else
+            return false;
+    }
+    if (!options.scenario.empty()) {
+        bool found{false};
+        for (const auto& scenario : benchmarkScenarios)
+            found = found || options.scenario == scenario.name;
+        if (!found)
+            return false;
+    }
+    return true;
+}
+
+using BenchmarkClock = std::chrono::steady_clock;
+
+double elapsedMicroseconds(BenchmarkClock::time_point start)
+{
+    return std::chrono::duration<double, std::micro>(BenchmarkClock::now() - start).count();
+}
+
+int activeVoices(FluidSynthModel& model)
+{
+    int voices{0};
+    for (int channel = 0; channel < 16; ++channel) {
+        FluidSynthModel::VoiceStateCounts counts;
+        if (model.getVoiceStateCounts(channel, counts))
+            voices += counts.playing;
+    }
+    return voices;
+}
+
+juce::AudioProcessorParameterWithID* benchmarkParameter(JuicySFAudioProcessor& processor,
+                                                       const juce::String& id)
+{
+    for (auto* parameter : processor.getParameters())
+        if (auto* identified{dynamic_cast<juce::AudioProcessorParameterWithID*>(parameter)};
+            identified != nullptr && identified->paramID == id)
+            return identified;
+    return nullptr;
+}
+
+int runBenchmarks(const juce::File& bank, const BenchmarkOptions& options)
+{
+    std::printf("BENCH_SCHEMA,1\n");
+    std::printf("BENCH_META,interpolation,%s\n", options.interpolation.c_str());
+    std::printf("BENCH_HEADER,scenario,rate,block,repeat,blocks,events_per_block,voices_start,voices_end,"
+                "audio_seconds,render_us,block_median_us,block_p95_us,block_max_us,"
+                "midi_generate_us,midi_copy_us,parameter_update_us,audio_energy,peak,finite\n");
+    const auto state{stateFor(bank.getFullPathName())};
+    int emitted{0};
+    for (const auto& scenario : benchmarkScenarios) {
+        if (!options.scenario.empty() && options.scenario != scenario.name)
+            continue;
+        for (const int rate : {44100, 48000, 96000, 192000}) {
+            if (options.rate != 0 && options.rate != rate)
+                continue;
+            for (const int defaultBlock : {64, 512}) {
+                const int blockSize{options.blockSize == 0 ? defaultBlock : options.blockSize};
+                if (options.blockSize != 0 && defaultBlock != 64)
+                    continue;
+                constexpr int patternSize{128};
+                std::vector<juce::MidiBuffer> patterns(static_cast<size_t>(patternSize));
+                const auto generationStart{BenchmarkClock::now()};
+                if (scenario.denseMidi || scenario.retrigger)
+                    for (int pattern = 0; pattern < patternSize; ++pattern) {
+                        juce::MidiBuffer generated;
+                        if (scenario.denseMidi)
+                            addAutomationStorm(generated, blockSize, pattern);
+                        if (scenario.retrigger)
+                            for (int channel = 1; channel <= 16; ++channel) {
+                                generated.addEvent(juce::MidiMessage::noteOff(channel, 60), 0);
+                                generated.addEvent(juce::MidiMessage::noteOn(
+                                    channel, 60, static_cast<juce::uint8>(100)), 0);
+                            }
+                        for (const auto metadata : generated)
+                            patterns[static_cast<size_t>(pattern)].addEvent(
+                                metadata.getMessage(), scenario.sameTimestamp ? 0 : metadata.samplePosition);
+                    }
+                const double generationUs{elapsedMicroseconds(generationStart)};
+                const int eventsPerBlock{patterns.front().getNumEvents()};
+                const int blocks{static_cast<int>(std::ceil(rate * options.seconds / blockSize))};
+                for (int repeat = 0; repeat < options.repeats; ++repeat) {
+                    JuicySFAudioProcessor processor;
+                    processor.prepareToPlay(rate, blockSize);
+                    processor.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
+                    if (processor.getFluidSynthModel().getFontLoadStatus() != "loaded") {
+                        std::fprintf(stderr, "Benchmark bank load failed\n");
+                        return 1;
+                    }
+                    auto* reverb{benchmarkParameter(processor, "reverbOn")};
+                    auto* chorus{benchmarkParameter(processor, "chorusOn")};
+                    auto* interpolation{dynamic_cast<juce::AudioParameterChoice*>(
+                        benchmarkParameter(processor, "interpolation"))};
+                    if (reverb == nullptr || chorus == nullptr || interpolation == nullptr) {
+                        std::fprintf(stderr, "Benchmark effects/interpolation parameters missing\n");
+                        return 1;
+                    }
+                    // stateFor intentionally retains the old resource probe's
+                    // schema-2 migration. Override it here so optional timing
+                    // measures the shipping Linear default unless requested.
+                    *interpolation = options.interpolation == "seventh" ? 0
+                        : options.interpolation == "linear" ? 1 : 2;
+                    reverb->setValueNotifyingHost(scenario.reverb ? 1.0f : 0.0f);
+                    chorus->setValueNotifyingHost(scenario.chorus ? 1.0f : 0.0f);
+                    std::vector<juce::AudioProcessorParameterWithID*> automated;
+                    if (scenario.parameterAutomation) {
+                        for (int channel = 1; channel <= 16; ++channel)
+                            for (const char* prefix : {"volCh", "panCh"}) {
+                                auto* parameter{benchmarkParameter(processor, juce::String{prefix} + juce::String{channel})};
+                                if (parameter == nullptr)
+                                    return 1;
+                                automated.push_back(parameter);
+                            }
+                        for (const char* id : {"outputLevel", "reverbSize", "reverbDamp", "reverbWidth",
+                                              "reverbLevel", "chorusLevel", "chorusRate", "chorusDepth"}) {
+                            auto* parameter{benchmarkParameter(processor, id)};
+                            if (parameter == nullptr)
+                                return 1;
+                            automated.push_back(parameter);
+                        }
+                    }
+                    juce::AudioBuffer<float> audio{2, blockSize};
+                    juce::MidiBuffer midi;
+                    midi.ensureSize(32768);
+                    if (scenario.reverb || scenario.chorus)
+                        for (int channel = 1; channel <= 16; ++channel) {
+                            midi.addEvent(juce::MidiMessage::controllerEvent(channel, 91, 100), 0);
+                            midi.addEvent(juce::MidiMessage::controllerEvent(channel, 93, 100), 0);
+                        }
+                    if (scenario.notes == 1)
+                        addSingleNote(midi);
+                    else if (scenario.notes == 64)
+                        addSixteenChannelChords(midi);
+                    else if (scenario.notes == 512)
+                        addVoiceCeilingChords(midi, blockSize, true);
+                    audio.clear();
+                    processor.processBlock(audio, midi);
+                    const int warmupBlocks{static_cast<int>(std::ceil(rate * 0.1 / blockSize))};
+                    for (int block = 0; block < warmupBlocks; ++block) {
+                        midi.clear();
+                        midi.addEvents(patterns[static_cast<size_t>(block % patternSize)], 0, blockSize, 0);
+                        audio.clear();
+                        processor.processBlock(audio, midi);
+                    }
+                    const int voicesStart{activeVoices(processor.getFluidSynthModel())};
+                    if (scenario.notes == voiceCeiling && voicesStart <= voiceCeiling / 2) {
+                        std::fprintf(stderr, "Benchmark did not reach a substantial fraction of the voice ceiling\n");
+                        return 1;
+                    }
+                    std::vector<double> blockTimes;
+                    blockTimes.reserve(static_cast<size_t>(blocks));
+                    double renderUs{0.0}, copyUs{0.0}, parameterUs{0.0}, energy{0.0}, peak{0.0};
+                    bool finite{true};
+                    for (int block = 0; block < blocks; ++block) {
+                        auto start{BenchmarkClock::now()};
+                        midi.clear();
+                        midi.addEvents(patterns[static_cast<size_t>(block % patternSize)], 0, blockSize, 0);
+                        copyUs += elapsedMicroseconds(start);
+                        if (!automated.empty()) {
+                            start = BenchmarkClock::now();
+                            for (size_t index = 0; index < automated.size(); ++index) {
+                                const float value{0.2f + 0.6f * static_cast<float>(
+                                    (static_cast<size_t>(block) + index * 7) % 128) / 127.0f};
+                                automated[index]->setValueNotifyingHost(value);
+                            }
+                            parameterUs += elapsedMicroseconds(start);
+                        }
+                        audio.clear();
+                        start = BenchmarkClock::now();
+                        processor.processBlock(audio, midi);
+                        const double blockUs{elapsedMicroseconds(start)};
+                        renderUs += blockUs;
+                        blockTimes.push_back(blockUs);
+                        // Audio diagnostics are intentionally outside render timing.
+                        for (int channel = 0; channel < 2; ++channel)
+                            for (int sample = 0; sample < blockSize; ++sample) {
+                                const double value{audio.getSample(channel, sample)};
+                                finite = finite && std::isfinite(value);
+                                energy += value * value;
+                                peak = std::max(peak, std::abs(value));
+                            }
+                    }
+                    const int voicesEnd{activeVoices(processor.getFluidSynthModel())};
+                    std::sort(blockTimes.begin(), blockTimes.end());
+                    const size_t middle{blockTimes.size() / 2};
+                    const double median{blockTimes.size() % 2 == 0
+                        ? (blockTimes[middle - 1] + blockTimes[middle]) * 0.5 : blockTimes[middle]};
+                    const size_t p95{static_cast<size_t>(std::ceil(static_cast<double>(blockTimes.size()) * 0.95)) - 1};
+                    std::printf("BENCH,%s,%d,%d,%d,%d,%d,%d,%d,%.9f,%.6f,%.6f,%.6f,%.6f,"
+                                "%.6f,%.6f,%.6f,%.12e,%.9f,%d\n",
+                                scenario.name, rate, blockSize, repeat, blocks, eventsPerBlock,
+                                voicesStart, voicesEnd, static_cast<double>(blocks) * blockSize / rate,
+                                renderUs, median, blockTimes[p95], blockTimes.back(), generationUs,
+                                copyUs, parameterUs, energy, peak, finite ? 1 : 0);
+                    ++emitted;
+                    if (!finite || (scenario.notes > 0 && (voicesStart == 0 || energy <= 0.0))
+                        || (scenario.notes == 0 && energy > 1.0e-12)) {
+                        std::fprintf(stderr, "Benchmark workload failed to produce finite active audio\n");
+                        return 1;
+                    }
+                }
+            }
+        }
+    }
+    return emitted > 0 ? 0 : 1;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -150,8 +439,8 @@ int main(int argc, char** argv)
     std::setvbuf(stdout, nullptr, _IONBF, 0);
 
     juce::ScopedJuceInitialiser_GUI juceInitialiser;
-    if (argc != 2) {
-        std::fprintf(stderr, "usage: JuicySFPerfProbe <bank.dls|sf2|sf3>\n");
+    if (argc < 2 || (argc > 2 && std::string{argv[2]} != "--benchmark")) {
+        std::fprintf(stderr, "usage: JuicySFPerfProbe <bank.dls|sf2|sf3> [--benchmark [--seconds=N] [--repeat=N] [--scenario=NAME] [--rate=HZ] [--block-size=N] [--interpolation=linear|seventh|none]]\n");
         return 2;
     }
 
@@ -159,6 +448,15 @@ int main(int argc, char** argv)
     if (!bank.existsAsFile()) {
         std::fprintf(stderr, "bank not found: %s\n", bank.getFullPathName().toRawUTF8());
         return 2;
+    }
+
+    if (argc > 2) {
+        BenchmarkOptions options;
+        if (!parseBenchmarkOptions(argc, argv, options)) {
+            std::fprintf(stderr, "Invalid benchmark option\n");
+            return 2;
+        }
+        return runBenchmarks(bank, options);
     }
 
     constexpr double sampleRate{48000.0};

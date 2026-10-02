@@ -68,13 +68,15 @@ jobs:
           cp -R build-release/JuicySFPlugin_artefacts/Release/AU/Juicy16.component \
             "$HOME/Library/Audio/Plug-Ins/Components/"
           killall -9 AudioComponentRegistrar || true
-          auval -v aumu Jc16 Pkst
+          auval -strict -v aumu Jc16 Pkst
 
       - name: Stage the candidate package
+        env:
+          CANDIDATE: ${{ github.event.inputs.candidate || 'BC1' }}
         run: |
           distribute/bundle_macos.sh \
             build-release/JuicySFPlugin_artefacts/Release \
-            "${{ github.event.inputs.candidate || 'BC1' }}"
+            "$CANDIDATE"
 
       # Unsigned beyond an ad-hoc signature: Developer ID and notarization are
       # still open Phase 4.2 gates, so this is a candidate, not a public release.

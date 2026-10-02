@@ -122,15 +122,16 @@ The tests check these IDs and the parameter manifest.
 
 ## Saved state
 
-The state root is `MYPLUGINSETTINGS`, currently schema **10**. It stores every
+The state root is `MYPLUGINSETTINGS`, currently schema **11**. It stores every
 parameter, one record per channel (`bank`, `preset`, `volume`, `pan`, `mute`,
-`solo`, `expression`, `bendRange`), the window and the bank's path and bookmark.
+`solo`, `expression`, `bendRange`), the window and accent, and the bank's path and bookmark.
 
 Newer builds read older projects; older builds refuse newer ones with an error
 rather than guessing. Keep a project backup if you might roll back.
 
 | Schema | Added | Older projects open with |
 | --- | --- | --- |
+| 11 | saved UI accent | Sage for projects without an accent; all twelve choices round-trip |
 | 10 | `interpolation` | 7th-order, the sound they were made with (new instances default to Linear) |
 | 9 | CC1 vibrato strength | ×1 |
 | 8 | chorus | chorus off |
@@ -142,3 +143,9 @@ rather than guessing. Keep a project backup if you might roll back.
 
 Any future state change needs a new schema number, a migration test, a
 changelog entry and an update here.
+
+Recall reapplies saved channel programs and mixer values even when the bank
+path and parameter values match the current instance. Older projects reset
+controls absent from their schema rather than inheriting a previous project's
+mute/solo, mixer or reverb settings. Nonfinite normalized values are ignored;
+finite out-of-range values are clamped before migration.

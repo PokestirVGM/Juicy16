@@ -45,7 +45,8 @@ public:
 
 // Settings popover: accent, sound and MIDI settings, and build facts as
 // key/value rows.
-class SettingsPanel final : public Component, private juce::Timer, private ValueTree::Listener {
+class SettingsPanel final : public Component, public juce::AsyncUpdater,
+                            private juce::Timer, private ValueTree::Listener {
 public:
     struct Fact { String key; String value; };
 
@@ -218,8 +219,6 @@ public:
                 return;
             if (chooseAccent != nullptr)
                 chooseAccent(accents[static_cast<std::size_t>(index)]);
-            // The popover is not an editor child, so it needs its own LookAndFeel change.
-            sendLookAndFeelChange();
         };
         addAndMakeVisible(accentBox);
 
@@ -260,6 +259,7 @@ public:
     ~SettingsPanel() override {
         stopTimer();
         valueTreeState.state.removeListener(this);
+        cancelPendingUpdate();
         // Detach the member LookAndFeel before either is destroyed.
         accentBox.setLookAndFeel(nullptr);
     }
@@ -274,6 +274,9 @@ public:
     void lookAndFeelChanged() override {
         auto& theme{getLookAndFeel()};
         if (!theme.isColourSpecified(Juicy16::textPrimaryColourId)) return;
+        if (auto* palette = dynamic_cast<Juicy16::PluginLookAndFeel*>(&theme))
+            if (accentListLookAndFeel.getAccent() != palette->getAccent())
+                accentListLookAndFeel.setAccent(palette->getAccent());
         const Colour label{theme.findColour(Juicy16::textLabelColourId)};
         for (Label* heading : {&accentHeading, &soundHeading, &midiHeading, &buildHeading, &interpolationLabel,
                                &bendRangeLabel, &bendScaleLabel, &resetPolicyLabel,
@@ -355,6 +358,9 @@ public:
     }
 
 private:
+#if JUICYSF_UI_WORK_COUNTERS
+    friend struct Juicy16::UIWorkBenchmark;
+#endif
     static constexpr int kWidth{252};
     static constexpr int kHeadingHeight{14};
     static constexpr int kHeadingGap{8};
@@ -365,6 +371,10 @@ private:
 
     void timerCallback() override {
         const int value = fluidSynthModel.getChannelDiagnostics(attachedVibratoChannel).modulation;
+        if (value == displayedModulation)
+            return;
+        displayedModulation = value;
+        JUICY16_COUNT_UI_WORK(settingsCC1Formats);
         cc1Value.setText(String(value) + (value == 0 ? " (inactive)" : ""), dontSendNotification);
     }
     void syncVibratoChannel() {
@@ -380,8 +390,24 @@ private:
         timerCallback();
     }
     void valueTreePropertyChanged(ValueTree& tree, const Identifier& property) override {
+        if (tree.getType() != StringRef("uiState")
+            || (property != StringRef("selectedChannel") && property != StringRef("accent")))
+            return;
+        if (!juce::MessageManager::getInstance()->isThisTheMessageThread()) {
+            triggerAsyncUpdate();
+            return;
+        }
         if (tree.getType() == StringRef("uiState") && property == StringRef("selectedChannel"))
             syncVibratoChannel();
+        if (tree.getType() == StringRef("uiState") && property == StringRef("accent"))
+            accentBox.setSelectedId(indexOfAccent(Juicy16::accentFromName(
+                tree.getProperty("accent", "sage").toString())) + 1, dontSendNotification);
+    }
+    void handleAsyncUpdate() override {
+        syncVibratoChannel();
+        accentBox.setSelectedId(indexOfAccent(Juicy16::accentFromName(valueTreeState.state
+            .getChildWithName("uiState").getProperty("accent", "sage").toString())) + 1,
+            dontSendNotification);
     }
     AudioProcessorValueTreeState& valueTreeState;
     FluidSynthModel& fluidSynthModel;
@@ -389,6 +415,7 @@ private:
     juce::ComboBox vibratoChannelBox, vibratoScaleBox;
     std::unique_ptr<AudioProcessorValueTreeState::ComboBoxAttachment> vibratoScaleAttachment;
     int attachedVibratoChannel{-1};
+    int displayedModulation{-1};
     std::vector<Fact> facts;
     Label accentHeading, soundHeading, midiHeading, buildHeading;
     Label bendRangeLabel, bendScaleLabel, resetPolicyLabel, interpolationLabel;
@@ -409,6 +436,13 @@ private:
 
 } // namespace
 
+#if JUICYSF_UI_WORK_COUNTERS
+void Juicy16::UIWorkBenchmark::tickSettings(juce::Component& component) {
+    if (auto* settings = dynamic_cast<SettingsPanel*>(&component))
+        settings->timerCallback();
+}
+#endif
+
 //==============================================================================
 JuicySFAudioProcessorEditor::JuicySFAudioProcessorEditor(
     JuicySFAudioProcessor& p,
@@ -418,7 +452,7 @@ JuicySFAudioProcessorEditor::JuicySFAudioProcessorEditor(
 , valueTreeState{state}
 , midiKeyboard{p.keyboardState, SurjectiveMidiKeyboardComponent::horizontalKeyboard}
 , channelRack{state, p.getFluidSynthModel()}
-, filePicker{state}
+, filePicker{state, p.getFluidSynthModel()}
 , mixerPanel{state, p.getFluidSynthModel()}
 {
     // Install the palette before children read colours. Per editor, not global:
@@ -431,6 +465,17 @@ JuicySFAudioProcessorEditor::JuicySFAudioProcessorEditor(
     // Before the first setSize: resized() sizes the header from the logo width.
     logoButton.setLogo(logo);
 
+    if (audioProcessor.wrapperType == AudioProcessor::wrapperType_Standalone) {
+        midiPlayer = std::make_unique<MidiPlayerComponent>(audioProcessor);
+        addAndMakeVisible(*midiPlayer);
+        filePicker.setMidiFileLoader(
+            [this](const File& file, String& error) {
+                return audioProcessor.getMidiFilePlayer().loadFile(file, error);
+            },
+            [this](const String& error) { midiPlayer->showLoadResult(error); });
+    }
+    const int transportHeight = midiPlayer != nullptr ? MidiPlayerComponent::preferredHeight : 0;
+
     // No wider than the keyboard's full range.
     const int keyboardMaxWidth{juce::jmax(
         GuiConstants::minWidth,
@@ -438,9 +483,9 @@ JuicySFAudioProcessorEditor::JuicySFAudioProcessorEditor(
 
     setResizeLimits(
         GuiConstants::minWidth,
-        GuiConstants::minHeight,
+        GuiConstants::minHeight + transportHeight,
         keyboardMaxWidth,
-        GuiConstants::maxHeight);
+        GuiConstants::maxHeight + transportHeight);
     // Some hosts (FL Studio's AU view) need the plugin's own resize corner.
     setResizable(true, true);
 
@@ -449,7 +494,7 @@ JuicySFAudioProcessorEditor::JuicySFAudioProcessorEditor(
 
     // Restore the saved size.
     setBoundsConstrained({getX(), getY(), static_cast<int>(lastUIWidth.getValue()),
-                          static_cast<int>(lastUIHeight.getValue())});
+                          static_cast<int>(lastUIHeight.getValue()) + transportHeight});
 
     lastUIWidth.addListener(this);
     lastUIHeight.addListener(this);
@@ -494,12 +539,23 @@ JuicySFAudioProcessorEditor::JuicySFAudioProcessorEditor(
     valueTreeState.state.addListener(this);
     syncKeyboardChannel();
     syncStatusLabel();
+    if (midiPlayer != nullptr)
+        registerTransportKeys(*this, true);
 }
 
 void JuicySFAudioProcessorEditor::applyAccentFromState() {
     const String stored{valueTreeState.state.getChildWithName("uiState")
         .getProperty("accent", "sage").toString()};
-    lookAndFeel.setAccent(Juicy16::accentFromName(stored));
+    const auto accent{Juicy16::accentFromName(stored)};
+    if (lookAndFeel.getAccent() == accent)
+        return;
+    lookAndFeel.setAccent(accent);
+    JUICY16_COUNT_UI_WORK(accentTreeRefreshes);
+    // Controls cache colours; update the complete tree, including the open
+    // settings CallOutBox parented to this editor.
+    sendLookAndFeelChange();
+    if (auto* top = getTopLevelComponent(); top != nullptr && top != this)
+        top->repaint();
 }
 
 void JuicySFAudioProcessorEditor::showSettings() {
@@ -523,11 +579,6 @@ void JuicySFAudioProcessorEditor::showSettings() {
         [this](Juicy16::Accent accent) {
             valueTreeState.state.getChildWithName("uiState")
                 .setProperty("accent", Juicy16::accentName(accent), nullptr);
-            lookAndFeel.setAccent(accent);
-            // Controls cache colours in lookAndFeelChanged(), so a repaint is not enough.
-            sendLookAndFeelChange();
-            if (auto* top{getTopLevelComponent()}; top != nullptr && top != this)
-                top->repaint();
         })};
     panel->setLookAndFeel(&lookAndFeel);
     settingsContent = std::move(panel);
@@ -558,8 +609,19 @@ void JuicySFAudioProcessorEditor::syncStatusLabel() {
 }
 
 void JuicySFAudioProcessorEditor::valueTreePropertyChanged(ValueTree& tree, const Identifier& property) {
+    if (!((tree.getType() == StringRef("uiState")
+            && (property == StringRef("selectedChannel") || property == StringRef("accent")))
+        || (tree.getType() == StringRef("soundFont")
+            && (property == StringRef("loadStatus") || property == StringRef("loadMessage")))))
+        return;
+    if (!juce::MessageManager::getInstance()->isThisTheMessageThread()) {
+        triggerAsyncUpdate();
+        return;
+    }
     if (tree.getType() == StringRef("uiState") && property == StringRef("selectedChannel"))
         syncKeyboardChannel();
+    if (tree.getType() == StringRef("uiState") && property == StringRef("accent"))
+        applyAccentFromState();
     if (tree.getType() == StringRef("soundFont")
         && (property == StringRef("loadStatus") || property == StringRef("loadMessage")))
         syncStatusLabel();
@@ -567,8 +629,20 @@ void JuicySFAudioProcessorEditor::valueTreePropertyChanged(ValueTree& tree, cons
 
 // Stored window size changed.
 void JuicySFAudioProcessorEditor::valueChanged(Value&) {
+    if (!juce::MessageManager::getInstance()->isThisTheMessageThread()) {
+        triggerAsyncUpdate();
+        return;
+    }
     setBoundsConstrained({getX(), getY(), static_cast<int>(lastUIWidth.getValue()),
-                          static_cast<int>(lastUIHeight.getValue())});
+                          static_cast<int>(lastUIHeight.getValue())
+                              + (midiPlayer != nullptr ? MidiPlayerComponent::preferredHeight : 0)});
+}
+
+void JuicySFAudioProcessorEditor::handleAsyncUpdate() {
+    valueChanged(lastUIWidth);
+    syncKeyboardChannel();
+    applyAccentFromState();
+    syncStatusLabel();
 }
 
 JuicySFAudioProcessorEditor::~JuicySFAudioProcessorEditor()
@@ -576,10 +650,13 @@ JuicySFAudioProcessorEditor::~JuicySFAudioProcessorEditor()
     // Settings listeners and attachments must die before the processor.
     settingsCallout.reset();
     settingsContent.reset();
+    if (midiPlayer != nullptr)
+        registerTransportKeys(*this, false);
     removeMouseListener(this);
     valueTreeState.state.removeListener(this);
     lastUIWidth.removeListener(this);
     lastUIHeight.removeListener(this);
+    cancelPendingUpdate();
     setLookAndFeel(nullptr);
 }
 
@@ -628,6 +705,9 @@ void JuicySFAudioProcessorEditor::resized()
     filePicker.setBounds(header.withSizeKeepingCentre(
         header.getWidth(), GuiConstants::filePickerHeight));
 
+    if (midiPlayer != nullptr)
+        midiPlayer->setBounds(r.removeFromTop(MidiPlayerComponent::preferredHeight));
+
     statusLabel.setBounds(r.removeFromBottom(GuiConstants::statusBarHeight)
                               .reduced(GuiConstants::padding, 0));
     midiKeyboard.setBounds(r.removeFromBottom(GuiConstants::pianoHeight));
@@ -636,14 +716,55 @@ void JuicySFAudioProcessorEditor::resized()
     channelRack.setBounds(r);
 
     lastUIWidth = getWidth();
-    lastUIHeight = getHeight();
+    // Keep the existing persisted rack size independent of the standalone strip.
+    lastUIHeight = getHeight() - (midiPlayer != nullptr ? MidiPlayerComponent::preferredHeight : 0);
 }
 
 bool JuicySFAudioProcessorEditor::keyPressed(const KeyPress &key) {
     // Any key press means keyboard use: show focus rings until the next click.
     setFocusRingsVisible(true);
+    if (handleTransportKey(key, getCurrentlyFocusedComponent()))
+        return true;
     // All other keys play the on-screen keyboard.
     return midiKeyboard.keyPressed(key);
+}
+
+bool JuicySFAudioProcessorEditor::handleTransportKey(const KeyPress& key, juce::Component* origin) {
+    if (midiPlayer == nullptr || key.getKeyCode() != KeyPress::spaceKey
+        || key.getModifiers().isAnyModifierKeyDown())
+        return false;
+    // Editing text and settings controls keep their usual keyboard behaviour.
+    for (auto* start : {origin, getCurrentlyFocusedComponent()})
+        for (auto* component = start; component != nullptr; component = component->getParentComponent())
+            if (dynamic_cast<juce::TextEditor*>(component) != nullptr
+                || component == settingsContent.get())
+                return false;
+    midiPlayer->togglePlayback();
+    return true;
+}
+
+bool JuicySFAudioProcessorEditor::keyPressed(const KeyPress& key, juce::Component* origin) {
+    if (key.getKeyCode() == KeyPress::spaceKey)
+        setFocusRingsVisible(true);
+    return handleTransportKey(key, origin);
+}
+
+void JuicySFAudioProcessorEditor::registerTransportKeys(juce::Component& component, bool add) {
+    if (add)
+        component.addKeyListener(this);
+    else
+        component.removeKeyListener(this);
+    for (int i = 0; i < component.getNumChildComponents(); ++i)
+        registerTransportKeys(*component.getChildComponent(i), add);
+}
+
+bool JuicySFAudioProcessorEditor::isInterestedInFileDrag(const StringArray& files) {
+    return midiPlayer != nullptr && midiPlayer->isInterestedInFileDrag(files);
+}
+
+void JuicySFAudioProcessorEditor::filesDropped(const StringArray& files, int x, int y) {
+    if (midiPlayer != nullptr)
+        midiPlayer->filesDropped(files, x, y);
 }
 
 void JuicySFAudioProcessorEditor::setFocusRingsVisible(bool visible) {
@@ -661,5 +782,16 @@ void JuicySFAudioProcessorEditor::mouseDown(const juce::MouseEvent&) {
 }
 
 bool JuicySFAudioProcessorEditor::keyStateChanged (bool isKeyDown) {
+    if (isKeyDown)
+        setFocusRingsVisible(true);
     return midiKeyboard.keyStateChanged(isKeyDown);
+}
+
+void JuicySFAudioProcessorEditor::focusLost(FocusChangeType cause) {
+    if (!hasKeyboardFocus(true))
+        midiKeyboard.focusLost(cause);
+}
+
+void JuicySFAudioProcessorEditor::focusOfChildComponentChanged(FocusChangeType cause) {
+    focusLost(cause);
 }

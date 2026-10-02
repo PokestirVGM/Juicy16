@@ -38,6 +38,14 @@ a 16-channel Program Change fixture driven through both routes.
 
 ## Threads
 
+Standalone owns a runtime-only MIDI file transport. Files and seek setup are
+prepared outside the audio callback, then published under the processor's
+callback lock. Playback merges a preallocated event stream into the existing
+synth path, using file order and Standard MIDI resets. The plugins retain their
+host ordering/recovery path and expose no additional parameters. Loop-start
+setup is prepared in advance, with a bounded chase event count. See
+[standalone playback](STANDALONE.md) for controls and seek approximations.
+
 **Audio thread** (`processBlock`, MIDI dispatch, rendering): calls FluidSynth and
 writes fixed-size atomics. It never allocates, touches the `ValueTree` or UI,
 loads banks or creates files.
@@ -49,14 +57,21 @@ loads banks or creates files.
 - SysEx is read straight from the MIDI buffer, because `MidiMessage` would
   heap-copy the reset every rip starts with.
 
-**Message thread:** owns the UI, `ValueTree`, bank loading, bookmarks and the
-repaired-DLS temp file. A new bank's ID is published only after it has loaded
-and proved playable.
+**Message thread:** owns the UI and normal `ValueTree` mirroring. Bank loading,
+bookmarks and repaired-DLS temporary files are control/state work outside normal
+audio rendering. A new bank's ID is published only after it has loaded and
+proved playable.
+
+Hosts can also restore state on a worker thread. Editor, settings, rack, mixer
+and picker listeners defer their widget updates to the message thread. This
+protects widget thread affinity; concurrent ValueTree reads during restoration
+still need real-host stress validation.
 
 `prepareToPlay` may recreate the synth for a new sample rate before playback.
 FluidSynth's thread-safe API stays on because occasional UI program changes can
 overlap rendering.
 
-The engine tests pass under AddressSanitizer, UndefinedBehaviorSanitizer and
-ThreadSanitizer. That doesn't replace real DAW testing with the editor open,
-automation running and several instances.
+Offline harnesses are exercised under AddressSanitizer and
+UndefinedBehaviorSanitizer; the [latest audit](AUDIT.md) records the actual
+coverage. These checks do not replace real DAW testing with the editor open,
+automation running and several instances, or establish full thread safety.

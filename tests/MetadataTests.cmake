@@ -3,6 +3,41 @@ if (NOT DEFINED PROJECT_SOURCE_DIR OR NOT DEFINED ARTIFACTS_DIR
   message(FATAL_ERROR "Metadata test arguments are incomplete")
 endif ()
 
+if (NOT DEFINED INCLUDE_STANDALONE)
+  set(INCLUDE_STANDALONE ON)
+endif ()
+if (INCLUDE_STANDALONE)
+  set(STANDALONE_PLIST "${ARTIFACTS_DIR}/Standalone/Juicy16.app/Contents/Info.plist")
+  set(STANDALONE_BINARY "${ARTIFACTS_DIR}/Standalone/Juicy16.app/Contents/MacOS/Juicy16")
+  if (NOT EXISTS "${STANDALONE_PLIST}" OR NOT EXISTS "${STANDALONE_BINARY}")
+    message(FATAL_ERROR "Expected Standalone metadata/executable is absent")
+  endif ()
+  foreach (KEY IN ITEMS CFBundleShortVersionString CFBundleIdentifier CFBundleExecutable CFBundlePackageType)
+    if (KEY STREQUAL "CFBundleShortVersionString")
+      set(EXPECTED_VALUE "${PROJECT_VERSION}")
+    elseif (KEY STREQUAL "CFBundleIdentifier")
+      set(EXPECTED_VALUE "com.pokestir.juicy16")
+    elseif (KEY STREQUAL "CFBundleExecutable")
+      set(EXPECTED_VALUE "Juicy16")
+    else ()
+      set(EXPECTED_VALUE "APPL")
+    endif ()
+    execute_process(COMMAND /usr/bin/plutil -extract "${KEY}" raw "${STANDALONE_PLIST}"
+      RESULT_VARIABLE STANDALONE_PLIST_RESULT OUTPUT_VARIABLE STANDALONE_VALUE
+      OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if (NOT STANDALONE_PLIST_RESULT EQUAL 0 OR NOT STANDALONE_VALUE STREQUAL EXPECTED_VALUE)
+      message(FATAL_ERROR "Standalone ${KEY} is '${STANDALONE_VALUE}', expected '${EXPECTED_VALUE}'")
+    endif ()
+  endforeach ()
+  execute_process(COMMAND /usr/bin/strings "${STANDALONE_BINARY}"
+    RESULT_VARIABLE STANDALONE_STRINGS_RESULT OUTPUT_VARIABLE STANDALONE_STRINGS)
+  string(REGEX MATCH "Juicy16 v[0-9][^ \n]*" STANDALONE_UI_VERSION "${STANDALONE_STRINGS}")
+  string(REPLACE "Juicy16 v" "" STANDALONE_UI_VERSION "${STANDALONE_UI_VERSION}")
+  if (NOT STANDALONE_STRINGS_RESULT EQUAL 0 OR NOT STANDALONE_UI_VERSION STREQUAL DISPLAY_VERSION)
+    message(FATAL_ERROR "Standalone displays '${STANDALONE_UI_VERSION}', expected '${DISPLAY_VERSION}'")
+  endif ()
+endif ()
+
 set(AU_PLIST
     "${ARTIFACTS_DIR}/AU/Juicy16.component/Contents/Info.plist")
 set(VST3_INFO
@@ -109,5 +144,10 @@ if (EXISTS "${ARTIFACTS_DIR}/VST")
   message(FATAL_ERROR "Unsupported VST2 artifact is present in the normal build")
 endif ()
 
+if (INCLUDE_STANDALONE)
+  set(METADATA_FORMATS "AU/VST3/Standalone")
+else ()
+  set(METADATA_FORMATS "AU/VST3")
+endif ()
 message(STATUS
-  "Metadata consistent: binary ${PROJECT_VERSION}, UI ${DISPLAY_VERSION}, AU/VST3 present, VST2 absent")
+  "Metadata consistent: binary ${PROJECT_VERSION}, UI ${DISPLAY_VERSION}, ${METADATA_FORMATS} present, VST2 absent")

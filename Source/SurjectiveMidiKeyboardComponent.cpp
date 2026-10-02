@@ -1,4 +1,5 @@
 #include "SurjectiveMidiKeyboardComponent.h"
+#include "Theme.h"
 
 /*
  * Forked from JUCE/modules/juce_audio_utils/gui/juce_MidiKeyboardComponent.cpp,
@@ -106,6 +107,8 @@ SurjectiveMidiKeyboardComponent::SurjectiveMidiKeyboardComponent (MidiKeyboardSt
 
 SurjectiveMidiKeyboardComponent::~SurjectiveMidiKeyboardComponent()
 {
+    stopTimer();
+    resetAnyKeysInUse();
     state.removeListener (this);
 }
 
@@ -334,7 +337,7 @@ const uint8 SurjectiveMidiKeyboardComponent::blackNotes[] = { 1, 3, 6, 8, 10 };
 
 int SurjectiveMidiKeyboardComponent::xyToNote (juce::Point<int> pos, float& mousePositionVelocity)
 {
-    if (! reallyContains (pos, false))
+    if (! containsMousePosition (pos))
         return -1;
 
     juce::Point<int> p (pos);
@@ -429,7 +432,11 @@ void SurjectiveMidiKeyboardComponent::paint (Graphics& g)
             if (noteNum >= rangeStart && noteNum <= rangeEnd)
             {
                 Rectangle<int> pos = getRectangleForKey (noteNum);
-
+                // Horizontal octave labels extend into adjacent white keys.
+                const auto inkBounds{pos.expanded(orientation == horizontalKeyboard ? pos.getWidth() : 1, 1)};
+                if (!g.clipRegionIntersects(inkBounds))
+                    continue;
+                JUICY16_COUNT_UI_WORK(keyboardKeyDraws);
                 drawWhiteNote (noteNum, g, pos.getX(), pos.getY(), pos.getWidth(), pos.getHeight(),
                         state.isNoteOnForChannels (midiInChannelMask, noteNum),
                         mouseOverNotes.contains (noteNum), lineColour, textColour);
@@ -494,7 +501,9 @@ void SurjectiveMidiKeyboardComponent::paint (Graphics& g)
             if (noteNum >= rangeStart && noteNum <= rangeEnd)
             {
                 Rectangle<int> pos = getRectangleForKey (noteNum);
-
+                if (!g.clipRegionIntersects(pos.expanded(1)))
+                    continue;
+                JUICY16_COUNT_UI_WORK(keyboardKeyDraws);
                 drawBlackNote (noteNum, g, pos.getX(), pos.getY(), pos.getWidth(), pos.getHeight(),
                         state.isNoteOnForChannels (midiInChannelMask, noteNum),
                         mouseOverNotes.contains (noteNum), blackNoteColour);
@@ -754,27 +763,20 @@ void SurjectiveMidiKeyboardComponent::handleNoteOff (MidiKeyboardState*, int /*m
 //==============================================================================
 void SurjectiveMidiKeyboardComponent::resetAnyKeysInUse()
 {
-    if (! keysPressed.isZero())
-    {
-        for (int i = 128; --i >= 0;)
-            if (keysPressed[i])
-                state.noteOff (midiChannel, i, 0.0f);
-
-        keysPressed.clear();
-    }
-
+    BigInteger ownedNotes{keysPressed};
     for (int i = mouseDownNotes.size(); --i >= 0;)
     {
         const int noteDown = mouseDownNotes.getUnchecked(i);
-
         if (noteDown >= 0)
-        {
-            state.noteOff (midiChannel, noteDown, 0.0f);
-            mouseDownNotes.set (i, -1);
-        }
-
+            ownedNotes.setBit(noteDown);
+        mouseDownNotes.set (i, -1);
         mouseOverNotes.set (i, -1);
     }
+    keysPressed.clear();
+    shouldCheckMousePos = false;
+    for (int note = 128; --note >= 0;)
+        if (ownedNotes[note])
+            state.noteOff(midiChannel, note, 0.0f);
 }
 
 void SurjectiveMidiKeyboardComponent::updateNoteUnderMouse (const MouseEvent& e, bool isDown)
@@ -784,11 +786,18 @@ void SurjectiveMidiKeyboardComponent::updateNoteUnderMouse (const MouseEvent& e,
 
 void SurjectiveMidiKeyboardComponent::updateNoteUnderMouse (juce::Point<int> pos, bool isDown, int fingerNum)
 {
+    if (fingerNum < 0)
+        return;
+    if (fingerNum >= mouseDownNotes.size()) {
+        const int extra = fingerNum + 1 - mouseDownNotes.size();
+        mouseDownNotes.insertMultiple(mouseDownNotes.size(), -1, extra);
+        mouseOverNotes.insertMultiple(mouseOverNotes.size(), -1, extra);
+    }
     float mousePositionVelocity = 0.0f;
     const int newNote = xyToNote (pos, mousePositionVelocity);
     const int oldNote = mouseOverNotes.getUnchecked (fingerNum);
     const int oldNoteDown = mouseDownNotes.getUnchecked (fingerNum);
-    const float eventVelocity = useMousePositionForVelocity ? mousePositionVelocity * velocity : 1.0f;
+    const float eventVelocity = useMousePositionForVelocity ? mousePositionVelocity * velocity : velocity;
 
     if (oldNote != newNote)
     {
@@ -805,14 +814,16 @@ void SurjectiveMidiKeyboardComponent::updateNoteUnderMouse (juce::Point<int> pos
             {
                 mouseDownNotes.set (fingerNum, -1);
 
-                if (! mouseDownNotes.contains (oldNoteDown))
+                if (! mouseDownNotes.contains (oldNoteDown) && !keysPressed[oldNoteDown])
                     state.noteOff (midiChannel, oldNoteDown, eventVelocity);
             }
 
-            if (newNote >= 0 && ! mouseDownNotes.contains (newNote))
+            if (newNote >= 0)
             {
-                state.noteOn (midiChannel, newNote, eventVelocity);
+                const bool alreadyOwned = mouseDownNotes.contains(newNote) || keysPressed[newNote];
                 mouseDownNotes.set (fingerNum, newNote);
+                if (!alreadyOwned)
+                    state.noteOn (midiChannel, newNote, eventVelocity);
             }
         }
     }
@@ -820,7 +831,7 @@ void SurjectiveMidiKeyboardComponent::updateNoteUnderMouse (juce::Point<int> pos
     {
         mouseDownNotes.set (fingerNum, -1);
 
-        if (! mouseDownNotes.contains (oldNoteDown))
+        if (! mouseDownNotes.contains (oldNoteDown) && !keysPressed[oldNoteDown])
             state.noteOff (midiChannel, oldNoteDown, eventVelocity);
     }
 }
@@ -890,15 +901,14 @@ void SurjectiveMidiKeyboardComponent::mouseWheelMove (const MouseEvent&, const M
 
 void SurjectiveMidiKeyboardComponent::timerCallback()
 {
-    if (shouldCheckState)
+    if (shouldCheckState.exchange(false))
     {
-        shouldCheckState = false;
-
         for (int i = rangeStart; i <= rangeEnd; ++i)
         {
-            if (keysCurrentlyDrawnDown[i] != state.isNoteOnForChannels (midiInChannelMask, i))
+            const bool isDown{state.isNoteOnForChannels(midiInChannelMask, i)};
+            if (keysCurrentlyDrawnDown[i] != isDown)
             {
-                keysCurrentlyDrawnDown.setBit (i, state.isNoteOnForChannels (midiInChannelMask, i));
+                keysCurrentlyDrawnDown.setBit (i, isDown);
                 repaintNote (i);
             }
         }
@@ -949,18 +959,20 @@ bool SurjectiveMidiKeyboardComponent::keyStateChanged (const bool /*isKeyDown*/)
                     && !keyDepressedForCurrentNote
                     && keysPressed[currentNote]) {
                 keysPressed.clearBit(currentNote);
-                state.noteOff(midiChannel, currentNote, velocity);
+                if (!mouseDownNotes.contains(currentNote))
+                    state.noteOff(midiChannel, currentNote, velocity);
                 keyPressUsed = true;
             }
             keyDepressedForCurrentNote = false;
             currentNote = proposedNote;
         }
         if (!keyDepressedForCurrentNote
-                && it->second.isCurrentlyDown()) {
+                && isKeyCurrentlyDown(it->second)) {
             keyDepressedForCurrentNote = true;
             if (!keysPressed[currentNote]) {
                 keysPressed.setBit(currentNote);
-                state.noteOn(midiChannel, currentNote, velocity);
+                if (!mouseDownNotes.contains(currentNote))
+                    state.noteOn(midiChannel, currentNote, velocity);
                 keyPressUsed = true;
             }
         }
@@ -970,7 +982,9 @@ bool SurjectiveMidiKeyboardComponent::keyStateChanged (const bool /*isKeyDown*/)
             && !keyDepressedForCurrentNote
             && keysPressed[currentNote]) {
         keysPressed.clearBit(currentNote);
-        state.noteOff(midiChannel, currentNote, velocity);
+        if (!mouseDownNotes.contains(currentNote))
+            state.noteOff(midiChannel, currentNote, velocity);
+        keyPressUsed = true;
     }
 
     return keyPressUsed;

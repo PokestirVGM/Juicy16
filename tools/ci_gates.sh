@@ -20,6 +20,7 @@ juce_prefix=${JUICE_PREFIX:-"$HOME/juicydeps"}
 build_jobs=${JUICY16_BUILD_JOBS:-8}
 gate=${1:-all}
 deps_prefix=${JUICY16_DEPS_PREFIX:-"$repo_dir/build/macos11-deps"}
+debug_ready=0
 
 cd "$repo_dir"
 
@@ -47,12 +48,14 @@ run_debug() {
   prepare_dependencies
   cmake -U '*FLUIDSYNTH*' -S . -B build-ci-debug \
     -DCMAKE_BUILD_TYPE=Debug \
+    -DBUILD_TESTING=ON \
     -DCMAKE_PREFIX_PATH="$juce_prefix;$deps_prefix" \
     -DFLUIDSYNTH_LINK_STATIC=ON \
     -DJUICYSF_COPY_PLUGIN_AFTER_BUILD=OFF \
     -DJUICYSF_WARNINGS_AS_ERRORS=ON
   cmake --build build-ci-debug --config Debug --parallel "$build_jobs"
-  ctest --test-dir build-ci-debug -C Debug --output-on-failure
+  ctest --test-dir build-ci-debug -C Debug --output-on-failure --no-tests=error
+  debug_ready=1
 }
 
 run_asan() {
@@ -62,6 +65,7 @@ run_asan() {
   # sanitized plugin bundle.
   cmake -U '*FLUIDSYNTH*' -S . -B build-ci-asan \
     -DCMAKE_BUILD_TYPE=Debug \
+    -DBUILD_TESTING=ON \
     -DCMAKE_PREFIX_PATH="$juce_prefix;$deps_prefix" \
     -DFLUIDSYNTH_LINK_STATIC=ON \
     -DJUICYSF_COPY_PLUGIN_AFTER_BUILD=OFF \
@@ -69,11 +73,45 @@ run_asan() {
     -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
     -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
   cmake --build build-ci-asan \
-    --target JuicySFFontQA JuicySFEngineMidiTests --parallel "$build_jobs"
+    --target JuicySFFontQA JuicySFEngineMidiTests JuicySFPlaybackReliabilityTests \
+      JuicySFRenderEquivalenceTests --parallel "$build_jobs"
   ASAN_OPTIONS=detect_leaks=0:abort_on_error=1 \
   UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 \
     ctest --test-dir build-ci-asan -C Debug --output-on-failure \
-      -R 'font_repair_unit|engine_midi_system_dls'
+      --no-tests=error \
+      -R '^(font_repair_unit|engine_midi_system_dls|playback_reliability|render_equivalence)$'
+}
+
+run_leak_harness() {
+  local name=$1 completion=$2
+  shift 2
+  local log="build-ci-debug/Testing/leaks-$name.log"
+  local status=0 summary
+  mkdir -p "$(dirname "$log")"
+  echo "-- $name"
+  MallocStackLogging=1 leaks -atExit -- "$@" > "$log" 2>&1 || status=$?
+  summary=$(grep -E "leaks? for [0-9]+ total leaked bytes" "$log" | tail -1 || true)
+  if [[ $status -ne 0 ]]; then
+    echo "   leaks exited with status $status; see $log" >&2
+    failed=1
+  fi
+  if [[ -z $summary ]]; then
+    echo "   leaks produced no summary; see $log" >&2
+    failed=1
+  else
+    echo "   $summary"
+    if [[ ! $summary =~ (^|[[:space:]])0\ leaks\ for\ 0\ total\ leaked\ bytes\.?$ ]]; then
+      echo "   leaked allocations remain; see $log" >&2
+      failed=1
+    fi
+  fi
+  # `leaks` reports its own result, not reliably the target's exit status. Debug
+  # CTest checks the harness exit codes first; require completion here too, so
+  # an early exit or an instrumented harness failure cannot look like success.
+  if ! grep -qE "$completion" "$log" || grep -qE '^[[:space:]]*FAIL([[:space:]]|$)' "$log"; then
+    echo "   the harness did not complete successfully; see $log" >&2
+    failed=1
+  fi
 }
 
 run_leaks() {
@@ -81,47 +119,25 @@ run_leaks() {
   # LeakSanitizer is unavailable on Darwin arm64, so the ASan gate runs with leak
   # detection off. macOS `leaks` covers that gap, and covers Core Foundation
   # objects the sanitizer would not attribute anyway.
-  if [[ ! -x build-ci-debug/JuicySFEngineMidiTests ]]; then
+  # An executable left by an earlier checkout is not evidence for this one.
+  # `all` has already built/tested Debug in this invocation, so reuse it there.
+  if [[ $debug_ready -ne 1 ]]; then
     run_debug
   fi
 
   local dls="/System/Library/Components/CoreAudio.component/Contents/Resources/gs_instruments.dls"
   local artefacts="build-ci-debug/JuicySFPlugin_artefacts/Debug"
-  local -a harnesses=(
-    "build-ci-debug/JuicySFFontQA $dls"
-    "build-ci-debug/JuicySFEngineMidiTests $dls tests/fixtures/controller_conformance.csv"
-    "build-ci-debug/JuicySFVST3Smoke $artefacts/VST3/Juicy16.vst3 $dls tests/fixtures/vst3_multichannel_programs.csv"
-    "build-ci-debug/JuicySFAUSmoke $artefacts/AU/Juicy16.component $dls"
-  )
-
   local failed=0
-  local harness name log summary
-  for harness in "${harnesses[@]}"; do
-    name=${harness%% *}
-    name=${name##*/}
-    log="build-ci-debug/Testing/leaks-$name.log"
-    mkdir -p "$(dirname "$log")"
-    echo "-- $name"
-    # `leaks` exits non-zero when it finds any, so its status cannot distinguish
-    # "leaked" from "failed to run". Read the summary line instead.
-    # shellcheck disable=SC2086
-    MallocStackLogging=1 leaks -atExit -- $harness > "$log" 2>&1 || true
-    summary=$(grep -E "leaks? for [0-9]+ total leaked bytes" "$log" | tail -1 || true)
-    if [[ -z "$summary" ]]; then
-      echo "   leaks produced no summary; see $log" >&2
-      failed=1
-      continue
-    fi
-    echo "   $summary"
-    if [[ "$summary" != *"0 leaks for 0 total leaked bytes"* ]]; then
-      echo "   leaked allocations remain; see $log" >&2
-      failed=1
-    fi
-    if grep -qE "^  FAIL" "$log"; then
-      echo "   the harness itself reported failures; see $log" >&2
-      failed=1
-    fi
-  done
+  run_leak_harness JuicySFFontQA \
+    '^== summary: [1-9][0-9]* ok \([0-9]+ auto-repaired\), 0 failed, 0 unit-test failures ==$' \
+    build-ci-debug/JuicySFFontQA "$dls"
+  run_leak_harness JuicySFEngineMidiTests '^== engine_midi_tests: 0 failures ==$' \
+    build-ci-debug/JuicySFEngineMidiTests "$dls" tests/fixtures/controller_conformance.csv
+  run_leak_harness JuicySFVST3Smoke '^== vst3_smoke: 0 failures ==$' \
+    build-ci-debug/JuicySFVST3Smoke "$artefacts/VST3/Juicy16.vst3" "$dls" \
+    tests/fixtures/vst3_multichannel_programs.csv
+  run_leak_harness JuicySFAUSmoke '^== au_smoke: 0 failures ==$' \
+    build-ci-debug/JuicySFAUSmoke "$artefacts/AU/Juicy16.component" "$dls"
 
   if [[ $failed -ne 0 ]]; then
     exit 1
@@ -148,6 +164,7 @@ run_release() {
     PKG_CONFIG_LIBDIR="$deps_prefix/lib/pkgconfig" \
   cmake -U '*FLUIDSYNTH*' -S . -B build-release \
     -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_TESTING=ON \
     -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
     -DCMAKE_OSX_ARCHITECTURES=arm64 \
     -DCMAKE_PREFIX_PATH="$juce_prefix;$deps_prefix" \
@@ -158,7 +175,7 @@ run_release() {
     -DJUICYSF_WARNINGS_AS_ERRORS=ON \
     -DJUICYSF_CODE_SIGN_IDENTITY="-"
   cmake --build build-release --config Release --parallel "$build_jobs"
-  ctest --test-dir build-release -C Release --output-on-failure
+  ctest --test-dir build-release -C Release --output-on-failure --no-tests=error
 }
 
 case "$gate" in
