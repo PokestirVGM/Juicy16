@@ -8,11 +8,12 @@ you care about and save new versions as you go.
 | | Supported |
 | --- | --- |
 | macOS beta.2 | Apple Silicon (M1 and newer), Standalone, AU and VST3; targets macOS 11 or later |
-| Windows beta.1 | 64-bit VST3; targets Windows 10 version 1607 or later |
+| Windows beta.2 | 64-bit Standalone and VST3; targets Windows 10 version 1607 or later |
 | Banks | `.dls`, `.sf2`, `.sf3` |
 
 Intel Macs, VST2, AUv3 and Linux aren't supported. Current builds have been
-tested locally on macOS 26.6.2; execution on macOS 11 remains unverified.
+tested locally on macOS 26.6.2 and Windows 11; execution on macOS 11 and clean
+Windows 10 remains unverified.
 FL Studio and Cubase are the main test hosts, but the latest changes still
 need their playback and save/reopen checks. Other hosts are untested.
 
@@ -54,16 +55,17 @@ rescan. If it still fails after that, please report it.
 
 ## Installing on Windows
 
-For Windows beta.1, run its Setup EXE or unzip the portable
+For Windows beta.2, run its Setup EXE or unzip the portable
 package and copy the complete `VST3\Juicy16.vst3` bundle into
 `C:\Program Files\Common Files\VST3`, then rescan in your DAW.
 `INSTALL-WINDOWS.txt` in the package has the details. The installer and binaries
-are unsigned. The optional Standalone app is for development/QA.
+are unsigned. Setup offers the Standalone MIDI player; portable users can run
+`Standalone\Juicy16.exe` directly.
 
-Windows remains at 1.0.0-beta.1. The [recorded Windows checks](WINDOWS_RELEASE.md)
-cover its local builds, packaging and an installed VST3 on Windows 11. The
-beta.2 changes need a Windows rebuild; itemized Windows DAW checks and clean
-Windows 10 testing remain pending.
+The [recorded Windows checks](WINDOWS_RELEASE.md) cover beta.2 local builds,
+synthetic playback, packages and isolated installer tests. Native screen readers,
+input/dialog/scaling, itemized Windows DAW checks and clean Windows 10 testing
+remain pending.
 
 ## Using it
 
@@ -71,7 +73,7 @@ The window is a 16-channel rack: each row is one MIDI channel with mute, solo,
 instrument, volume, pan and trim. The right panel has the master trim, reverb,
 chorus and the loaded bank. Click the Juicy16 logo for settings.
 
-The macOS beta.2 Standalone app has a MIDI file player with seek, current BPM,
+The beta.2 Standalone app has a MIDI file player with seek, current BPM,
 speed and A/B looping; see [standalone playback](STANDALONE.md). AU and VST3
 continue to receive MIDI from your DAW.
 
@@ -104,8 +106,9 @@ speed and whole-song/section loops. Quit and reopen the app: the bank can be
 restored, while the MIDI file and transport settings are cleared.
 
 Keyboard control works too: Tab moves around, arrows pick a channel and Return
-opens its instrument list. In Standalone, Space controls playback; in plugins,
-Space toggles a focused mute or solo control when the host delivers it.
+opens its instrument list or activates a focused button. In Standalone, Space
+controls playback outside text editing and settings. Plugins rely on the host
+delivering keyboard input.
 
 ## Uninstalling
 

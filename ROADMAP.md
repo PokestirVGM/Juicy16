@@ -1,19 +1,21 @@
 # Roadmap
 
-## Now: 1.0.0-beta.2 on macOS
+## Now: 1.0.0-beta.2
 
-This macOS beta adds a Standalone MIDI player alongside AU and VST3. Load a
+This beta adds a Standalone MIDI player alongside macOS AU/VST3 and Windows VST3. Load a
 bank and MIDI together, seek through the song, see its current BPM and repeat
 the whole song or a section. It also includes the recall, playback, leak and
 performance fixes described in the [changelog](CHANGELOG.md).
 
-Windows remains on 1.0.0-beta.1 while these changes are rebuilt and tested.
+Windows Debug/Release, synthetic playback, packages and isolated installer
+checks pass. The Windows follow-up includes keyboard-focus fixes that still
+need rebuilding and checking on macOS.
 
 ## Next
 
-- Rebuild the latest fixes on Windows and complete host testing. The
-  [Windows evidence](docs/WINDOWS_RELEASE.md) records local 1.0.0-beta.1
-  build, package and installed-plugin checks; itemized DAW and clean Windows 10
+- Complete native accessibility, input/dialog, text/DPI and host testing. The
+  [Windows evidence](docs/WINDOWS_RELEASE.md) records beta.2 native
+  build, package and installer checks; itemized DAW and clean Windows 10
   checks remain pending.
 - Test in FL Studio and Cubase, and compare side by side with Fruity LSD
 - Cut repeated same-key notes the way LSD does

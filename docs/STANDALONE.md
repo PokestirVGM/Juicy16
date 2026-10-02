@@ -1,10 +1,10 @@
 # Standalone MIDI playback
 
-The macOS 1.0.0-beta.2 package includes a Standalone app that plays MIDI files
-through the same sixteen-channel rack as the plugins. The macOS installer puts
-it at `~/Applications/Juicy16.app`; see the [tester guide](BETA_TESTER_GUIDE.md)
-for installation and quarantine handling. The Windows beta.1 Standalone remains
-a development/QA build and does not include this player.
+The macOS and Windows 1.0.0-beta.2 packages include a Standalone app that plays
+MIDI files through the same sixteen-channel rack as the plugins. The macOS
+installer puts it at `~/Applications/Juicy16.app`; the Windows portable app is
+`Standalone/Juicy16.exe`, and Setup offers to install it. See the
+[tester guide](BETA_TESTER_GUIDE.md) for installation and quarantine handling.
 
 1. Click the folder in the header. Select one `.dls`, `.sf2`, or `.sf3` bank
    and one `.mid` / `.midi` file together, or select either file on its own.

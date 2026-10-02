@@ -11,7 +11,8 @@ PORTABLE ZIP
 Extract the entire ZIP first. To use the plugin, copy the entire Juicy16.vst3
 folder from VST3 into your DAW's VST3 directory. Keep the Contents folder and
 all files together; the inner .vst3 file alone is not the complete plugin.
-Standalone\Juicy16.exe runs without installation for auditioning your banks.
+Standalone\Juicy16.exe runs without installation. Select a bank and MIDI file
+together from the header folder to play, seek, change speed and loop a section.
 Its audio/MIDI device preferences may be saved in your Windows user profile.
 
 LOAD A BANK
