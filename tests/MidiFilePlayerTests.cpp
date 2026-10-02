@@ -5,6 +5,7 @@
 #include "FilePicker.h"
 #include "SyntheticSf2.h"
 #include "SyntheticDls.h"
+#include "SyntheticFixtures.h"
 #include <atomic>
 #include <cmath>
 #include <cstdio>
@@ -768,6 +769,7 @@ void multiFileChooserTests(const juce::File& firstBank) {
         && near(pathOnly.getMidiFilePlayer().getStatus().positionSeconds, pathOnlyBefore.positionSeconds)
         && pathOnly.getMidiFilePlayer().getStatus().playing,
         "failed combined bank import with an empty prior bookmark retains the playing bank/MIDI pair");
+    check(corruptBank.deleteTemporaryFile(), "failed bank import releases the rejected file while the previous pair stays loaded");
     auto* folder = dynamic_cast<juce::Button*>(namedChild(*editor, "Load sound bank and MIDI files"));
     check(folder != nullptr && static_cast<bool>(folder->onClick), "standalone folder button has the combined chooser callback");
     if (auto* theme = dynamic_cast<Juicy16::PluginLookAndFeel*>(&editor->getLookAndFeel())) {
@@ -798,6 +800,16 @@ void multiFileChooserTests(const juce::File& firstBank) {
         check(!pluginPicker->loadSelectedFiles({firstBank, firstMidi.file()}, error) && error.isNotEmpty()
             && selectedBankPath(plugin) == secondBank.getFile().getFullPathName(),
             "AU/VST3 chooser rejects mixed bank/MIDI selections before replacing the bank");
+    }
+    pathOnlyEditor.reset();
+    pathOnlyInstance.reset();
+    editor.reset();
+    instance.reset();
+    for (const auto* temporary : {&secondBank, &unsupported, &corruptMidi, &corruptBank}) {
+        if (!temporary->deleteTemporaryFile()) {
+            std::fprintf(stderr, "Chooser fixture remains open: %s\n", temporary->getFile().getFullPathName().toRawUTF8());
+            check(false, "chooser teardown releases its generated fixture files");
+        }
     }
 }
 void loopUiTests(const juce::File& bank) {
@@ -991,10 +1003,154 @@ void isolationAndUiTests(const juce::File& bank, const char* pngPath, const char
     check(editor->getLocalBounds() == savedSize,
         "reopening the standalone editor does not add transport height a second time");
 }
+void keyboardFocusTests(const juce::File& bank) {
+    auto instance = makeProcessor();
+    loadBank(*instance, bank);
+    juce::MidiMessageSequence notes;
+    add(notes, juce::MidiMessage::noteOn(1, 60, static_cast<juce::uint8>(100)), 0);
+    end(notes, 19200);
+    MidiFixture midi{{notes}, 0};
+    import(instance->getMidiFilePlayer(), midi.file());
+    std::unique_ptr<juce::AudioProcessorEditor> editor{instance->createEditor()};
+    auto* mode = dynamic_cast<juce::ComboBox*>(namedChild(*editor, "MIDI loop mode"));
+    if (mode != nullptr) mode->setSelectedId(2, juce::sendNotificationSync);
+    editor->setAlpha(0.0f);
+    editor->addToDesktop(juce::ComponentPeer::windowIsTemporary);
+    editor->setVisible(true);
+    for (const auto* name : {"Load sound bank and MIDI files", "Set loop start", "Set loop end"}) {
+        auto* control = namedChild(*editor, name);
+        check(control != nullptr && control->getWantsKeyboardFocus(), "custom controls are reachable by keyboard");
+        if (control == nullptr) continue;
+        control->grabKeyboardFocus();
+        check(control->hasKeyboardFocus(false), "custom control receives keyboard focus");
+        Juicy16::setFocusRingsVisible(false);
+        const auto mouse = control->createComponentSnapshot(control->getLocalBounds());
+        Juicy16::setFocusRingsVisible(true);
+        const auto keyboard = control->createComponentSnapshot(control->getLocalBounds());
+        bool different{false};
+        for (int y = 0; y < mouse.getHeight(); ++y)
+            for (int x = 0; x < mouse.getWidth(); ++x)
+                different = different || mouse.getPixelAt(x, y) != keyboard.getPixelAt(x, y);
+        check(different, "focused folder and loop time fields show a visible keyboard focus indicator");
+        editor->createComponentSnapshot(editor->getLocalBounds());
+        check(control->hasKeyboardFocus(false), "first editor painting preserves the focused child control");
+    }
+    auto* speed = namedChild(*editor, "MIDI playback speed");
+    check(speed != nullptr, "playback speed is available for keyboard interaction");
+    if (speed != nullptr) {
+        speed->grabKeyboardFocus();
+        Juicy16::setFocusRingsVisible(false);
+        editor->getPeer()->handleKeyPress(juce::KeyPress{juce::KeyPress::rightKey});
+        check(Juicy16::focusRingsVisible(), "arrow-key interaction restores focus rings after mouse use");
+    }
+    editor->setVisible(false);
+    editor->removeFromDesktop();
+    Juicy16::setFocusRingsVisible(false);
+}
+void uiAuditSnapshots(const juce::File& bank, const juce::File& directory) {
+    check(directory.createDirectory().wasOk(), "UI audit output directory created");
+    auto instance = makeProcessor();
+    auto& processor = *instance;
+    processor.setRateAndBufferSizeDetails(rate, 1024);
+    processor.prepareToPlay(rate, 1024);
+    std::unique_ptr<juce::AudioProcessorEditor> editor{processor.createEditor()};
+    auto* component = dynamic_cast<MidiPlayerComponent*>(namedChild(*editor, "MIDI file player"));
+    if (component == nullptr) return;
+    const auto capture = [&](const juce::String& state, bool wide = false) {
+        processor.getFluidSynthModel().handleUpdateNowIfNeeded();
+        const auto flush = [](auto&& self, juce::Component& child) -> void {
+            if (auto* updater = dynamic_cast<juce::AsyncUpdater*>(&child)) updater->handleUpdateNowIfNeeded();
+            for (auto* nested : child.getChildren()) self(self, *nested);
+        };
+        flush(flush, *editor);
+        juce::Thread::sleep(60);
+        juce::Timer::callPendingTimersSynchronously();
+        editor->setBoundsConstrained({0, 0, GuiConstants::minWidth + (wide ? 180 : 0),
+            GuiConstants::minHeight + MidiPlayerComponent::preferredHeight});
+        for (int scale : {1, 2}) {
+            const auto image = editor->createComponentSnapshot(editor->getLocalBounds(), true, static_cast<float>(scale));
+            juce::MemoryOutputStream out;
+            juce::PNGImageFormat png;
+            check(image.isValid() && image.getWidth() == editor->getWidth() * scale
+                && png.writeImageToStream(image, out)
+                && directory.getChildFile(state + "-" + juce::String(scale) + "x.png")
+                    .replaceWithData(out.getData(), out.getDataSize()), "UI state renders at 1x and 2x");
+        }
+    };
+    capture("empty");
+    juce::MidiMessageSequence notes;
+    for (int channel = 1; channel <= 16; ++channel) {
+        add(notes, juce::MidiMessage::programChange(channel, channel % 2), 0);
+        add(notes, juce::MidiMessage::noteOn(channel, 60, static_cast<juce::uint8>(100)), 0);
+        add(notes, juce::MidiMessage::noteOff(channel, 60), 960);
+    }
+    end(notes, 19200);
+    MidiFixture midi{{notes}, 0};
+    import(processor.getMidiFilePlayer(), midi.file());
+    component->showLoadResult({});
+    auto* play = namedChild(*editor, "Play or pause MIDI file");
+    check(play != nullptr && !play->isEnabled(), "MIDI-only UI explains the missing bank and disables playback");
+    capture("midi-only");
+    loadBank(processor, bank);
+    component->showLoadResult({});
+    check(play != nullptr && play->isEnabled(), "ready UI enables playback after the bank loads");
+    capture("ready");
+    capture("ready-wide", true);
+    auto& transport = processor.getMidiFilePlayer();
+    transport.play();
+    juce::AudioBuffer<float> audio{2, 1024};
+    render(processor, audio);
+    component->showLoadResult({});
+    capture("playing");
+    transport.pause();
+    component->showLoadResult({});
+    capture("paused");
+    transport.stop();
+    component->showLoadResult({});
+    capture("stopped");
+    transport.seek(transport.getStatus().durationSeconds);
+    component->showLoadResult({});
+    capture("song-end");
+    transport.setLoopRange(4.0, 14.0);
+    transport.setLooping(true);
+    transport.seek(6.0);
+    transport.setSpeed(1.25);
+    component->showLoadResult({});
+    capture("section");
+    capture("section-wide", true);
+    component->showLoadResult("Choose one MIDI file at a time, optionally with one sound bank.");
+    capture("load-error");
+    component->showLoadResult({});
+    for (const auto* effect : {"Show reverb controls", "Show chorus controls"}) {
+        if (auto* tab = dynamic_cast<juce::Button*>(namedChild(*editor, effect)); tab != nullptr && tab->onClick)
+            tab->onClick();
+        const bool chorus = juce::String{effect}.contains("chorus");
+        auto* toggle = dynamic_cast<juce::Button*>(namedChild(*editor, chorus ? "Chorus enabled" : "Reverb enabled"));
+        if (toggle != nullptr) toggle->setToggleState(false, juce::sendNotificationSync);
+        capture(chorus ? "chorus-off" : "reverb-off");
+        if (toggle != nullptr) toggle->setToggleState(true, juce::sendNotificationSync);
+        capture(chorus ? "chorus-on" : "reverb-on");
+    }
+    if (auto* settings = dynamic_cast<juce::Button*>(namedChild(*editor, "Settings")); settings != nullptr && settings->onClick)
+        settings->onClick();
+    capture("settings");
+    auto* accentBox = dynamic_cast<juce::ComboBox*>(namedChild(*editor, "Accent colour"));
+    check(accentBox != nullptr, "settings accent selector is available");
+    if (accentBox != nullptr) {
+        int choice{1};
+        for (const auto accent : Juicy16::allAccents()) {
+            accentBox->setSelectedId(choice++, juce::sendNotificationSync);
+            capture("settings-" + Juicy16::accentName(accent));
+        }
+    }
+}
 }
 
 int main(int argc, char** argv) {
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
     juce::ScopedJuceInitialiser_GUI juce;
+    if (argc == 3 && juce::String{argv[1]} == "--write-fixtures")
+        return SyntheticFixtures::write(juce::File{argv[2]}) ? 0 : 1;
     AssertionLogger logger;
     juce::Logger::setCurrentLogger(&logger);
     juce::TemporaryFile bank{".sf2"};
@@ -1018,7 +1174,10 @@ int main(int argc, char** argv) {
     dlsTests();
     loopUiTests(bank.getFile());
     multiFileChooserTests(bank.getFile());
-    isolationAndUiTests(bank.getFile(), argc > 1 ? argv[1] : nullptr, argc > 2 ? argv[2] : nullptr);
+    keyboardFocusTests(bank.getFile());
+    const bool audit = argc == 3 && juce::String{argv[1]} == "--ui-audit";
+    isolationAndUiTests(bank.getFile(), !audit && argc > 1 ? argv[1] : nullptr, !audit && argc > 2 ? argv[2] : nullptr);
+    if (audit) uiAuditSnapshots(bank.getFile(), juce::File{argv[2]});
     check(logger.assertions.load() == 0, "MIDI playback, transport, editor construction, and painting produce zero JUCE assertions");
     juce::Logger::setCurrentLogger(nullptr);
     return failures == 0 ? 0 : 1;

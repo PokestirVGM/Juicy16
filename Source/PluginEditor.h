@@ -112,8 +112,8 @@ private:
     void applyAccentFromState();
     bool handleTransportKey(const KeyPress&, juce::Component* origin);
     bool keyPressed(const KeyPress&, juce::Component* origin) override;
-    bool keyStateChanged(bool, juce::Component*) override { return false; }
-    void registerTransportKeys(juce::Component&, bool add);
+    bool keyStateChanged(bool, juce::Component*) override;
+    void registerEditorKeys(juce::Component&, bool add);
 
     JuicySFAudioProcessor& audioProcessor;
     AudioProcessorValueTreeState& valueTreeState;

@@ -56,12 +56,12 @@ inline juce::MemoryBlock wsmp(int frames)
 }
 
 // Static pan (tenths of a percent) plus the bank's own CC10 -> pan depth.
-inline juce::MemoryBlock region(int staticPan, int cc10Depth, int frames)
+inline juce::MemoryBlock region(int staticPan, int cc10Depth, int frames, int waveIndex = 0)
 {
     juce::MemoryOutputStream rgnh;
     u16(rgnh, 0); u16(rgnh, 127); u16(rgnh, 0); u16(rgnh, 127); u16(rgnh, 0); u16(rgnh, 0);
     juce::MemoryOutputStream wlnk;
-    u16(wlnk, 0); u16(wlnk, 0); u32(wlnk, 1); u32(wlnk, 0);
+    u16(wlnk, 0); u16(wlnk, 0); u32(wlnk, 1); u32(wlnk, waveIndex);
     juce::MemoryOutputStream art;
     u32(art, 8); u32(art, 2);
     u16(art, 0x0000); u16(art, 0x0000); u16(art, 0x0004); u16(art, 0x0000);
@@ -78,9 +78,45 @@ inline juce::MemoryBlock region(int staticPan, int cc10Depth, int frames)
 constexpr int sampleRate{44100};
 
 // Stereo-pair instrument at bank 0, program 0: a 441 Hz sine in both regions.
-inline juce::MemoryBlock buildStereoPair(int cc10Depth = 254)
+inline juce::MemoryBlock build(int cc10Depth, bool generalMidi)
 {
     using namespace detail;
+    if (generalMidi) {
+        constexpr int rate{22050}, frames{11025};
+        juce::MemoryOutputStream waves, offsets, instruments;
+        for (int program = 0; program < 128; ++program) {
+            u32(offsets, static_cast<std::int64_t>(waves.getDataSize()));
+            juce::MemoryOutputStream pcm, fmt;
+            const int frequency{220 + 4 * program};
+            // A band-limited high harmonic makes interpolation differences
+            // measurable; each program retains its own fundamental pitch.
+            const int harmonic{static_cast<int>(rate * 0.45 / frequency)};
+            for (int i = 0; i < frames; ++i) {
+                const double phase = 2.0 * juce::MathConstants<double>::pi * frequency * i / rate;
+                pcm.writeShort(static_cast<short>(std::lround(14000.0 * (std::sin(phase) + 0.35 * std::sin(harmonic * phase)))));
+            }
+            u16(fmt, 1); u16(fmt, 1); u32(fmt, rate); u32(fmt, rate * 2); u16(fmt, 2); u16(fmt, 16);
+            const auto wave = list("wave", join({chunk("fmt ", fmt.getMemoryBlock()), wsmp(frames),
+                                                chunk("data", pcm.getMemoryBlock())}));
+            waves.write(wave.getData(), wave.getSize());
+        }
+        // Bank 1 and every drum program are present for the host reset fixtures.
+        for (int bank : {0, 1, 128})
+            for (int program = 0; program < 128; ++program) {
+                juce::MemoryOutputStream insh, name;
+                u32(insh, 1); u32(insh, bank == 128 ? 0x80000000LL : bank << 8); u32(insh, program);
+                name.writeString("Synthetic " + juce::String(bank) + "/" + juce::String(program));
+                const auto instrument = list("ins ", join({chunk("insh", insh.getMemoryBlock()),
+                    list("INFO", chunk("INAM", name.getMemoryBlock())),
+                    list("lrgn", region(0, cc10Depth, frames, program))}));
+                instruments.write(instrument.getData(), instrument.getSize());
+            }
+        juce::MemoryOutputStream colh, ptbl;
+        u32(colh, 384);
+        u32(ptbl, 8); u32(ptbl, 128); ptbl.write(offsets.getData(), offsets.getDataSize());
+        return list("DLS ", join({chunk("colh", colh.getMemoryBlock()), list("lins", instruments.getMemoryBlock()),
+            chunk("ptbl", ptbl.getMemoryBlock()), list("wvpl", waves.getMemoryBlock())}), "RIFF");
+    }
     constexpr int frames{100};
     juce::MemoryOutputStream pcm;
     for (int i = 0; i < frames; ++i)
@@ -91,17 +127,22 @@ inline juce::MemoryBlock buildStereoPair(int cc10Depth = 254)
     const auto wave{list("wave", join({chunk("fmt ", fmt.getMemoryBlock()), wsmp(frames),
                                        chunk("data", pcm.getMemoryBlock())}))};
 
+    juce::MemoryOutputStream instruments;
     juce::MemoryOutputStream insh;
     u32(insh, 2); u32(insh, 0); u32(insh, 0);
     const auto instrument{list("ins ", join({chunk("insh", insh.getMemoryBlock()),
         list("lrgn", join({region(-500, cc10Depth, frames), region(500, cc10Depth, frames)}))}))};
+    instruments.write(instrument.getData(), instrument.getSize());
 
     juce::MemoryOutputStream colh, ptbl;
     u32(colh, 1);
     u32(ptbl, 8); u32(ptbl, 1); u32(ptbl, 0);
-    return list("DLS ", join({chunk("colh", colh.getMemoryBlock()), list("lins", instrument),
+    return list("DLS ", join({chunk("colh", colh.getMemoryBlock()), list("lins", instruments.getMemoryBlock()),
                               chunk("ptbl", ptbl.getMemoryBlock()), list("wvpl", wave)}),
                 "RIFF");
 }
+
+inline juce::MemoryBlock buildStereoPair(int cc10Depth = 254) { return build(cc10Depth, false); }
+inline juce::MemoryBlock buildGeneralMidi() { return build(254, true); }
 
 } // namespace SyntheticDls

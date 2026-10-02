@@ -45,6 +45,10 @@ void FolderIconButton::paintButton(Graphics& g, bool isMouseOverButton, bool isB
     g.strokePath(folder, juce::PathStrokeType{2.0f * scale,
                                               juce::PathStrokeType::curved,
                                               juce::PathStrokeType::rounded});
+    if (hasKeyboardFocus(false) && Juicy16::focusRingsVisible()) {
+        g.setColour(findColour(Juicy16::focusRingColourId));
+        g.drawRoundedRectangle(bounds.reduced(0.5f), GuiConstants::cornerRadius, 1.0f);
+    }
 }
 
 FilePicker::FilePicker(

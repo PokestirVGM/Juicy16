@@ -36,6 +36,14 @@ bool MidiPlayerComponent::TimeField::keyPressed(const juce::KeyPress& key) {
     return juce::Label::keyPressed(key);
 }
 
+void MidiPlayerComponent::TimeField::paint(juce::Graphics& g) {
+    juce::Label::paint(g);
+    if (!isBeingEdited() && hasKeyboardFocus(false) && Juicy16::focusRingsVisible()) {
+        g.setColour(findColour(Juicy16::focusRingColourId));
+        g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(0.5f), GuiConstants::cornerRadius, 1.0f);
+    }
+}
+
 std::unique_ptr<juce::AccessibilityHandler> MidiPlayerComponent::TimeField::createAccessibilityHandler() {
     class ValueInterface final : public juce::AccessibilityTextValueInterface {
     public:

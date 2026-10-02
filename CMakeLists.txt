@@ -72,11 +72,13 @@ set(JUICYSF_SF3_FIXTURE "" CACHE FILEPATH
 set(JUICYSF_CODE_SIGN_IDENTITY "-" CACHE STRING
     "macOS code-sign identity used after bundle resources and VST3 metadata are finalized; empty disables signing")
 set(JUICYSF_MACOS_SYSTEM_DLS
-    "/System/Library/Components/CoreAudio.component/Contents/Resources/gs_instruments.dls")
+    "/System/Library/Components/CoreAudio.component/Contents/Resources/gs_instruments.dls"
+    CACHE FILEPATH "DLS test input; defaults to the system bank, may be a generated synthetic bank")
 # Windows ships the Microsoft GS Wavetable DLS bank in the same spirit: a real
 # DLS a clean checkout can parse without adding a copyrighted fixture to the
 # repository. It is read in place and never copied or packaged.
-set(JUICYSF_WINDOWS_SYSTEM_DLS "C:/Windows/System32/drivers/gm.dls")
+set(JUICYSF_WINDOWS_SYSTEM_DLS "C:/Windows/System32/drivers/gm.dls"
+    CACHE FILEPATH "DLS test input; defaults to the system bank, may be a generated synthetic bank")
 if (APPLE)
   set(JUICYSF_SYSTEM_DLS "${JUICYSF_MACOS_SYSTEM_DLS}")
 elseif (WIN32)

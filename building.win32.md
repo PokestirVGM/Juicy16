@@ -49,8 +49,8 @@ codec dependencies and their required definitions, including `FLAC__NO_DLL`.
 
 JUCE 8.0.14, FluidSynth 2.5.7, libsndfile 1.2.2 with the reviewed IRCAM patch,
 FLAC 1.5.0, Ogg 1.3.6, Vorbis 1.3.7, Opus 1.6.1, and the pinned GCEM commit.
-The FluidSynth CC1 and full-range DLS pan patches and JUCE multitimbral wrapper
-are shared with macOS. Rebuild the dependency prefix for 1.0.0-beta.1.
+The FluidSynth CC1, full-range DLS pan and timer-thread patches and JUCE multitimbral wrapper
+are shared with macOS. Rebuild the dependency prefix for 1.0.0-beta.2.
 All dependency tarballs are SHA-256 checked. `.gitattributes` preserves the
 reviewed vendored bytes on Windows checkouts. Python extracts Unicode archive
 names without depending on the Windows system locale.
@@ -59,6 +59,13 @@ FluidSynth uses `osal=cpp11`, native DLS enabled, libinstpatch disabled, and
 unused audio/MIDI/network drivers disabled. The tests load Windows' own
 `C:/Windows/System32/drivers/gm.dls` in place and upstream regression SF2/SF3/DLS
 fixtures. Neither the system bank nor the local corpus goes into binary packages.
+
+For synthetic-only validation, the built player harness can generate SF2/DLS/SF3
+tones with `--write-fixtures`. Pass their directory as `-FontCorpus`, the SF3 as
+`-Sf3Fixture`, and the DLS as `-DlsFixture` to `verify_windows.ps1`. Packaging
+then uses the DLS recorded in that build's CMake cache; installer checks accept
+the same `-DlsFixture`. See the [current audit](docs/audits/2026-10-02/README.md)
+for the exact commands. Default inputs remain available for ordinary validation.
 
 ## Package
 
@@ -104,8 +111,8 @@ reviewed patches. An installed compiler, Windows SDK, CMake, Python and
 PowerShell are still required. Replacing a library with a modified version for
 relinking requires intentionally updating its source/hash checks.
 
-The [September 27 evidence](docs/WINDOWS_RELEASE.md) covers fresh 1.0.0-beta.1
-builds, package checks and owner approval. Clean minimum-OS installation
+The [Windows evidence](docs/WINDOWS_RELEASE.md) records current beta.2 build
+checks separately from beta.1 owner testing. Clean minimum-OS installation
 remains unverified. Debug timing is diagnostic; Release enforces speed limits.
 
 ## Legacy cross-build

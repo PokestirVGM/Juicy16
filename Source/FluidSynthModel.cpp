@@ -1399,6 +1399,22 @@ bool FluidSynthModel::unloadAndLoadFont(const String& absPath) {
         return false;
     }
 
+    // Reject an incomplete or unrelated file before either backend loader opens
+    // it. In particular, a rejected short bank must remain replaceable on Windows.
+    bool recognisedHeader{false};
+    {
+        juce::FileInputStream input{requested};
+        char header[12]{};
+        recognisedHeader = !input.failedToOpen() && input.read(header, sizeof(header)) == sizeof(header)
+            && std::memcmp(header, "RIFF", 4) == 0
+            && (std::memcmp(header + 8, "sfbk", 4) == 0 || std::memcmp(header + 8, "DLS ", 4) == 0);
+    }
+    if (!recognisedHeader) {
+        publishFontLoadResult(false, absPath,
+            "This file is not a readable SF2, SF3, or DLS bank. Choose a supported bank or re-export it.", false);
+        return false;
+    }
+
     String pathToLoad{absPath};
     // Repair into a temp candidate; the model owns it only once FluidSynth accepts it.
     juce::File repaired{writeRepairedTempCopy(requested)};

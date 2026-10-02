@@ -8,7 +8,10 @@ param(
     [switch] $SkipDependencies,
     [switch] $SkipJuce,
     [ValidateSet('Release','Debug')][string] $Configuration = 'Release',
-    [string] $SourceArchiveDir = ''
+    [string] $SourceArchiveDir = '',
+    [string] $FontCorpus = '',
+    [string] $Sf3Fixture = '',
+    [string] $DlsFixture = 'C:/Windows/System32/drivers/gm.dls'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -18,6 +21,8 @@ $repoRoot = [IO.Path]::GetFullPath("$PSScriptRoot/..")
 $DepsPrefix = [IO.Path]::GetFullPath($DepsPrefix)
 $JucePrefix = [IO.Path]::GetFullPath($JucePrefix)
 $BuildDir = [IO.Path]::GetFullPath($BuildDir)
+if (-not $FontCorpus) { $FontCorpus = "$DepsPrefix/share/juicy16-test-fixtures" }
+if (-not $Sf3Fixture) { $Sf3Fixture = "$DepsPrefix/share/juicy16-test-fixtures/VintageDreamsWaves-v2.sf3" }
 New-Item -ItemType Directory -Path $BuildDir -Force | Out-Null
 Start-Transcript -Path "$BuildDir/verification-$Configuration.txt" -Force
 try {
@@ -37,8 +42,9 @@ try {
         "-DCMAKE_PREFIX_PATH=$DepsPrefix;$JucePrefix" -DFLUIDSYNTH_LINK_STATIC=ON `
         -DBUILD_TESTING=ON `
         -DJUICYSF_RELEASE_VALIDATION=ON -DJUICYSF_COPY_PLUGIN_AFTER_BUILD=OFF `
-        "-DJUICYSF_FONT_CORPUS=$DepsPrefix/share/juicy16-test-fixtures" `
-        "-DJUICYSF_SF3_FIXTURE=$DepsPrefix/share/juicy16-test-fixtures/VintageDreamsWaves-v2.sf3" `
+        "-DJUICYSF_FONT_CORPUS=$FontCorpus" `
+        "-DJUICYSF_SF3_FIXTURE=$Sf3Fixture" `
+        "-DJUICYSF_WINDOWS_SYSTEM_DLS=$DlsFixture" `
         -DJUICYSF_WARNINGS_AS_ERRORS=ON
     Assert-NativeSuccess 'Configure'
     cmake --build $BuildDir --config $Configuration --parallel $BuildJobs

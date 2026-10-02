@@ -28,6 +28,7 @@ private:
     class TimeField final : public juce::Label {
     public:
         TimeField(MidiPlayerComponent&, bool isStart);
+        void paint(juce::Graphics&) override;
         void mouseDown(const juce::MouseEvent&) override;
         bool keyPressed(const juce::KeyPress&) override;
         std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override;

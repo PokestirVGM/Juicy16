@@ -2,7 +2,8 @@
 param([Parameter(Mandatory)][string] $Installer,
       [Parameter(Mandatory)][string] $PortableDir,
       [string] $BuildDir = "$PSScriptRoot/../build-win",
-      [string] $TestDirectory = '')
+      [string] $TestDirectory = '',
+      [string] $DlsFixture = 'C:/Windows/System32/drivers/gm.dls')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 . "$PSScriptRoot/../tools/windows_common.ps1"
@@ -30,7 +31,7 @@ foreach ($pass in 1,2) {
     }
 }
 & "$BuildDir/Release/JuicySFVST3Smoke.exe" "$plugins/Juicy16.vst3" `
-    'C:/Windows/System32/drivers/gm.dls' "$PSScriptRoot/fixtures/vst3_multichannel_programs.csv"
+    $DlsFixture "$PSScriptRoot/fixtures/vst3_multichannel_programs.csv"
 Assert-NativeSuccess 'Installed VST3 smoke test'
 'user-owned file' | Set-Content -LiteralPath "$app/preserve-me.txt"
 $uninstaller = Join-Path $app 'unins000.exe'

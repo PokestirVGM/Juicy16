@@ -3207,6 +3207,9 @@ int main(int argc, char** argv)
             const auto noInterpolation{renderChoice(2, false)};
             const auto noneAfterReset{renderChoice(2, true)};
             const double controlDb{choiceDifferenceDb(seventh, seventhRepeat)};
+            std::printf("    interpolation difference dB: repeat %.2f, seventh/linear %.2f, linear/none %.2f, seventh/none %.2f\n",
+                controlDb, choiceDifferenceDb(seventh, linear),
+                choiceDifferenceDb(linear, noInterpolation), choiceDifferenceDb(seventh, noInterpolation));
             check(magnitude(linear, 0, choiceFrames) > audiblePresence
                       && choiceDifferenceDb(seventh, linear) > controlDb + 6.0
                       && choiceDifferenceDb(linear, noInterpolation) > controlDb + 6.0

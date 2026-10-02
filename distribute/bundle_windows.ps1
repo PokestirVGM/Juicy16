@@ -26,6 +26,10 @@ if ($dirty) {
     $name += '-LOCAL-DIRTY'
 }
 $cache = Get-Content -LiteralPath "$BuildDir/CMakeCache.txt" -Raw
+$dlsInput = [regex]::Match($cache, '(?m)^JUICYSF_WINDOWS_SYSTEM_DLS:FILEPATH=([^\r\n]+)').Groups[1].Value
+if (-not $dlsInput -or -not (Test-Path -LiteralPath $dlsInput -PathType Leaf)) {
+    throw 'Packaging requires the exact DLS input recorded by the tested build.'
+}
 if ($cache -notmatch 'JUICYSF_RELEASE_VALIDATION:BOOL=ON') { throw 'Packaging requires a strict release build.' }
 $pinnedLabel = [regex]::Match($cache, '(?m)^JUICYSF_PRERELEASE_LABEL:[^=]+=([^\r\n]*)')
 if ($pinnedLabel.Success -and $pinnedLabel.Groups[1].Value -ne $label) {
@@ -60,6 +64,6 @@ foreach ($line in Get-Content -LiteralPath "$extracted/SHA256SUMS") {
 }
 & "$repo/tests/WindowsArtifactTests.ps1" -ArtifactsDir $extracted
 & "$BuildDir/Release/JuicySFVST3Smoke.exe" "$extracted/VST3/Juicy16.vst3" `
-    'C:/Windows/System32/drivers/gm.dls' "$repo/tests/fixtures/vst3_multichannel_programs.csv"
+    $dlsInput "$repo/tests/fixtures/vst3_multichannel_programs.csv"
 Assert-NativeSuccess 'Extracted portable plugin smoke test'
 Write-Output "Created and verified: $name (portable, installer, source, SHA-256 sidecars)"

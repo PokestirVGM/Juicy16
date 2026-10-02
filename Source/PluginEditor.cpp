@@ -539,8 +539,7 @@ JuicySFAudioProcessorEditor::JuicySFAudioProcessorEditor(
     valueTreeState.state.addListener(this);
     syncKeyboardChannel();
     syncStatusLabel();
-    if (midiPlayer != nullptr)
-        registerTransportKeys(*this, true);
+    registerEditorKeys(*this, true);
 }
 
 void JuicySFAudioProcessorEditor::applyAccentFromState() {
@@ -554,6 +553,8 @@ void JuicySFAudioProcessorEditor::applyAccentFromState() {
     // Controls cache colours; update the complete tree, including the open
     // settings CallOutBox parented to this editor.
     sendLookAndFeelChange();
+    // FilenameComponent recreates its folder button on a palette refresh.
+    registerEditorKeys(*this, true);
     if (auto* top = getTopLevelComponent(); top != nullptr && top != this)
         top->repaint();
 }
@@ -584,6 +585,7 @@ void JuicySFAudioProcessorEditor::showSettings() {
     settingsContent = std::move(panel);
     settingsCallout = std::make_unique<juce::CallOutBox>(
         *settingsContent, getLocalArea(&logoButton, logoButton.getLocalBounds()), this);
+    registerEditorKeys(*settingsCallout, true);
     settingsCallout->enterModalState(isShowing());
 }
 
@@ -650,8 +652,7 @@ JuicySFAudioProcessorEditor::~JuicySFAudioProcessorEditor()
     // Settings listeners and attachments must die before the processor.
     settingsCallout.reset();
     settingsContent.reset();
-    if (midiPlayer != nullptr)
-        registerTransportKeys(*this, false);
+    registerEditorKeys(*this, false);
     removeMouseListener(this);
     valueTreeState.state.removeListener(this);
     lastUIWidth.removeListener(this);
@@ -681,10 +682,10 @@ void JuicySFAudioProcessorEditor::paint (Graphics& g)
     g.fillRect(statusBar.getX(), statusBar.getY(), width, 1);
 
     if (!focusInitialized) {
-        if (!hasKeyboardFocus(false) && isVisible()) {
+        if (!hasKeyboardFocus(true) && isVisible()) {
             grabKeyboardFocus();
         }
-        if (getCurrentlyFocusedComponent() == this) {
+        if (hasKeyboardFocus(true)) {
             focusInitialized = true;
         }
     }
@@ -744,18 +745,23 @@ bool JuicySFAudioProcessorEditor::handleTransportKey(const KeyPress& key, juce::
 }
 
 bool JuicySFAudioProcessorEditor::keyPressed(const KeyPress& key, juce::Component* origin) {
-    if (key.getKeyCode() == KeyPress::spaceKey)
-        setFocusRingsVisible(true);
+    setFocusRingsVisible(true);
     return handleTransportKey(key, origin);
 }
 
-void JuicySFAudioProcessorEditor::registerTransportKeys(juce::Component& component, bool add) {
+bool JuicySFAudioProcessorEditor::keyStateChanged(bool isKeyDown, juce::Component*) {
+    if (isKeyDown)
+        setFocusRingsVisible(true);
+    return false;
+}
+
+void JuicySFAudioProcessorEditor::registerEditorKeys(juce::Component& component, bool add) {
     if (add)
         component.addKeyListener(this);
     else
         component.removeKeyListener(this);
     for (int i = 0; i < component.getNumChildComponents(); ++i)
-        registerTransportKeys(*component.getChildComponent(i), add);
+        registerEditorKeys(*component.getChildComponent(i), add);
 }
 
 bool JuicySFAudioProcessorEditor::isInterestedInFileDrag(const StringArray& files) {
@@ -793,5 +799,7 @@ void JuicySFAudioProcessorEditor::focusLost(FocusChangeType cause) {
 }
 
 void JuicySFAudioProcessorEditor::focusOfChildComponentChanged(FocusChangeType cause) {
+    if (cause == focusChangedByTabKey)
+        setFocusRingsVisible(true);
     focusLost(cause);
 }

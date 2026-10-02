@@ -1,4 +1,24 @@
-# Windows validation — 1.0.0-beta.1
+# Windows validation
+
+## 1.0.0-beta.2 — 2026-10-02
+
+Current native Windows 11 x64 Debug and strict Release builds pass **19/19
+CTest checks each**, with rebuilt static dependencies including the timer-thread
+fix. All bank and MIDI inputs in this run are synthetic. VST3/Standalone are
+x64 with system-only imports. The new Standalone transport and existing
+sixteen-channel host routes are covered by the player and VST3 harnesses.
+
+The follow-up fixes custom-control focus indicators, keyboard focus after mouse
+use, first-paint focus preservation and rejection of short invalid banks without
+locking the rejected file. The published macOS beta.2 binary predates these
+shared-source follow-up fixes. See the [UI audit](audits/2026-10-02/README.md)
+for the surface/state inventory, 1×/2× snapshots and native validation gaps.
+
+Packages must pass extracted checksums/plugin smoke and isolated installer
+round-trip before publication. Real Windows screen-reader, physical input,
+native dialog, text/DPI scaling, DAW and minimum-OS checks remain open.
+
+## 1.0.0-beta.1 — historical evidence
 
 Validated locally on 2026-09-27, Windows 11 x64 build 26200, MSVC 14.44,
 Windows SDK 10.0.26100 and CMake 3.31.6. The owner tested the installed Windows
