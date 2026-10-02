@@ -38,9 +38,11 @@ The 2026-09-27 Windows 1.0.0-beta.1 candidate passed local Debug and Release
 checks, including the full-range DLS pan patch, static MSVC runtime/codec,
 SF2/SF3/DLS loading, system-only DLL imports and installer lifecycle. The native
 recipe uses CMake config packages and explicitly enables Opus's static runtime.
-That evidence predates the 2026-09-28 timer-thread cleanup patch; a Windows
-rebuild of the latest dependency closure remains pending. Itemized DAW and
-clean Windows 10 checks also remain open. See [Windows evidence](WINDOWS_RELEASE.md).
+That evidence predates the 2026-09-28 timer-thread cleanup patch. The later
+beta.2 Windows Debug/Release closures include that patch and pass 19/19 checks
+each with generated SF2/DLS/SF3 and MIDI inputs. Windows leak instrumentation,
+itemized DAW and clean Windows 10 checks remain open.
+See [Windows evidence](WINDOWS_RELEASE.md).
 
 ## Security notes
 
