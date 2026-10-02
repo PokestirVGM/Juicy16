@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0-beta.2 — 2026-10-02 (macOS)
+## 1.0.0-beta.2 — 2026-10-02
 
 - Added Standalone MIDI loading and drag/drop, play/pause, stop, seek, elapsed
   and total time, playback speed, whole-song loops and A/B section markers.
@@ -13,9 +13,24 @@
 - MIDI formats 0/1, tempo maps and SMPTE timing; bounded, strict file validation.
   AU/VST3 parameter/state identities and host program routes are unchanged.
 
-Standalone is included with the macOS AU/VST3 package. Controls and current
-limits are in [standalone playback](docs/STANDALONE.md). Windows remains on
-1.0.0-beta.1 until rebuilt and tested.
+Standalone is included with the macOS AU/VST3 and Windows VST3 packages.
+Controls and current limits are in [standalone playback](docs/STANDALONE.md).
+
+### Windows and keyboard follow-up
+
+- Added visible keyboard focus to the folder and editable loop times, restored
+  focus indicators after mouse use, and preserved a child's focus on first paint.
+- Reject incomplete/unrelated bank headers before backend loading, retaining
+  the current bank/MIDI pair and leaving rejected Windows files replaceable.
+- Added generated SF2/DLS/SF3 validation inputs and repeatable 1×/2× UI snapshots.
+- Fixed release verification folders colliding across product versions.
+- Windows Debug and strict Release pass 19/19 checks each; extracted packages
+  and isolated installer install/upgrade/uninstall pass. Native readers,
+  input/dialog/scaling, current DAW and minimum-OS checks remain open.
+
+These follow-up fixes are in the Windows corresponding-source ZIP. The already
+published macOS beta.2 binary predates them and needs a fresh build to include
+them. [Windows evidence and UI inventory](docs/audits/2026-10-02/README.md).
 
 ### Audit and performance fixes
 
@@ -39,7 +54,7 @@ limits are in [standalone playback](docs/STANDALONE.md). Windows remains on
 - Healthy DLS banks avoid a full-file repair copy. Saved bank paths and bookmarks
   restore together with one load; failed selections retain their fallback.
 
-Current DAW, Windows and minimum-OS validation remain pending; see the
+Current DAW and minimum-OS validation remain pending; see the
 [audit report](docs/AUDIT.md) for evidence and limitations.
 
 ## 1.0.0-beta.1 — 2026-09-27

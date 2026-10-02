@@ -14,8 +14,16 @@ locking the rejected file. The published macOS beta.2 binary predates these
 shared-source follow-up fixes. See the [UI audit](audits/2026-10-02/README.md)
 for the surface/state inventory, 1×/2× snapshots and native validation gaps.
 
-Packages must pass extracted checksums/plugin smoke and isolated installer
-round-trip before publication. Real Windows screen-reader, physical input,
+The BC2 portable/source ZIPs pass creation and archive-integrity checks;
+extracted checksums, documentation links, x64/system-only imports and VST3
+smoke pass. Isolated silent install, upgrade with a remembered custom plugin
+folder, exact binary hashes, installed VST3 smoke, uninstall and unrelated-file
+preservation pass. No existing installation was changed. Logs are in
+`build-win-logs/package-beta2-bc2.log` and `build-win-logs/installer-beta2-bc2.log`.
+The publication candidate must retain these tested binary hashes and rerun
+its own package/installer checks after the documentation update.
+
+Real Windows screen-reader, physical input,
 native dialog, text/DPI scaling, DAW and minimum-OS checks remain open.
 
 ## 1.0.0-beta.1 — historical evidence

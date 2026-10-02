@@ -114,11 +114,18 @@ and native VoiceOver/Retina checks must run on a Mac against these changes.
 
 ## Release gate and remaining work
 
-Before Windows assets are published, run portable/source archive creation,
-extraction/checksums, extracted VST3 smoke and isolated installer
-install/upgrade/uninstall with the synthetic DLS. Preserve the existing macOS
-assets and identify the Windows source commit separately; the release tag still
-identifies the already published macOS build.
+BC2 passes portable/source archive creation and integrity checks, extracted
+file hashes and documentation links, x64/system-only imports and extracted
+VST3 smoke. Isolated silent install, upgrade with its custom plugin folder,
+exact payload hashes, installed VST3 smoke, uninstall and preservation of an
+unrelated synthetic user file pass. Its temporary per-user registration was
+removed; no existing installation was changed. Logs are in
+`build-win-logs/package-beta2-bc2.log` and `build-win-logs/installer-beta2-bc2.log`.
+
+The publication candidate includes the updated documentation, must retain the
+tested VST3/Standalone hashes, and reruns its own package and installer gates.
+Preserve the existing macOS assets and identify the Windows source commit
+separately; the release tag still identifies the already published macOS build.
 
 Real FL Studio/Cubase scenarios, clean Windows 10 1607, Windows Narrator, native
 input/dialog/appearance/text/DPI checks, and the Mac checks above remain open.

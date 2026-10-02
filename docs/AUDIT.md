@@ -7,8 +7,9 @@ and build/packaging; failures were reproduced, fixes integrated and verification
 run locally.
 
 The checkout began clean at `aea4fb0`. Findings concern that source and these
-local changes, which are included in the macOS 1.0.0-beta.2 source. Windows
-remains at beta.1 pending a rebuild. The latest checks below cover the extracted
+local changes, which are included in the macOS 1.0.0-beta.2 source. The later
+[Windows/UI follow-up](audits/2026-10-02/README.md) records beta.2 native builds,
+packages and shared-source focus fixes separately. The Mac checks below cover the extracted
 macOS validation candidate; real DAW, minimum-OS, Windows and hosted-CI
 validation remain pending.
 
@@ -142,8 +143,9 @@ validation candidate, not a clean-system or real-DAW run; see
   routes, imported Bank Select/Program Change timing, all-channel playback,
   save/reopen, reset/replay, pedals with mute/solo and editor-open automation.
   Offline wrapper tests do not substitute for these DAW scenarios.
-- Native Windows rebuild, PowerShell/installer/package checks and Windows host
-  scenarios remain pending. Python packaging tests run here on macOS; the
+- Native Windows beta.2 build, PowerShell, installer and package checks now pass;
+  see the [separate Windows evidence](WINDOWS_RELEASE.md). Windows host and native
+  UI scenarios remain pending. Python packaging tests in this Mac audit run on macOS; the
   Unix-only shell orchestration test is excluded on Windows.
 - Clean macOS 11 and Windows 10 execution, accessibility with VoiceOver/Narrator,
   native QWERTY delivery/focus behavior and sandboxed-host bookmark recall still

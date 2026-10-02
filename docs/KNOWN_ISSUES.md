@@ -9,9 +9,10 @@ Please read this before reporting a bug. Some of these are deliberate.
   pending. Logic and other hosts are untested.
 - **macOS 11.** The builds target macOS 11, but I've only run them on current
   macOS.
-- **Windows latest fixes.** [Local Windows evidence](WINDOWS_RELEASE.md) covers
-  1.0.0-beta.1 build/package checks and owner testing of the installed VST3 on
-  Windows 11. Windows remains at beta.1; the beta.2 changes still need a rebuild.
+- **Windows native UI and hosts.** [Local Windows evidence](WINDOWS_RELEASE.md) now covers
+  beta.2 Debug/Release, synthetic MIDI/bank tests, packages and isolated install
+  checks. The earlier owner testing of the installed VST3 covered beta.1.
+  Beta.2 native input, dialogs, OS appearance and text/DPI scaling are unverified.
   Itemized DAW playback/save/reopen and clean Windows 10 minimum-OS testing
   remain pending.
 - **Screen readers.** Everything has accessible names, but I haven't tried
@@ -79,11 +80,12 @@ JUCE AU parameter-text leaks that were absent from the beta.1 Mac package.
 On 2026-09-28 and again in the 2026-10-02 [source audit](AUDIT.md), local macOS
 font, engine, VST3 and AU harnesses completed with zero failures and zero leaked
 bytes. Those local results do not prove hosted CI or real-DAW behavior. Windows
-beta.1 predates these fixes and still needs a rebuild.
+beta.2 has been rebuilt with the timer-thread fix; Windows leak instrumentation
+has not been run.
 
 ## Standalone player
 
-The macOS beta.2 app retriggers held notes when seeking or restarting loops,
+The beta.2 Standalone app retriggers held notes when seeking or restarting loops,
 so their envelopes restart and a held note uses the current patch. Earlier
 release voices and effects tails are not reconstructed. MIDI files and transport
 settings are runtime-only; audio-device reconfiguration pauses playback.
