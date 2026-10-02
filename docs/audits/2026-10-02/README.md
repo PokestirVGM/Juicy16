@@ -122,10 +122,20 @@ unrelated synthetic user file pass. Its temporary per-user registration was
 removed; no existing installation was changed. Logs are in
 `build-win-logs/package-beta2-bc2.log` and `build-win-logs/installer-beta2-bc2.log`.
 
-The publication candidate includes the updated documentation, must retain the
-tested VST3/Standalone hashes, and reruns its own package and installer gates.
-Preserve the existing macOS assets and identify the Windows source commit
-separately; the release tag still identifies the already published macOS build.
+The published **BC5** candidate includes updated user documentation. Its
+VST3/Standalone hashes match BC2, and its own extracted package and isolated
+installer gates pass. Every source/portable manifest entry, exact committed
+source file, executable permission and asset sidecar was checked. Its clean
+corresponding-source commit is `f2638d6dd86ff00f5bd36de6a1f718011d0eb5f0`.
+Subsequent audit-only documentation updates leave that release source unchanged.
+
+The installer, portable/source ZIPs and three SHA-256 sidecars are published on
+[beta.2](https://github.com/PokestirVGM/Juicy16/releases/tag/v1.0.0-beta.2).
+GitHub's digests match all six local files. Existing macOS asset IDs/digests and
+the release target are preserved at `03bf14c`; those Mac binaries still need
+rebuilding to include the shared-source fixes. Final evidence is retained in
+`build-win-logs/package-beta2-bc5.log`, `build-win-logs/installer-beta2-bc5.log`,
+`build-win-logs/publish-beta2-windows.log` and `build-win/release-beta2-after.json`.
 
 Real FL Studio/Cubase scenarios, clean Windows 10 1607, Windows Narrator, native
 input/dialog/appearance/text/DPI checks, and the Mac checks above remain open.

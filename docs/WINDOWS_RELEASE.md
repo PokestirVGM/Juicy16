@@ -14,14 +14,23 @@ locking the rejected file. The published macOS beta.2 binary predates these
 shared-source follow-up fixes. See the [UI audit](audits/2026-10-02/README.md)
 for the surface/state inventory, 1×/2× snapshots and native validation gaps.
 
-The BC2 portable/source ZIPs pass creation and archive-integrity checks;
+The published BC5 portable/source ZIPs pass creation and archive-integrity checks;
 extracted checksums, documentation links, x64/system-only imports and VST3
 smoke pass. Isolated silent install, upgrade with a remembered custom plugin
 folder, exact binary hashes, installed VST3 smoke, uninstall and unrelated-file
 preservation pass. No existing installation was changed. Logs are in
-`build-win-logs/package-beta2-bc2.log` and `build-win-logs/installer-beta2-bc2.log`.
-The publication candidate must retain these tested binary hashes and rerun
-its own package/installer checks after the documentation update.
+`build-win-logs/package-beta2-bc5.log` and `build-win-logs/installer-beta2-bc5.log`.
+Final VST3/Standalone hashes match the earlier BC2 tested payload. Every
+source/portable manifest entry, source file, executable permission and asset
+sidecar was checked before upload. All six Windows asset SHA-256 values match
+GitHub's release digests; the existing macOS asset IDs/hashes and release target
+are preserved.
+
+The [beta.2 release](https://github.com/PokestirVGM/Juicy16/releases/tag/v1.0.0-beta.2)
+contains the installer, portable/source ZIPs and their sidecars. The Windows
+corresponding-source commit is `f2638d6dd86ff00f5bd36de6a1f718011d0eb5f0`;
+the macOS archive/tag remains at `03bf14c`. Later audit documentation does not
+change those tested binary/source identities.
 
 Real Windows screen-reader, physical input,
 native dialog, text/DPI scaling, DAW and minimum-OS checks remain open.
