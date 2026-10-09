@@ -140,39 +140,43 @@ public:
                                      + (factor == 1 ? " (off)" : ""),
                                  factor);
         addAndMakeVisible(bendScaleBox);
-        for (auto* label : {&vibratoChannelLabel, &vibratoScaleLabel, &cc1Label}) {
+        for (auto* label : {&vibratoScaleLabel, &vibratoRateLabel, &cc1Label}) {
             label->setFont(Font{juce::FontOptions{GuiConstants::valueFontHeight}});
             label->setAccessible(false);
             addAndMakeVisible(*label);
         }
-        vibratoChannelLabel.setText("CC1 channel", dontSendNotification);
-        vibratoScaleLabel.setText("CC1 scale", dontSendNotification);
+        vibratoScaleLabel.setText("CC1 strength", dontSendNotification);
+        vibratoRateLabel.setText("CC1 rate", dontSendNotification);
         cc1Label.setText("CC1 received", dontSendNotification);
-        vibratoChannelBox.setName("CC1 MIDI channel");
-        vibratoChannelBox.setTooltip("Choose the channel whose CC1 vibrato strength is edited. Also selects that channel in the rack.");
-        vibratoScaleBox.setName("Selected channel CC1 vibrato strength");
-        vibratoScaleBox.setTooltip("Scales CC1-driven pitch vibrato on this channel. x1 follows the bank. "
-            "CC1 must be delivered by the host: at zero this does not create vibrato. Bank rate and delay are preserved.");
-        for (int ch = 1; ch <= 16; ++ch) vibratoChannelBox.addItem("Channel " + String(ch), ch);
-        for (int factor = 1; factor <= 24; ++factor)
+        vibratoScaleBox.setName("CC1 vibrato strength");
+        vibratoScaleBox.setTooltip("Scales CC1-driven pitch vibrato on all 16 channels. x1 follows the bank. "
+            "CC1 must be delivered by the host: at zero this does not create vibrato. "
+            "DS rips need about x2 per step of the song's modulation range (range 16: x32).");
+        vibratoRateBox.setName("CC1 vibrato rate");
+        vibratoRateBox.setTooltip("Speeds up the vibrato LFO on all 16 channels. Bank keeps the bank's rate "
+            "(5 Hz on DLS without its own setting). DS rips: modulation speed 32 is about x2.4.");
+        for (int factor = 1; factor <= FluidSynthModel::maxVibratoScale; ++factor)
             vibratoScaleBox.addItem(String::fromUTF8("\xc3\x97") + String(factor)
                 + (factor == 1 ? " (off)" : ""), factor);
-        for (auto* box : {&vibratoChannelBox, &vibratoScaleBox}) {
+        vibratoRateBox.addItem("Bank", 1);
+        for (const char* rate : {"1.5", "2", "2.4", "3", "4"})
+            vibratoRateBox.addItem(String::fromUTF8("\xc3\x97") + rate, vibratoRateBox.getNumItems() + 1);
+        for (auto* box : {&vibratoScaleBox, &vibratoRateBox}) {
             box->setWantsKeyboardFocus(true);
             addAndMakeVisible(*box);
         }
-        vibratoChannelBox.onChange = [this] {
-            fluidSynthModel.selectChannelForEditing(vibratoChannelBox.getSelectedId() - 1);
-            syncVibratoChannel();
-        };
+        vibratoScaleAttachment = std::make_unique<AudioProcessorValueTreeState::ComboBoxAttachment>(
+            valueTreeState, "cc1VibratoScale", vibratoScaleBox);
+        vibratoRateAttachment = std::make_unique<AudioProcessorValueTreeState::ComboBoxAttachment>(
+            valueTreeState, "cc1VibratoRate", vibratoRateBox);
         cc1Value.setName("Received CC1 value");
         cc1Value.setFont(Font{juce::FontOptions{GuiConstants::valueFontHeight}});
         cc1Value.setJustificationType(Justification::centredRight);
-        cc1Value.setTooltip("Current modulation controller received by Juicy16 on the selected channel. "
+        cc1Value.setTooltip("Highest modulation controller currently received by Juicy16, and its channel. "
             "If this stays zero while the MIDI file contains modulation, check its controller routing in the host.");
         addAndMakeVisible(cc1Value);
         valueTreeState.state.addListener(this);
-        syncVibratoChannel();
+        timerCallback();
         startTimerHz(20);
         resetPolicyLabel.setText("Reset policy", dontSendNotification);
         resetPolicyLabel.setFont(Font{juce::FontOptions{GuiConstants::valueFontHeight}});
@@ -280,7 +284,7 @@ public:
         const Colour label{theme.findColour(Juicy16::textLabelColourId)};
         for (Label* heading : {&accentHeading, &soundHeading, &midiHeading, &buildHeading, &interpolationLabel,
                                &bendRangeLabel, &bendScaleLabel, &resetPolicyLabel,
-                               &vibratoChannelLabel, &vibratoScaleLabel, &cc1Label})
+                               &vibratoScaleLabel, &vibratoRateLabel, &cc1Label})
             heading->setColour(Label::textColourId, label);
         cc1Value.setColour(Label::textColourId, theme.findColour(Juicy16::textPrimaryColourId));
         // The closed dropdown shows its text in the selected accent.
@@ -328,12 +332,12 @@ public:
             bendScaleLabel.setBounds(row);
             r.removeFromTop(kControlRowGap);
             row = r.removeFromTop(kControlRowHeight);
-            vibratoChannelBox.setBounds(row.removeFromRight(row.getWidth() * 3 / 5));
-            vibratoChannelLabel.setBounds(row);
-            r.removeFromTop(kControlRowGap);
-            row = r.removeFromTop(kControlRowHeight);
             vibratoScaleBox.setBounds(row.removeFromRight(row.getWidth() * 3 / 5));
             vibratoScaleLabel.setBounds(row);
+            r.removeFromTop(kControlRowGap);
+            row = r.removeFromTop(kControlRowHeight);
+            vibratoRateBox.setBounds(row.removeFromRight(row.getWidth() * 3 / 5));
+            vibratoRateLabel.setBounds(row);
             r.removeFromTop(kControlRowGap);
             row = r.removeFromTop(kControlRowHeight);
             cc1Value.setBounds(row.removeFromRight(row.getWidth() * 3 / 5));
@@ -370,51 +374,40 @@ private:
     static constexpr int kControlRowGap{6};
 
     void timerCallback() override {
-        const int value = fluidSynthModel.getChannelDiagnostics(attachedVibratoChannel).modulation;
-        if (value == displayedModulation)
+        int value = 0, channel = 0;
+        for (int ch = 0; ch < 16; ++ch)
+            if (const int m = fluidSynthModel.getChannelDiagnostics(ch).modulation; m > value) {
+                value = m;
+                channel = ch;
+            }
+        const int shown = value == 0 ? 0 : value * 16 + channel;
+        if (shown == displayedModulation)
             return;
-        displayedModulation = value;
+        displayedModulation = shown;
         JUICY16_COUNT_UI_WORK(settingsCC1Formats);
-        cc1Value.setText(String(value) + (value == 0 ? " (inactive)" : ""), dontSendNotification);
-    }
-    void syncVibratoChannel() {
-        const int ch = juce::jlimit(0, 15, static_cast<int>(valueTreeState.state
-            .getChildWithName("uiState").getProperty("selectedChannel", 1)) - 1);
-        if (ch != attachedVibratoChannel) {
-            vibratoScaleAttachment.reset();
-            attachedVibratoChannel = ch;
-            vibratoChannelBox.setSelectedId(ch + 1, dontSendNotification);
-            vibratoScaleAttachment = std::make_unique<AudioProcessorValueTreeState::ComboBoxAttachment>(
-                valueTreeState, "vibratoScaleCh" + String(ch + 1), vibratoScaleBox);
-        }
-        timerCallback();
+        cc1Value.setText(value == 0 ? String{"0 (inactive)"}
+                                    : String(value) + " on ch " + String(channel + 1), dontSendNotification);
     }
     void valueTreePropertyChanged(ValueTree& tree, const Identifier& property) override {
-        if (tree.getType() != StringRef("uiState")
-            || (property != StringRef("selectedChannel") && property != StringRef("accent")))
+        if (tree.getType() != StringRef("uiState") || property != StringRef("accent"))
             return;
         if (!juce::MessageManager::getInstance()->isThisTheMessageThread()) {
             triggerAsyncUpdate();
             return;
         }
-        if (tree.getType() == StringRef("uiState") && property == StringRef("selectedChannel"))
-            syncVibratoChannel();
-        if (tree.getType() == StringRef("uiState") && property == StringRef("accent"))
-            accentBox.setSelectedId(indexOfAccent(Juicy16::accentFromName(
-                tree.getProperty("accent", "sage").toString())) + 1, dontSendNotification);
+        accentBox.setSelectedId(indexOfAccent(Juicy16::accentFromName(
+            tree.getProperty("accent", "sage").toString())) + 1, dontSendNotification);
     }
     void handleAsyncUpdate() override {
-        syncVibratoChannel();
         accentBox.setSelectedId(indexOfAccent(Juicy16::accentFromName(valueTreeState.state
             .getChildWithName("uiState").getProperty("accent", "sage").toString())) + 1,
             dontSendNotification);
     }
     AudioProcessorValueTreeState& valueTreeState;
     FluidSynthModel& fluidSynthModel;
-    Label vibratoChannelLabel, vibratoScaleLabel, cc1Label, cc1Value;
-    juce::ComboBox vibratoChannelBox, vibratoScaleBox;
-    std::unique_ptr<AudioProcessorValueTreeState::ComboBoxAttachment> vibratoScaleAttachment;
-    int attachedVibratoChannel{-1};
+    Label vibratoScaleLabel, vibratoRateLabel, cc1Label, cc1Value;
+    juce::ComboBox vibratoScaleBox, vibratoRateBox;
+    std::unique_ptr<AudioProcessorValueTreeState::ComboBoxAttachment> vibratoScaleAttachment, vibratoRateAttachment;
     int displayedModulation{-1};
     std::vector<Fact> facts;
     Label accentHeading, soundHeading, midiHeading, buildHeading;

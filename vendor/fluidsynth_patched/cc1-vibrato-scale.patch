@@ -58,7 +58,7 @@
 + * Range validation rejects NaN as well as values outside the public control. */
 +int fluid_synth_set_cc1_vibrato_scale(fluid_synth_t *synth, int chan, float scale)
 +{
-+    fluid_return_val_if_fail(scale >= 1.0f && scale <= 24.0f, FLUID_FAILED);
++    fluid_return_val_if_fail(scale >= 1.0f && scale <= 64.0f, FLUID_FAILED);
 +    FLUID_API_ENTRY_CHAN(FLUID_FAILED);
 +    synth->channel[chan]->cc1_vibrato_scale = scale;
 +    fluid_synth_modulate_voices_LOCAL(synth, chan, 1, 1);

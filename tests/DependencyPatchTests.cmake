@@ -99,6 +99,8 @@ message(STATUS "libsndfile IRCAM hardening patch, both recipes, and the README a
 
 # Both platforms must download the same reviewed synthesis engine archive.
 foreach (recipe tools/build_macos_dependencies.sh tools/build_windows_dependencies.ps1)
+  # The plugin owns audio I/O; auto-detected SDL adds an unbundled dependency.
+  assert_contains("The portable dependency recipe" "${SOURCE_ROOT}/${recipe}" "-Denable-sdl3=OFF")
   file(READ "${SOURCE_ROOT}/${recipe}" ENGINE_RECIPE)
   string(FIND "${ENGINE_RECIPE}" "ce27840221ab00dd59bf27e85ecbba480c6c2a7c9fbec4243658f68f59c07f4a" ENGINE_HASH_AT)
   string(FIND "${ENGINE_RECIPE}" "2.5.7" ENGINE_VERSION_AT)
@@ -109,11 +111,11 @@ endforeach ()
 
 # Both platforms share the exact reviewed FluidSynth edits.
 file(SHA256 "${SOURCE_ROOT}/vendor/fluidsynth_patched/apply.cmake" ENGINE_APPLY_HASH)
-if(NOT ENGINE_APPLY_HASH STREQUAL "6aa442e4a6ac6be83c98a356ee154b82124ea2f86f44eed5b0ebab302423d4fd")
+if(NOT ENGINE_APPLY_HASH STREQUAL "ff36e29447812a205c8a9b620f0042cf0a916fb99a7ec1f7d561e314b86f702e")
   message(FATAL_ERROR "Unreviewed FluidSynth apply.cmake; refresh evidence when changing an engine patch")
 endif()
 file(SHA256 "${SOURCE_ROOT}/vendor/fluidsynth_patched/cc1-vibrato-scale.patch" VIBRATO_HASH)
-if(NOT VIBRATO_HASH STREQUAL "ad2549f3b64b2ce8bba850656e45e45583c8fdc3b601f7212f0832c3322f9f8d")
+if(NOT VIBRATO_HASH STREQUAL "1684632d3088227943077886473cea1dc02bb52bd1f2af05f9f226aa0d9cdf8f")
   message(FATAL_ERROR "Unreviewed vibrato cc1-vibrato-scale.patch; refresh evidence when changing the engine patch")
 endif()
 file(SHA256 "${SOURCE_ROOT}/vendor/fluidsynth_patched/dls-full-range-pan.patch" DLS_PAN_HASH)

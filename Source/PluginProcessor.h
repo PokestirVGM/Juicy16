@@ -59,8 +59,9 @@ public:
     MidiKeyboardState keyboardState;
 
 private:
-    static constexpr int currentStateVersion{11};
+    static constexpr int currentStateVersion{12};
     void initialiseSynth();
+    void migrateSharedVibratoScale();
 
     AudioProcessorValueTreeState valueTreeState;
 

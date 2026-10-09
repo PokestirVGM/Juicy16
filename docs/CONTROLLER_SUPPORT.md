@@ -121,7 +121,9 @@ Choosing a profile sets the four knobs; moving a knob switches to Custom.
 | Interpolation | `interpolation` | 7th-order / Linear / None | Linear |
 | Bend range | `bendRange` | follow file, or 1–24 semitones | follow file |
 | Bend scale | `bendScale` | ×1–×24 | ×1 |
-| CC1 vibrato strength | `vibratoScaleCh1`–`vibratoScaleCh16` | ×1–×24 | ×1 |
+| CC1 strength | `cc1VibratoScale` | ×1–×64 | ×1 |
+| CC1 rate | `cc1VibratoRate` | Bank, ×1.5, ×2, ×2.4, ×3, ×4 | Bank |
+| Per-channel CC1 strength (automation only) | `vibratoScaleCh1`–`vibratoScaleCh16` | ×1–×24 | ×1 |
 | Reset policy | `resetPolicy` | DAW recovery / Standard MIDI | DAW recovery |
 
 - **Interpolation** is how samples are stretched to other pitches. Linear is what
@@ -132,6 +134,13 @@ Choosing a profile sets the four knobs; moving a knob switches to Custom.
   file's RPN.
 - **Bend scale** multiplies incoming bends. FL Studio imports every bend as ±2
   semitones, so a rip written for 12 semitones needs ×6.
-- **CC1 vibrato strength** boosts weak CC1 vibrato per channel without changing
-  the CC1 value. It can't create vibrato when CC1 is 0; *CC1 received* shows what
-  the host is sending.
+- **CC1 strength** boosts weak CC1 vibrato on all 16 channels without changing
+  the CC1 value. It can't create vibrato when CC1 is 0; *CC1 received* shows the
+  highest CC1 the host is sending and on which channel. The per-channel
+  strengths multiply it (capped at ×64); they have no control in the window.
+- **CC1 rate** speeds up the vibrato LFO on all 16 channels. *Bank* keeps the
+  bank's rate, 5 Hz for DLS banks that don't set one.
+- **Nintendo DS rips:** VGMTrans exports only the DS modulation depth as CC1,
+  not its range or speed. Strength ≈ ×2 × range and rate ≈ speed ÷ 16 × (6/5)
+  for DLS. Many Pokémon Black/White songs use range 16 and speed 32: **×32** and
+  **×2.4**.

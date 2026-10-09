@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.0-beta.3 — 2026-10-09
+
+- CC1 vibrato controls in settings now apply to all 16 channels; the channel
+  picker is gone. *CC1 received* shows the highest CC1 and its channel.
+- CC1 strength goes up to ×64 (was ×24), enough for Nintendo DS rips whose
+  songs use a wide modulation range.
+- New CC1 rate: Bank, ×1.5, ×2, ×2.4, ×3 or ×4. It survives CC121 and reset
+  SysEx. DS rips (e.g. Pokémon Black/White, range 16 / speed 32) want ×32 and
+  ×2.4.
+- State schema 12. Older projects whose sixteen per-channel strengths match
+  move that value to the new all-channel strength; others keep their
+  per-channel values, which remain automatable.
+- The macOS dependency build disables the optional SDL3 driver, keeping the
+  package independent of Homebrew audio libraries.
+
 ## 1.0.0-beta.2 — 2026-10-02
 
 - Added Standalone MIDI loading and drag/drop, play/pause, stop, seek, elapsed

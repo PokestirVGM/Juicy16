@@ -1,15 +1,19 @@
 # Roadmap
 
-## Now: 1.0.0-beta.2
+## Now: macOS 1.0.0-beta.3 / Windows 1.0.0-beta.2
 
-This beta adds a Standalone MIDI player alongside macOS AU/VST3 and Windows VST3. Load a
+The macOS beta.3 adds all-channel CC1 vibrato strength up to ×64, a vibrato
+rate setting and saved-state migration. Windows beta.3 has not been built or
+validated; its latest verified packages remain beta.2.
+
+Beta.2 added a Standalone MIDI player alongside macOS AU/VST3 and Windows VST3. Load a
 bank and MIDI together, seek through the song, see its current BPM and repeat
 the whole song or a section. It also includes the recall, playback, leak and
 performance fixes described in the [changelog](CHANGELOG.md).
 
 Windows Debug/Release, synthetic playback, packages and isolated installer
 checks pass. The Windows follow-up includes keyboard-focus fixes that still
-need rebuilding and checking on macOS.
+need native checking on macOS.
 
 ## Next
 

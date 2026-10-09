@@ -17,7 +17,7 @@ across updates. Changing any of them would break existing sessions.
 ## Parameters
 
 New parameters are only ever added at the end, so existing indices never move.
-There are 131, in this order:
+There are 133, in this order:
 
 ```text
 bank, preset, outputLevel,
@@ -31,17 +31,20 @@ bendRange, bendScale,
 resetPolicy, trimCh1 .. trimCh16,
 chorusOn, chorusVoices, chorusLevel, chorusRate, chorusDepth, chorusWaveform,
 vibratoScaleCh1 .. vibratoScaleCh16,
-interpolation
+interpolation,
+cc1VibratoScale, cc1VibratoRate
 ```
 
 AU version hints: the first 91 use `1`, the playback group (`resetPolicy`, trims)
-`2`, chorus `3`, vibrato `4`, and `interpolation` `5`.
+`2`, chorus `3`, vibrato `4`, `interpolation` `5`, and the all-channel CC1
+controls `6`.
 
 Hosts store automation as 0–1, so ranges are fixed too: `bank` 0–255, `preset`,
 volume, pan and `progChN` 0–127, master trim -24 to +12 dB, reverb values 0–1,
-`bendRange` 0–24 (0 follows the file), `bendScale` 1–24. Choice parameters keep
-their order: `reverbProfile` is Universal / Soft / Custom and `interpolation` is
-7th-order / Linear / None.
+`bendRange` 0–24 (0 follows the file), `bendScale` 1–24, `vibratoScaleChN` 1–24,
+`cc1VibratoScale` 1–64. Choice parameters keep their order: `reverbProfile` is
+Universal / Soft / Custom, `interpolation` is 7th-order / Linear / None, and
+`cc1VibratoRate` is Bank / x1.5 / x2 / x2.4 / x3 / x4.
 
 The mixer and reverb parameters are deliberately ungrouped. In VST3 a group
 becomes a unit, and the plugin serves a fixed set of 17 units that Cubase caches
@@ -122,7 +125,7 @@ The tests check these IDs and the parameter manifest.
 
 ## Saved state
 
-The state root is `MYPLUGINSETTINGS`, currently schema **11**. It stores every
+The state root is `MYPLUGINSETTINGS`, currently schema **12**. It stores every
 parameter, one record per channel (`bank`, `preset`, `volume`, `pan`, `mute`,
 `solo`, `expression`, `bendRange`), the window and accent, and the bank's path and bookmark.
 
@@ -131,6 +134,7 @@ rather than guessing. Keep a project backup if you might roll back.
 
 | Schema | Added | Older projects open with |
 | --- | --- | --- |
+| 12 | all-channel CC1 strength and rate | ×1 and Bank rate; if all sixteen per-channel strengths match, that value moves to the all-channel strength |
 | 11 | saved UI accent | Sage for projects without an accent; all twelve choices round-trip |
 | 10 | `interpolation` | 7th-order, the sound they were made with (new instances default to Linear) |
 | 9 | CC1 vibrato strength | ×1 |

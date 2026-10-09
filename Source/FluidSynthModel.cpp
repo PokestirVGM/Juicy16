@@ -4,6 +4,7 @@
 #include <array>
 #include <algorithm>
 #include <limits>
+#include <cmath>
 #include <fluidsynth.h>
 #include "FluidSynthModel.h"
 
@@ -255,6 +256,8 @@ FluidSynthModel::FluidSynthModel(
         interpolationMethod.store(interpolationForChoice(juce::roundToInt(p->load())));
     for (int ch = 1; ch <= 16; ++ch)
         valueTreeState.addParameterListener("vibratoScaleCh" + String(ch), this);
+    valueTreeState.addParameterListener("cc1VibratoScale", this);
+    valueTreeState.addParameterListener("cc1VibratoRate", this);
     valueTreeState.addParameterListener("reverbOn", this);
     valueTreeState.addParameterListener("reverbProfile", this);
     for (int i = 0; i < numReverbParams; ++i) {
@@ -296,6 +299,8 @@ FluidSynthModel::~FluidSynthModel() {
     valueTreeState.removeParameterListener("interpolation", this);
     for (int ch = 1; ch <= 16; ++ch)
         valueTreeState.removeParameterListener("vibratoScaleCh" + String(ch), this);
+    valueTreeState.removeParameterListener("cc1VibratoScale", this);
+    valueTreeState.removeParameterListener("cc1VibratoRate", this);
     valueTreeState.removeParameterListener("reverbOn", this);
     valueTreeState.removeParameterListener("reverbProfile", this);
     for (int i = 0; i < numReverbParams; ++i)
@@ -333,6 +338,8 @@ void FluidSynthModel::createSynth() {
     synth = { new_fluid_synth(settings.get()), delete_fluid_synth };
     std::fill(std::begin(appliedVibratoScale), std::end(appliedVibratoScale), 0);
     applyVibratoScaleFromAudioThread();
+    appliedVibratoRate = 0;
+    applyVibratoRateFromAudioThread();
 
     // Interpolation comes from the setting; a reset SysEx re-applies it.
     applyInterpolationMethod();
@@ -550,6 +557,16 @@ void FluidSynthModel::parameterChanged(const String& parameterID, float /*newVal
         if (ch >= 0 && ch < 16)
             vibratoScale[ch].store(juce::jlimit(1, 24, juce::roundToInt(
                 valueTreeState.getRawParameterValue(parameterID)->load())));
+        return;
+    }
+    if (parameterID == "cc1VibratoScale") {
+        globalVibratoScale.store(juce::jlimit(1, maxVibratoScale, juce::roundToInt(
+            valueTreeState.getRawParameterValue(parameterID)->load())));
+        return;
+    }
+    if (parameterID == "cc1VibratoRate") {
+        vibratoRate.store(juce::jlimit(0, numVibratoRates - 1, juce::roundToInt(
+            valueTreeState.getRawParameterValue(parameterID)->load())));
         return;
     }
     if (parameterID == "resetPolicy") {
@@ -1042,8 +1059,10 @@ void FluidSynthModel::setControllerValue(int controller, int value) {
         || !juce::isPositiveAndBelow(controller, 128)
         || !juce::isPositiveAndBelow(value, 128))
         return;
-    if (reachesEngine(controller))
+    if (reachesEngine(controller)) {
         fluid_synth_cc(synth.get(), static_cast<int>(ch), controller, value);
+        reapplyVibratoRateAfterController(static_cast<int>(ch), controller);
+    }
     if (controller == 1 || controller == 121) diagnosticModulation[ch].store(controller == 1 ? value : 0);
     if (const int idx{ccToIndex(controller)}; idx >= 0)
         engineCc[ch][idx].store(value, std::memory_order_relaxed);
@@ -1054,8 +1073,10 @@ void FluidSynthModel::setChannelControllerValue(int channelToWrite, int controll
         || !juce::isPositiveAndBelow(controller, 128)
         || !juce::isPositiveAndBelow(value, 128))
         return;
-    if (reachesEngine(controller))
+    if (reachesEngine(controller)) {
         fluid_synth_cc(synth.get(), channelToWrite, controller, value);
+        reapplyVibratoRateAfterController(channelToWrite, controller);
+    }
     if (controller == 1 || controller == 121) diagnosticModulation[channelToWrite].store(controller == 1 ? value : 0);
     if (const int idx{ccToIndex(controller)}; idx >= 0)
         engineCc[channelToWrite][idx].store(value, std::memory_order_relaxed);
@@ -1825,6 +1846,7 @@ void FluidSynthModel::dispatchSysEx(const uint8_t* payload, int payloadBytes) {
 
     // The reset restored 4th-order interpolation; re-apply ours first (no font needed).
     applyInterpolationMethod();
+    for (int ch = 0; ch < kNumChannels; ++ch) reapplyVibratoRate(ch);
 
     const int fontId{sfont_id.load(std::memory_order_acquire)};
     if (fontId == -1)
@@ -1981,13 +2003,42 @@ int FluidSynthModel::interpolationForChoice(int choice) {
 }
 
 void FluidSynthModel::applyVibratoScaleFromAudioThread() {
+    const int global = globalVibratoScale.load(std::memory_order_relaxed);
     for (int ch = 0; ch < 16; ++ch) {
-        const int scale = vibratoScale[ch].load(std::memory_order_relaxed);
+        const int scale = std::min(maxVibratoScale, global * vibratoScale[ch].load(std::memory_order_relaxed));
         if (scale != appliedVibratoScale[ch]) {
             fluid_synth_set_cc1_vibrato_scale(synth.get(), ch, static_cast<float>(scale));
             appliedVibratoScale[ch] = scale;
         }
     }
+}
+
+// Vibrato LFO rate multiplier as a channel generator offset, in cents.
+float FluidSynthModel::vibratoRateOffsetCents(int choice) {
+    static constexpr float multipliers[numVibratoRates]{1.0f, 1.5f, 2.0f, 2.4f, 3.0f, 4.0f};
+    return 1200.0f * std::log2(multipliers[juce::jlimit(0, numVibratoRates - 1, choice)]);
+}
+
+void FluidSynthModel::applyVibratoRateFromAudioThread() {
+    const int rate = vibratoRate.load(std::memory_order_relaxed);
+    if (rate == appliedVibratoRate)
+        return;
+    appliedVibratoRate = rate;
+    for (int ch = 0; ch < 16; ++ch)
+        reapplyVibratoRate(ch);
+}
+
+// CC121, mode messages and reset SysEx clear FluidSynth's channel generators.
+void FluidSynthModel::reapplyVibratoRate(int ch) {
+    fluid_synth_set_gen(synth.get(), ch, GEN_VIBLFOFREQ,
+                        vibratoRateOffsetCents(vibratoRate.load(std::memory_order_relaxed)));
+}
+
+void FluidSynthModel::reapplyVibratoRateAfterController(int ch, int controller) {
+    if (controller == 121)
+        reapplyVibratoRate(ch);
+    else if (controller >= 124)
+        for (int i = 0; i < kNumChannels; ++i) reapplyVibratoRate(i);
 }
 
 void FluidSynthModel::applyBendRangeChangeFromAudioThread() {
@@ -2312,12 +2363,14 @@ void FluidSynthModel::dispatchMidiEvent(const MidiMessage& m, int samplePosition
                 value, std::memory_order_relaxed);
             lastCcSample[midiCh][controller].store(
                 samplePosition, std::memory_order_relaxed);
-            if (reachesEngine(controller))
+            if (reachesEngine(controller)) {
                 fluid_synth_cc(
                     synth.get(),
                     midiCh,
                     controller,
                     value);
+                reapplyVibratoRateAfterController(midiCh, controller);
+            }
             if (controller == 1)
                 diagnosticModulation[midiCh].store(value);
             if (controller == 121)
@@ -2618,6 +2671,7 @@ void FluidSynthModel::processBlock(AudioBuffer<float>& buffer, MidiBuffer& midiM
     applyChorusFromAudioThread(numSamples);
     applyBendRangeChangeFromAudioThread();
     applyVibratoScaleFromAudioThread();
+    applyVibratoRateFromAudioThread();
     applyInterpolationChangeFromAudioThread();
 
     // Render up to each event, then apply that timestamp's events. Keeps Bank Select

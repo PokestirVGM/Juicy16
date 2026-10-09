@@ -8,7 +8,8 @@ mixes to one stereo output.
 
 ## Download
 
-The latest release is [1.0.0-beta.2](https://github.com/PokestirVGM/Juicy16/releases/tag/v1.0.0-beta.2).
+The latest macOS release is [1.0.0-beta.3](https://github.com/PokestirVGM/Juicy16/releases/tag/v1.0.0-beta.3).
+Windows remains on [1.0.0-beta.2](https://github.com/PokestirVGM/Juicy16/releases/tag/v1.0.0-beta.2).
 
 - **Apple Silicon macOS:** Standalone, AU and VST3. The build targets macOS 11;
   current checks run on macOS 26.6.2. Unzip and run `install_macos.command`.
@@ -22,7 +23,15 @@ Nothing else needs installing. The macOS builds are ad-hoc signed, so macOS will
 them until you clear quarantine; the [beta tester guide](docs/BETA_TESTER_GUIDE.md)
 shows how.
 
-## What's new in 1.0.0-beta.2
+## What's new in 1.0.0-beta.3
+
+- **CC1 vibrato strength** applies to all sixteen channels and reaches ×64.
+- **CC1 vibrato rate:** Bank, ×1.5, ×2, ×2.4, ×3 or ×4; retained through MIDI resets.
+- **Saved projects:** matching older per-channel strengths migrate to the global
+  control; independent per-channel values remain automatable. Schema 12 saves
+  cannot be opened by older builds, so keep a backup before upgrading.
+
+## From 1.0.0-beta.2
 
 - **Standalone MIDI playback:** select a sound bank and MIDI together, then
   play, pause, seek and change speed. The timeline shows elapsed/total time
@@ -69,7 +78,7 @@ picked by hand, at the moment it happens. If a channel sounds wrong in a DAW,
   for the selected channel.
 - **Keyboard:** plays the selected channel and lights up for incoming notes.
 - **Settings** (click the Juicy16 logo): interpolation, pitch-bend fixes for
-  hosts that mangle bends, CC1 vibrato strength, reset behaviour and accent colour.
+  hosts that mangle bends, CC1 vibrato strength and rate, reset behaviour and accent colour.
 
 Mute and solo belong to the plugin, so nothing in a MIDI file changes them.
 

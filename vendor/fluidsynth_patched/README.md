@@ -4,7 +4,7 @@ Juicy16 builds FluidSynth 2.5.7 with three small changes. They're LGPL-2.1 like
 FluidSynth itself.
 
 - **`cc1-vibrato-scale.patch`** adds `fluid_synth_set_cc1_vibrato_scale()`,
-  which multiplies only the CC1-driven part of pitch vibrato (×1–×24) on one
+  which multiplies only the CC1-driven part of pitch vibrato (×1–×64) on one
   channel. The CC1 value itself, other modulators and the bank's own settings
   stay the same, and it survives MIDI resets.
 - **`dls-full-range-pan.patch`** gives every DLS region a CC10 pan range of the

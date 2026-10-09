@@ -15,6 +15,8 @@ class FluidSynthModel
 , public AudioProcessorValueTreeState::Listener
 , public juce::AsyncUpdater {
 public:
+    static constexpr int maxVibratoScale{64};
+    static constexpr int numVibratoRates{6};
     FluidSynthModel(
         AudioProcessorValueTreeState& valueTreeState
         );
@@ -309,9 +311,17 @@ private:
     std::atomic<int> bendRangeOverride{0}; // semitones; 0 follows MIDI
     std::atomic<bool> bendRangeOverrideDirty{false};
     std::atomic<int> bendScale{1};
+    // CC1 vibrato: effective strength is global x per-channel, capped by the engine.
     std::atomic<int> vibratoScale[16];
+    std::atomic<int> globalVibratoScale{1};
     int appliedVibratoScale[16]{};
     void applyVibratoScaleFromAudioThread();
+    std::atomic<int> vibratoRate{0};
+    int appliedVibratoRate{0};
+    static float vibratoRateOffsetCents(int choice);
+    void applyVibratoRateFromAudioThread();
+    void reapplyVibratoRate(int channel);
+    void reapplyVibratoRateAfterController(int channel, int controller);
     void applyBendRangeOverride(int channel);
     void applyBendRangeChangeFromAudioThread();
     // Re-sends a remembered range via RPN, cents included.

@@ -223,6 +223,7 @@ std::vector<juce::String> beta1ParameterIds()
                            "chorusRate", "chorusDepth", "chorusWaveform"});
     for (int ch = 1; ch <= 16; ++ch) ids.push_back("vibratoScaleCh" + juce::String(ch));
     ids.push_back("interpolation");
+    ids.insert(ids.end(), {"cc1VibratoScale", "cc1VibratoRate"});
     return ids;
 }
 
@@ -839,7 +840,7 @@ int main(int argc, char** argv)
                 dynamic_cast<juce::AudioProcessorParameterWithID*>(parameters[static_cast<int>(i)])};
             parameterContract = identified != nullptr
                 && identified->paramID == expectedParameterIds[i]
-                && identified->getVersionHint() == (i < 91 ? 1 : i < 108 ? 2 : i < 114 ? 3 : i < 130 ? 4 : 5);
+                && identified->getVersionHint() == (i < 91 ? 1 : i < 108 ? 2 : i < 114 ? 3 : i < 130 ? 4 : i < 131 ? 5 : 6);
             if (!parameterContract)
                 std::printf("    parameter %d expected %s got %s\n",
                             static_cast<int>(i),
@@ -4099,7 +4100,7 @@ int main(int argc, char** argv)
                     allChannelProperties = allChannelProperties
                         && ch->hasAttribute(property);
         check(xml != nullptr && xml->hasTagName("MYPLUGINSETTINGS")
-                  && xml->getIntAttribute("stateVersion", -1) == 11
+                  && xml->getIntAttribute("stateVersion", -1) == 12
                   && allParams && allChannelProperties
                   && font != nullptr && font->hasAttribute("path")
                   && font->hasAttribute("bookmark"),
@@ -4263,7 +4264,7 @@ int main(int argc, char** argv)
                 check(refreshes == 1 && selectedModel.getLoadedFontPath() == first.getFullPathName(),
                       "an explicit replacement path without a bookmark cannot reuse the old bank's bookmark");
                 juce::XmlElement noFont{"MYPLUGINSETTINGS"};
-                noFont.setAttribute("stateVersion", 11);
+                noFont.setAttribute("stateVersion", 12);
                 juce::MemoryBlock noFontState;
                 juce::AudioProcessor::copyXmlToBinary(noFont, noFontState);
                 selected.setStateInformation(noFontState.getData(), static_cast<int>(noFontState.getSize()));
@@ -4499,7 +4500,7 @@ int main(int argc, char** argv)
         const auto* rewrittenParams{
             rewrittenXml != nullptr ? rewrittenXml->getChildByName("params") : nullptr};
         check(rewrittenXml != nullptr
-                  && rewrittenXml->getIntAttribute("stateVersion", -1) == 11
+                  && rewrittenXml->getIntAttribute("stateVersion", -1) == 12
                   && rewrittenParams != nullptr
                   && !rewrittenParams->hasAttribute("volume")
                   && !rewrittenParams->hasAttribute("pan")
@@ -4544,7 +4545,7 @@ int main(int argc, char** argv)
 
         // A save from a FUTURE schema is still refused rather than half-applied.
         juce::XmlElement future{"MYPLUGINSETTINGS"};
-        future.setAttribute("stateVersion", 12);
+        future.setAttribute("stateVersion", 13);
         juce::MemoryBlock futureState;
         juce::AudioProcessor::copyXmlToBinary(future, futureState);
         migrated.setStateInformation(
@@ -5057,13 +5058,10 @@ int main(int argc, char** argv)
             findNamedComponent(*editor, "MIDI Keyboard")) : nullptr};
         auto* recalledTable{editor != nullptr ? dynamic_cast<juce::TableListBox*>(
             channelTableForFocus(*editor)) : nullptr};
-        auto* vibratoChannel{editor != nullptr ? dynamic_cast<juce::ComboBox*>(
-            findNamedComponent(*editor, "CC1 MIDI channel")) : nullptr};
         check(editor != nullptr && accentBox != nullptr && accentBox->getText() == "Rose"
                   && editor->getLookAndFeel().findColour(Juicy16::accentColourId) == rose
                   && recalledKeyboard != nullptr && recalledKeyboard->getMidiChannel() == 12
-                  && recalledTable != nullptr && recalledTable->getSelectedRow() == 11
-                  && vibratoChannel != nullptr && vibratoChannel->getSelectedId() == 12,
+                  && recalledTable != nullptr && recalledTable->getSelectedRow() == 11,
               "deferred state recall updates editor, rack, audition channel and open settings on the message thread");
     }
     {
@@ -5310,7 +5308,7 @@ int main(int argc, char** argv)
                       && labelText("Selected channel bend range") == "12.25 st"
                       && labelText("Selected channel pitch bend") == "12345"
                       && labelText("Selected channel chorus send (cc93)") == "45"
-                      && labelText("Received CC1 value") == "5",
+                      && labelText("Received CC1 value") == "5 on ch 1",
                   "changed controller fields retain their exact displayed values, refresh once, and light the MIDI lamp");
 
             Juicy16::uiWorkCounters = {};

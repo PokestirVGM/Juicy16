@@ -4,6 +4,9 @@ Please read this before reporting a bug. Some of these are deliberate.
 
 ## Not yet tested
 
+- **Windows beta.3.** The all-channel CC1 changes have no native Windows build
+  or package validation yet; use the verified beta.2 Windows assets.
+
 - **Current-build host coverage.** FL Studio and Cubase are the main test hosts,
   but itemized playback and save/reopen checks for the latest fixes remain
   pending. Logic and other hosts are untested.

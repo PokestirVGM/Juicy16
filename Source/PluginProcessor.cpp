@@ -243,6 +243,14 @@ AudioProcessorValueTreeState::ParameterLayout JuicySFAudioProcessor::createParam
     layout.add(make_unique<juce::AudioParameterChoice>(
         juce::ParameterID{"interpolation", 5}, "Sample interpolation",
         juce::StringArray{"7th-order", "Linear", "None"}, 1));
+    // CC1 vibrato for all channels; the per-channel strengths above multiply it.
+    layout.add(make_unique<juce::AudioParameterInt>(
+        juce::ParameterID{"cc1VibratoScale", 6}, "CC1 vibrato strength", 1, 64, 1,
+        juce::AudioParameterIntAttributes{}.withLabel("x")));
+    // Choice order is frozen (hosts store the index).
+    layout.add(make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{"cc1VibratoRate", 6}, "CC1 vibrato rate",
+        juce::StringArray{"Bank", "x1.5", "x2", "x2.4", "x3", "x4"}, 0));
     return layout;
 }
 
@@ -392,7 +400,7 @@ void JuicySFAudioProcessor::getStateInformation (MemoryBlock& destData)
 {
 
     XmlElement xml{"MYPLUGINSETTINGS"};
-    // Schema history: v11 saved accent; v10 interpolation; v9 vibrato strength; v8 chorus; v7 reset
+    // Schema history: v12 global CC1 vibrato strength and rate; v11 saved accent; v10 interpolation; v9 vibrato strength; v8 chorus; v7 reset
     // policy, trims and remembered controllers; v6 reverb; v5 per-channel mixer
     // parameters; v4 bank spans 0-255; v3 volume/pan replaced CC71-79 (v1-v2).
     xml.setAttribute("stateVersion", currentStateVersion);
@@ -534,6 +542,9 @@ void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInByt
             // Older projects keep the 7th-order sound they were made with.
             if (stateVersion < 10)
                 valueTreeState.getParameter("interpolation")->setValueNotifyingHost(0.0f);
+            if (stateVersion < 12)
+                for (const char* id : {"cc1VibratoScale", "cc1VibratoRate"})
+                    valueTreeState.getParameter(id)->setValueNotifyingHost(0.0f);
             if (stateVersion < 9)
                 for (int ch = 1; ch <= 16; ++ch)
                     valueTreeState.getParameter("vibratoScaleCh" + String(ch))->setValueNotifyingHost(0.0f);
@@ -638,6 +649,10 @@ void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInByt
                         p->setValueNotifyingHost(static_cast<float>(stored));
                     }
                 }
+                // v9-v11 had only per-channel strengths. One shared value moves to
+                // the global control; differing values stay per channel.
+                if (stateVersion < 12)
+                    migrateSharedVibratoScale();
             }
             // Reflect the restored selection now that the font is loaded.
             fluidSynthModel.syncToSelectedChannel();
@@ -652,6 +667,21 @@ void JuicySFAudioProcessor::setStateInformation (const void* data, int sizeInByt
             fluidSynthModel.finishStateRestore(xmlState->getChildByName("channelPrograms") != nullptr);
         }
     }
+}
+
+void JuicySFAudioProcessor::migrateSharedVibratoScale() {
+    auto strength = [this](int ch) {
+        auto* control = valueTreeState.getParameter("vibratoScaleCh" + String(ch));
+        return juce::roundToInt(control->convertFrom0to1(control->getValue()));
+    };
+    const int shared = strength(1);
+    for (int ch = 2; ch <= 16; ++ch)
+        if (strength(ch) != shared)
+            return;
+    auto* global = valueTreeState.getParameter("cc1VibratoScale");
+    global->setValueNotifyingHost(global->convertTo0to1(static_cast<float>(shared)));
+    for (int ch = 1; ch <= 16; ++ch)
+        valueTreeState.getParameter("vibratoScaleCh" + String(ch))->setValueNotifyingHost(0.0f);
 }
 
 // FluidSynth renders float only.

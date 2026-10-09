@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include "PluginProcessor.h"
 #include "SyntheticSf2.h"
@@ -272,7 +273,7 @@ int main(int argc, char** argv) {
             choice->setSelectedId(index++, juce::sendNotificationSync);
             juce::MemoryBlock saved; p.getStateInformation(saved);
             auto xml = juce::AudioProcessor::getXmlFromBinary(saved.getData(), static_cast<int>(saved.getSize()));
-            roundTrip = xml->getIntAttribute("stateVersion") == 11
+            roundTrip = xml->getIntAttribute("stateVersion") == 12
                 && xml->getChildByName("uiState")->getStringAttribute("accent") == name && roundTrip;
             choice->setSelectedId(1, juce::sendNotificationSync);
             p.setStateInformation(saved.getData(), static_cast<int>(saved.getSize()));
@@ -413,24 +414,31 @@ int main(int argc, char** argv) {
                 }
         }
         check(aligned, "rack cells align with headings immediately at minimum and wider sizes");
-        check(namedChild(*editor, "Selected channel CC1 vibrato strength") == nullptr,
+        check(namedChild(*editor, "CC1 vibrato strength") == nullptr,
             "CC1 control is absent from the main sidebar");
         auto* settings = dynamic_cast<juce::Button*>(namedChild(*editor, "Settings"));
         check(settings != nullptr, "settings button is available");
         if (settings != nullptr) settings->onClick();
-        auto* vibrato = dynamic_cast<juce::ComboBox*>(namedChild(*editor, "Selected channel CC1 vibrato strength"));
-        check(vibrato != nullptr && editor->getLocalBounds().contains(
+        auto* vibrato = dynamic_cast<juce::ComboBox*>(namedChild(*editor, "CC1 vibrato strength"));
+        auto* vibratoRate = dynamic_cast<juce::ComboBox*>(namedChild(*editor, "CC1 vibrato rate"));
+        check(vibrato != nullptr && vibrato->getNumItems() == 64 && editor->getLocalBounds().contains(
             editor->getLocalArea(vibrato, vibrato->getLocalBounds())), "vibrato selector fits beside pitch controls in settings");
-        if (vibrato != nullptr) {
-            parameter(p, "vibratoScaleCh16", 10);
-            p.getFluidSynthModel().selectChannelForEditing(15);
-            check(vibrato->getSelectedId() == 10, "channel selection immediately rebinds vibrato multiplier");
-            vibrato->setSelectedId(6, juce::sendNotificationSync);
-            check(std::abs(findParameter(p, "vibratoScaleCh16")->convertFrom0to1(findParameter(p, "vibratoScaleCh16")->getValue()) - 6.0f) < 0.0001f
+        check(vibratoRate != nullptr && vibratoRate->getNumItems() == 6 && editor->getLocalBounds().contains(
+            editor->getLocalArea(vibratoRate, vibratoRate->getLocalBounds())), "vibrato rate selector fits in settings");
+        check(namedChild(*editor, "CC1 MIDI channel") == nullptr, "CC1 settings need no channel picker");
+        if (vibrato != nullptr && vibratoRate != nullptr) {
+            vibrato->setSelectedId(32, juce::sendNotificationSync);
+            check(std::abs(findParameter(p, "cc1VibratoScale")->convertFrom0to1(findParameter(p, "cc1VibratoScale")->getValue()) - 32.0f) < 0.0001f
                 && findParameter(p, "vibratoScaleCh1")->getValue() == 0.0f,
-                "selected channel dropdown edits only that channel");
+                "CC1 strength dropdown edits the all-channel control");
+            p.getFluidSynthModel().selectChannelForEditing(15);
+            check(vibrato->getSelectedId() == 32, "CC1 strength does not follow the rack selection");
+            vibratoRate->setSelectedId(4, juce::sendNotificationSync);
+            check(juce::roundToInt(findParameter(p, "cc1VibratoRate")->convertFrom0to1(findParameter(p, "cc1VibratoRate")->getValue())) == 3,
+                "CC1 rate dropdown edits the rate parameter");
+            vibrato->setSelectedId(1, juce::sendNotificationSync);
+            vibratoRate->setSelectedId(1, juce::sendNotificationSync);
             p.getFluidSynthModel().selectChannelForEditing(0);
-            check(vibrato->getSelectedId() == 1, "returning to channel 1 shows its independent unity multiplier");
         }
         auto* interpolation = dynamic_cast<juce::ComboBox*>(namedChild(*editor, "Sample interpolation"));
         check(interpolation != nullptr && interpolation->getNumItems() == 3
@@ -444,16 +452,9 @@ int main(int argc, char** argv) {
                 "choosing Linear sets the interpolation parameter");
             interpolation->setSelectedId(1, juce::sendNotificationSync);
         }
-        auto* channelChoice = dynamic_cast<juce::ComboBox*>(namedChild(*editor, "CC1 MIDI channel"));
-        if (channelChoice != nullptr && vibrato != nullptr) {
-            channelChoice->setSelectedId(16, juce::sendNotificationSync);
-            check(p.getFluidSynthModel().getSelectedChannel() == 15 && vibrato->getSelectedId() == 6,
-                "settings channel picker selects the rack channel and its multiplier");
+        {
             p.getFluidSynthModel().setChannelControllerValue(15, 1, 5);
-            channelChoice->setSelectedId(1, juce::sendNotificationSync);
-            channelChoice->setSelectedId(16, juce::sendNotificationSync);
-            auto* received = dynamic_cast<juce::Label*>(namedChild(*editor, "Received CC1 value"));
-            check(received != nullptr && received->getText() == "5", "settings shows the actual received CC1 value");
+            p.getFluidSynthModel().setChannelControllerValue(2, 1, 3);
         }
         if (argc > 1) {
             juce::FileOutputStream out{juce::File{juce::String(argv[1]) + ".settings.png"}};
@@ -514,8 +515,13 @@ int main(int argc, char** argv) {
         // Reopen after dismissal, then destroy the editor with settings still modal.
         // The controls must release their processor references synchronously.
         if (settings != nullptr) settings->onClick();
-        check(namedChild(*editor, "Selected channel CC1 vibrato strength") != nullptr,
+        check(namedChild(*editor, "CC1 vibrato strength") != nullptr,
             "settings can reopen before deferred modal cleanup");
+        {
+            auto* received = dynamic_cast<juce::Label*>(namedChild(*editor, "Received CC1 value"));
+            check(received != nullptr && received->getText() == "5 on ch 16",
+                "settings shows the highest received CC1 value and its channel");
+        }
         editor.reset();
         juce::Timer::callPendingTimersSynchronously();
         check(true, "editor closes safely with MIDI settings open");
@@ -713,6 +719,97 @@ int main(int argc, char** argv) {
         "CC1 values above 12 retain proportional depth at x10 without 127 saturation");
     check(difference(vibratoAudio(bank, 1, 1, 0, 80), vibratoAudio(bank, 1, 24, 0, 80)) < 1.0e-8,
         "CC1 strength leaves channel-pressure vibrato unchanged");
+    // All-channel CC1 strength: same engine path as the per-channel multiplier.
+    auto globalVibratoAudio = [&](int global, int perChannel, int cc1, int rate = 0, int reset = 0) {
+        JuicySFAudioProcessor p; load(p, bank);
+        parameter(p, "cc1VibratoScale", static_cast<float>(global));
+        parameter(p, "vibratoScaleCh1", static_cast<float>(perChannel));
+        parameter(p, "cc1VibratoRate", static_cast<float>(rate));
+        juce::MidiBuffer midi;
+        render(p, block, midi);
+        if (reset == 1) midi.addEvent(juce::MidiMessage::controllerEvent(1, 121, 0), 0);
+        if (reset == 2) gm(midi);
+        midi.addEvent(juce::MidiMessage::controllerEvent(1, 1, cc1), 0);
+        midi.addEvent(juce::MidiMessage::noteOn(1, 60, static_cast<juce::uint8>(100)), 0);
+        std::vector<float> samples;
+        for (int i = 0; i < 96; ++i) {
+            render(p, block, midi);
+            if (i >= 48) samples.insert(samples.end(), block.getReadPointer(0), block.getReadPointer(0) + block.getNumSamples());
+        }
+        return samples;
+    };
+    // LFO rate from mean crossings of the per-cycle pitch track.
+    auto lfoHz = [](const std::vector<float>& samples) {
+        std::vector<std::pair<double, double>> track;
+        double last{-1};
+        for (size_t i = 1; i < samples.size(); ++i)
+            if (samples[i - 1] <= 0 && samples[i] > 0) {
+                const double crossing = static_cast<double>(i - 1)
+                    - samples[i - 1] / static_cast<double>(samples[i] - samples[i - 1]);
+                if (last >= 0) track.emplace_back(crossing, crossing - last);
+                last = crossing;
+            }
+        if (track.size() < 3) return 0.0;
+        double mean{0};
+        for (const auto& t : track) mean += t.second;
+        mean /= static_cast<double>(track.size());
+        int crossings{0};
+        for (size_t i = 1; i < track.size(); ++i)
+            if ((track[i - 1].second < mean) != (track[i].second < mean)) ++crossings;
+        return crossings / 2.0 / ((track.back().first - track.front().first) / 48000.0);
+    };
+    check(difference(globalVibratoAudio(10, 1, 8), vibratoAudio(bank, 1, 10, 8)) < 1.0e-8,
+        "all-channel CC1 strength x10 equals the per-channel x10 audio");
+    check(difference(globalVibratoAudio(5, 2, 8), vibratoAudio(bank, 1, 10, 8)) < 1.0e-8,
+        "all-channel and per-channel strengths multiply");
+    check(std::abs(excursion(globalVibratoAudio(32, 1, 4)) - 50.0) < 1.5,
+        "x32 strength reaches the DS-style depth above the old x24 cap");
+    check(difference(globalVibratoAudio(64, 24, 4), globalVibratoAudio(64, 1, 4)) < 1.0e-8,
+        "combined strength is capped at x64");
+    {
+        const double bankRate = lfoHz(globalVibratoAudio(10, 1, 32));
+        const double doubled = lfoHz(globalVibratoAudio(10, 1, 32, 2));
+        const double ds = lfoHz(globalVibratoAudio(10, 1, 32, 3));
+        std::printf("VIBRATO RATE bank=%.3f Hz x2=%.3f Hz x2.4=%.3f Hz\n", bankRate, doubled, ds);
+        check(bankRate > 1.0 && std::abs(doubled / bankRate - 2.0) < 0.25 && std::abs(ds / bankRate - 2.4) < 0.3,
+            "CC1 rate multiplies the measured vibrato LFO rate");
+        check(difference(globalVibratoAudio(10, 1, 32, 3, 1), globalVibratoAudio(10, 1, 32, 3)) < 1.0e-8,
+            "CC1 rate survives CC121");
+        check(difference(globalVibratoAudio(10, 1, 32, 3, 2), globalVibratoAudio(10, 1, 32, 3)) < 1.0e-8,
+            "CC1 rate survives a GM reset");
+    }
+    {
+        JuicySFAudioProcessor p; load(p, bank);
+        juce::MemoryBlock saved; p.getStateInformation(saved);
+        auto legacyWith = [&](auto value) {
+            auto xml = juce::AudioProcessor::getXmlFromBinary(saved.getData(), static_cast<int>(saved.getSize()));
+            xml->setAttribute("stateVersion", 11);
+            auto* params = xml->getChildByName("params");
+            params->removeAttribute("cc1VibratoScale");
+            params->removeAttribute("cc1VibratoRate");
+            for (int ch = 1; ch <= 16; ++ch)
+                params->setAttribute("vibratoScaleCh" + juce::String(ch), (value(ch) - 1.0) / 23.0);
+            juce::MemoryBlock legacy; juce::AudioProcessor::copyXmlToBinary(*xml, legacy);
+            JuicySFAudioProcessor restored; restored.prepareToPlay(48000.0, 1024);
+            parameter(restored, "cc1VibratoScale", 9.0f);
+            parameter(restored, "cc1VibratoRate", 4.0f);
+            restored.setStateInformation(legacy.getData(), static_cast<int>(legacy.getSize()));
+            auto plain = [&](const juce::String& id) {
+                auto* control = findParameter(restored, id);
+                return juce::roundToInt(control->convertFrom0to1(control->getValue()));
+            };
+            std::vector<int> values{plain("cc1VibratoScale"), plain("cc1VibratoRate")};
+            for (int ch = 1; ch <= 16; ++ch) values.push_back(plain("vibratoScaleCh" + juce::String(ch)));
+            return values;
+        };
+        const auto shared = legacyWith([](int) { return 6.0; });
+        check(shared[0] == 6 && shared[1] == 0
+                  && std::all_of(shared.begin() + 2, shared.end(), [](int v) { return v == 1; }),
+            "schema 11 shared per-channel strength moves to the all-channel control");
+        const auto mixed = legacyWith([](int ch) { return ch == 3 ? 12.0 : 1.0; });
+        check(mixed[0] == 1 && mixed[1] == 0 && mixed[4] == 12 && mixed[2] == 1,
+            "schema 11 differing per-channel strengths stay per channel");
+    }
     juce::TemporaryFile customFile{".sf2"};
     auto customBank = [&](const std::vector<SyntheticSf2::ModSpec>& mods) {
         const auto bytes = SyntheticSf2::build({{0, 0, 441.0, "Custom modulation"}}, mods);

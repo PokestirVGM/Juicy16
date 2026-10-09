@@ -48,13 +48,13 @@ edit_file("src/synth/fluid_mod.c" "4779920afad5fee4c86d37a1375debcc424d1f7883321
     }
     return final_value;
 }]==])
-edit_file("src/synth/fluid_synth.c" "d4a223fba22d8b25c547652c82eab3124fb05311fac57db4dd841ba6ecd22d75" "995457c30a179ac4971b03cfe61f4f0e4666597fd6c3b45896000613e0b9908c"
+edit_file("src/synth/fluid_synth.c" "d4a223fba22d8b25c547652c82eab3124fb05311fac57db4dd841ba6ecd22d75" "10dc26a321a4efbd547036e6ef951303ecec6294617fb13a4a8036d714c18059"
 [==[static void fluid_synth_reset_basic_channel_LOCAL(fluid_synth_t *synth, int chan, int nbr_chan);]==]
 [==[/* Juicy16 extension. Uses the usual API lock; updates held and future voices.
  * Range validation rejects NaN as well as values outside the public control. */
 int fluid_synth_set_cc1_vibrato_scale(fluid_synth_t *synth, int chan, float scale)
 {
-    fluid_return_val_if_fail(scale >= 1.0f && scale <= 24.0f, FLUID_FAILED);
+    fluid_return_val_if_fail(scale >= 1.0f && scale <= 64.0f, FLUID_FAILED);
     FLUID_API_ENTRY_CHAN(FLUID_FAILED);
     synth->channel[chan]->cc1_vibrato_scale = scale;
     fluid_synth_modulate_voices_LOCAL(synth, chan, 1, 1);

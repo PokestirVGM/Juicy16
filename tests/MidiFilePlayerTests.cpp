@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <memory>
 #include <limits>
 #include <vector>
@@ -732,7 +733,19 @@ void multiFileChooserTests(const juce::File& firstBank) {
         error.clear();
         const bool accepted = picker->loadSelectedFiles(files, error);
         const auto after = player.getStatus();
-        check(!accepted && error.isNotEmpty() && selectedBankPath(processor) == previousBank
+        // macOS bookmarks may canonicalize /var to /private/var. Compare file
+        // identity so an alias change cannot look like a replaced bank.
+        std::error_code bankError;
+        const bool sameBank = std::filesystem::equivalent(previousBank.toStdString(),
+            selectedBankPath(processor).toStdString(), bankError) && !bankError;
+        if (accepted || error.isEmpty() || !sameBank
+            || after.fileName != before.fileName || !near(after.positionSeconds, before.positionSeconds)
+            || after.playing != before.playing)
+            std::printf("REJECTION diagnostic accepted=%d error=%s bank=%s previous=%s midi=%s previousMidi=%s position=%.9f previousPosition=%.9f playing=%d previousPlaying=%d\n",
+                accepted, error.toRawUTF8(), selectedBankPath(processor).toRawUTF8(), previousBank.toRawUTF8(),
+                after.fileName.toRawUTF8(), before.fileName.toRawUTF8(), after.positionSeconds,
+                before.positionSeconds, after.playing, before.playing);
+        check(!accepted && error.isNotEmpty() && sameBank
             && after.fileName == before.fileName && near(after.positionSeconds, before.positionSeconds)
             && after.playing == before.playing, message);
     };

@@ -215,6 +215,7 @@ build_and_install "$work_dir/fluidsynth" "$work_dir/build-fluidsynth" \
   -Denable-coreaudio=OFF \
   -Denable-coremidi=OFF \
   -Denable-framework=OFF \
+  -Denable-sdl3=OFF \
   -Denable-portaudio=OFF \
   -Denable-openmp=OFF
 
