@@ -120,6 +120,9 @@ for document in ARCHITECTURE.md BETA_TESTER_GUIDE.md COMPATIBILITY.md \
                 STANDALONE.md AUDIT.md; do
   cp "$repo_dir/docs/$document" "$staging_dir/docs/"
 done
+mkdir -p "$staging_dir/docs/audits/2026-10-02"
+cp "$repo_dir/docs/audits/2026-10-02/README.md" \
+   "$staging_dir/docs/audits/2026-10-02/"
 mkdir -p "$staging_dir/vendor/juce_patched"
 cp "$repo_dir/vendor/juce_patched/README.md" \
    "$repo_dir/vendor/juce_patched/juce-8.0.14-vst3-multitimbral.patch" \
