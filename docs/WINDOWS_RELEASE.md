@@ -1,5 +1,46 @@
 # Windows validation
 
+## 1.0.0-beta.3 — 2026-10-09
+
+Native Windows 11 x64 build 26200, MSVC 14.44, Windows SDK 10.0.26100 and
+CMake 3.31.6: Debug and strict Release pass **19/19 CTest checks each**.
+Both static dependency closures were rebuilt from checksummed pinned sources
+with the expanded ×64 CC1 patch and timer-thread fix. JUCE remains pinned to
+8.0.14. The local bank and MIDI inputs are generated synthetic fixtures.
+
+The checks cover all-channel CC1 strength, measured vibrato rate, CC121/SysEx
+reset persistence, schema 12 recall and migration of older matching or independent
+channel strengths, sixteen-channel VST3 routing, SF2/SF3/DLS loading, rendering,
+playback reliability and the Standalone player. First-party warnings are errors.
+The rendered Windows settings show `1.0.0-beta.3`, the strength/rate controls fit,
+and processing/editor construction/painting report zero JUCE assertions.
+
+Portable/source ZIP integrity, every manifest entry, exact committed source,
+executable permissions, asset sidecars, documentation links and extracted VST3
+smoke pass. VST3 and Standalone are x64 with system-only imports and static
+codec/MSVC runtimes. Isolated silent install, upgrade with the remembered custom
+plugin folder, exact installed binary hashes, installed VST3 smoke, uninstall
+and unrelated-file preservation pass. No existing installation was changed.
+The final BC2 package repeats the checks against the same tested binaries;
+`BUILD_INFO.json` and the matching `SOURCE_INFO.json` identify its clean source.
+
+Logs are in `build-win-logs/verify-beta3-release.log`,
+`build-win-logs/verify-beta3-debug.log`, `build-win-logs/ui-beta3-settings.log`,
+`build-win-logs/package-beta3-bc2.log`, `build-win-logs/installer-beta3-bc2.log`
+and `build-win-logs/archives-beta3-bc2.log`.
+
+The Windows Debug/Release jobs for source commit `4e501f7` also pass in
+[GitHub CI](https://github.com/PokestirVGM/Juicy16/actions/runs/37991686690),
+including Windows packaging and installer lifecycle. The overall run is failed:
+the macOS Release AU embeds a build path, and the macOS leaks job fails at job
+completion after its checks pass. Those macOS failures remain unresolved.
+
+Windows beta.3 packages are on the
+[beta.3 release](https://github.com/PokestirVGM/Juicy16/releases/tag/v1.0.0-beta.3).
+The installer and binaries are unsigned. Real FL Studio/Cubase scenarios,
+clean Windows 10 version 1607, screen readers, physical input, native dialogs
+and text/DPI scaling remain unverified.
+
 ## 1.0.0-beta.2 — 2026-10-02
 
 Current native Windows 11 x64 Debug and strict Release builds pass **19/19

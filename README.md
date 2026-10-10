@@ -8,8 +8,7 @@ mixes to one stereo output.
 
 ## Download
 
-The latest macOS release is [1.0.0-beta.3](https://github.com/PokestirVGM/Juicy16/releases/tag/v1.0.0-beta.3).
-Windows remains on [1.0.0-beta.2](https://github.com/PokestirVGM/Juicy16/releases/tag/v1.0.0-beta.2).
+The latest macOS and Windows release is [1.0.0-beta.3](https://github.com/PokestirVGM/Juicy16/releases/tag/v1.0.0-beta.3).
 
 - **Apple Silicon macOS:** Standalone, AU and VST3. The build targets macOS 11;
   current checks run on macOS 26.6.2. Unzip and run `install_macos.command`.

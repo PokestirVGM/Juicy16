@@ -1,10 +1,11 @@
 # Roadmap
 
-## Now: macOS 1.0.0-beta.3 / Windows 1.0.0-beta.2
+## Now: macOS and Windows 1.0.0-beta.3
 
-The macOS beta.3 adds all-channel CC1 vibrato strength up to ×64, a vibrato
-rate setting and saved-state migration. Windows beta.3 has not been built or
-validated; its latest verified packages remain beta.2.
+Beta.3 adds all-channel CC1 vibrato strength up to ×64, a vibrato
+rate setting and saved-state migration on macOS and Windows. Native Windows
+Debug and strict Release pass all 19 checks each with freshly rebuilt dependencies;
+portable/source archives and isolated installer checks pass.
 
 Beta.2 added a Standalone MIDI player alongside macOS AU/VST3 and Windows VST3. Load a
 bank and MIDI together, seek through the song, see its current BPM and repeat
@@ -18,7 +19,7 @@ need native checking on macOS.
 ## Next
 
 - Complete native accessibility, input/dialog, text/DPI and host testing. The
-  [Windows evidence](docs/WINDOWS_RELEASE.md) records beta.2 native
+  [Windows evidence](docs/WINDOWS_RELEASE.md) records beta.3 native
   build, package and installer checks; itemized DAW and clean Windows 10
   checks remain pending.
 - Test in FL Studio and Cubase, and compare side by side with Fruity LSD
