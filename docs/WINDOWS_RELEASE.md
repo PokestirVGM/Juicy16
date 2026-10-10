@@ -37,6 +37,13 @@ completion after its checks pass. Those macOS failures remain unresolved.
 
 Windows beta.3 packages are on the
 [beta.3 release](https://github.com/PokestirVGM/Juicy16/releases/tag/v1.0.0-beta.3).
+All six BC2 Windows asset SHA-256 values match GitHub's release digests;
+the existing macOS asset IDs/digests and release tag remain unchanged.
+The Windows corresponding-source commit is
+`0e762106cffdf500d89bd007ebcec122d9a1e91a`; the shared code/tag remains at
+`4e501f7`. This later publication record does not change the tested source or
+binary identities. Evidence is in `build-win-logs/publish-beta3-windows.log`
+and `build-win/release-beta3-after.json`.
 The installer and binaries are unsigned. Real FL Studio/Cubase scenarios,
 clean Windows 10 version 1607, screen readers, physical input, native dialogs
 and text/DPI scaling remain unverified.
