@@ -7,8 +7,8 @@ you care about and save new versions as you go.
 
 | | Supported |
 | --- | --- |
-| macOS beta.2 | Apple Silicon (M1 and newer), Standalone, AU and VST3; targets macOS 11 or later |
-| Windows beta.2 | 64-bit Standalone and VST3; targets Windows 10 version 1607 or later |
+| macOS beta.3 | Apple Silicon (M1 and newer), Standalone, AU and VST3; targets macOS 11 or later |
+| Windows beta.3 | 64-bit Standalone and VST3; targets Windows 10 version 1607 or later |
 | Banks | `.dls`, `.sf2`, `.sf3` |
 
 Intel Macs, VST2, AUv3 and Linux aren't supported. Current builds have been
@@ -55,14 +55,14 @@ rescan. If it still fails after that, please report it.
 
 ## Installing on Windows
 
-For Windows beta.2, run its Setup EXE or unzip the portable
+For Windows beta.3, run its Setup EXE or unzip the portable
 package and copy the complete `VST3\Juicy16.vst3` bundle into
 `C:\Program Files\Common Files\VST3`, then rescan in your DAW.
 `INSTALL-WINDOWS.txt` in the package has the details. The installer and binaries
 are unsigned. Setup offers the Standalone MIDI player; portable users can run
 `Standalone\Juicy16.exe` directly.
 
-The [recorded Windows checks](WINDOWS_RELEASE.md) cover beta.2 local builds,
+The [recorded Windows checks](WINDOWS_RELEASE.md) cover beta.3 local builds,
 synthetic playback, packages and isolated installer tests. Native screen readers,
 input/dialog/scaling, itemized Windows DAW checks and clean Windows 10 testing
 remain pending.
@@ -73,9 +73,13 @@ The window is a 16-channel rack: each row is one MIDI channel with mute, solo,
 instrument, volume, pan and trim. The right panel has the master trim, reverb,
 chorus and the loaded bank. Click the Juicy16 logo for settings.
 
-The beta.2 Standalone app has a MIDI file player with seek, current BPM,
+The Standalone app has a MIDI file player with seek, current BPM,
 speed and A/B looping; see [standalone playback](STANDALONE.md). AU and VST3
 continue to receive MIDI from your DAW.
+
+Beta.3's settings apply CC1 vibrato strength (up to ×64) and rate to all sixteen
+channels. Beta.3 saves use schema 12, which older builds refuse; keep a project
+backup before upgrading.
 
 A few things that are intentional:
 

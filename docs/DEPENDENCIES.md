@@ -42,6 +42,8 @@ That evidence predates the 2026-09-28 timer-thread cleanup patch. The later
 beta.2 Windows Debug/Release closures include that patch and pass 19/19 checks
 each with generated SF2/DLS/SF3 and MIDI inputs. Windows leak instrumentation,
 itemized DAW and clean Windows 10 checks remain open.
+Beta.3 rebuilds both Windows closures with the expanded ×64 CC1 patch and passes
+19/19 checks in each configuration, plus package and isolated installer checks.
 See [Windows evidence](WINDOWS_RELEASE.md).
 
 ## Security notes

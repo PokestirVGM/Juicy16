@@ -50,7 +50,7 @@ codec dependencies and their required definitions, including `FLAC__NO_DLL`.
 JUCE 8.0.14, FluidSynth 2.5.7, libsndfile 1.2.2 with the reviewed IRCAM patch,
 FLAC 1.5.0, Ogg 1.3.6, Vorbis 1.3.7, Opus 1.6.1, and the pinned GCEM commit.
 The FluidSynth CC1, full-range DLS pan and timer-thread patches and JUCE multitimbral wrapper
-are shared with macOS. Rebuild the dependency prefix for 1.0.0-beta.2.
+are shared with macOS. Rebuild the dependency prefix for 1.0.0-beta.3's ×64 CC1 strength.
 All dependency tarballs are SHA-256 checked. `.gitattributes` preserves the
 reviewed vendored bytes on Windows checkouts. Python extracts Unicode archive
 names without depending on the Windows system locale.
@@ -111,7 +111,7 @@ reviewed patches. An installed compiler, Windows SDK, CMake, Python and
 PowerShell are still required. Replacing a library with a modified version for
 relinking requires intentionally updating its source/hash checks.
 
-The [Windows evidence](docs/WINDOWS_RELEASE.md) records current beta.2 build
+The [Windows evidence](docs/WINDOWS_RELEASE.md) records current beta.3 build
 checks separately from beta.1 owner testing. Clean minimum-OS installation
 remains unverified. Debug timing is diagnostic; Release enforces speed limits.
 

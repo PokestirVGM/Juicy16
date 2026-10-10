@@ -14,6 +14,10 @@
   per-channel values, which remain automatable.
 - The macOS dependency build disables the optional SDL3 driver, keeping the
   package independent of Homebrew audio libraries.
+- Windows VST3 and Standalone use freshly rebuilt Release/Debug static dependencies.
+  All 19 checks pass in each configuration, including CC1 audio/rate/reset and
+  older-project migration; portable/source archives and isolated installer
+  install/upgrade/uninstall checks pass. [Windows validation](docs/WINDOWS_RELEASE.md).
 
 ## 1.0.0-beta.2 — 2026-10-02
 
